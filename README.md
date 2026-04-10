@@ -66,6 +66,12 @@ On first load, Keepsake scans the standard VST2 locations for your platform. You
 
 ---
 
+## Docs
+
+Project docs, planning, and architecture decisions live in [`docs/README.md`](docs/README.md).
+
+---
+
 ## Signal / Loophole
 
 Keepsake was created by [Infinite Loop Audio](https://github.com/infinite-loop-audio), the team behind [Signal](https://github.com/infinite-loop-audio/signal) and Loophole. Signal supports CLAP natively, which means Keepsake works in Signal out of the box — your VST2 plugins appear in the plugin browser with no additional setup.
