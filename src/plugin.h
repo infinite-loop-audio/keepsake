@@ -42,8 +42,9 @@ struct KeepsakePlugin {
     PlatformShm shm;
     uint32_t max_frames = 0;
 
-    // Cached parameter info (queried once at init)
+    // Cached parameter info (queried lazily on first access)
     std::vector<CachedParamInfo> params;
+    bool params_loaded = false;
 
     // Editor
     bool has_editor = false;

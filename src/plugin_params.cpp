@@ -4,8 +4,32 @@
 
 #include "plugin_internal.h"
 
+// Lazy-load parameter info from bridge on first access.
+static void ensure_params_loaded(KeepsakePlugin *kp) {
+    if (kp->params_loaded || kp->crashed || !kp->bridge_ok) return;
+    kp->params_loaded = true;
+    kp->params.resize(static_cast<size_t>(kp->num_params));
+    for (int32_t i = 0; i < kp->num_params; i++) {
+        uint32_t idx = static_cast<uint32_t>(i);
+        std::vector<uint8_t> data;
+        if (send_and_wait(kp, IPC_OP_GET_PARAM_INFO, &idx, sizeof(idx), &data) &&
+            data.size() >= sizeof(IpcParamInfoResponse)) {
+            IpcParamInfoResponse resp;
+            memcpy(&resp, data.data(), sizeof(resp));
+            auto &cp = kp->params[static_cast<size_t>(i)];
+            cp.index = resp.index;
+            cp.default_value = resp.current_value;
+            memcpy(cp.name, resp.name, sizeof(cp.name));
+            memcpy(cp.label, resp.label, sizeof(cp.label));
+        }
+    }
+    fprintf(stderr, "keepsake: lazy-loaded %d param(s)\n", kp->num_params);
+}
+
 uint32_t keepsake_params_count(const clap_plugin_t *plugin) {
-    return static_cast<uint32_t>(get(plugin)->params.size());
+    auto *kp = get(plugin);
+    ensure_params_loaded(kp);
+    return static_cast<uint32_t>(kp->params.size());
 }
 
 bool keepsake_params_get_info(const clap_plugin_t *plugin, uint32_t index,

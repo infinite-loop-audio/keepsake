@@ -19,7 +19,7 @@ bool send_and_wait(KeepsakePlugin *kp, uint32_t opcode,
     }
     uint32_t resp_op;
     std::vector<uint8_t> resp_payload;
-    if (!ipc_read_msg(kp->bridge->proc.pipe_from, resp_op, resp_payload, 10000)) {
+    if (!ipc_read_msg(kp->bridge->proc.pipe_from, resp_op, resp_payload, 3000)) {
         kp->crashed = true;
         return false;
     }
@@ -96,44 +96,17 @@ static bool plugin_init(const clap_plugin_t *plugin) {
 
     kp->bridge_ok = true;
 
-    // Query parameter info from bridge (cached for the plugin's lifetime)
-    kp->params.resize(static_cast<size_t>(kp->num_params));
-    for (int32_t i = 0; i < kp->num_params; i++) {
-        uint32_t idx = static_cast<uint32_t>(i);
-        std::vector<uint8_t> param_data;
-        if (send_and_wait(kp, IPC_OP_GET_PARAM_INFO, &idx, sizeof(idx),
-                          &param_data) &&
-            param_data.size() >= sizeof(IpcParamInfoResponse)) {
-            IpcParamInfoResponse resp;
-            memcpy(&resp, param_data.data(), sizeof(resp));
-            auto &cp = kp->params[static_cast<size_t>(i)];
-            cp.index = resp.index;
-            cp.default_value = resp.current_value;
-            memcpy(cp.name, resp.name, sizeof(cp.name));
-            memcpy(cp.label, resp.label, sizeof(cp.label));
-        }
-    }
-    fprintf(stderr, "keepsake: cached %d parameter(s)\n", kp->num_params);
-
-    // Check for editor support and query size
+    // Read editor flag from plugin info (already in ok_data)
     if (ok_data.size() >= 4 + sizeof(IpcPluginInfo)) {
         IpcPluginInfo pi2;
-        memcpy(&pi2, ok_data.data() + 4, sizeof(pi2)); // +4 for instance_id
-        kp->has_editor = (pi2.flags & 1) != 0; // effFlagsHasEditor = 1
-    }
-    if (kp->has_editor) {
-        std::vector<uint8_t> rect_data;
-        if (send_and_wait(kp, IPC_OP_EDITOR_GET_RECT, nullptr, 0, &rect_data) &&
-            rect_data.size() >= sizeof(IpcEditorRect)) {
-            IpcEditorRect rect;
-            memcpy(&rect, rect_data.data(), sizeof(rect));
-            kp->editor_width = rect.width;
-            kp->editor_height = rect.height;
-            fprintf(stderr, "keepsake: editor available (%dx%d)\n",
-                    kp->editor_width, kp->editor_height);
-        }
+        memcpy(&pi2, ok_data.data() + 4, sizeof(pi2));
+        kp->has_editor = (pi2.flags & 1) != 0;
+        fprintf(stderr, "keepsake: init OK — in=%d out=%d params=%d editor=%d\n",
+                kp->num_inputs, kp->num_outputs, kp->num_params, kp->has_editor);
     }
 
+    // Parameter and editor rect queries are deferred to first access
+    // to keep init() fast (REAPER times out on slow init).
     return true;
 }
 

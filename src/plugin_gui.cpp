@@ -7,6 +7,8 @@
 static bool gui_is_api_supported(const clap_plugin_t *plugin,
                                    const char *api, bool is_floating) {
     auto *kp = get(plugin);
+    fprintf(stderr, "keepsake: gui_is_api_supported('%s', floating=%d) has_editor=%d\n",
+            api, is_floating, kp->has_editor);
     if (!kp->has_editor) return false;
 #ifdef __APPLE__
     if (!is_floating) return false;
@@ -33,8 +35,9 @@ static bool gui_get_preferred_api(const clap_plugin_t *, const char **api,
     return true;
 }
 
-static bool gui_create(const clap_plugin_t *plugin, const char *, bool is_floating) {
+static bool gui_create(const clap_plugin_t *plugin, const char *api, bool is_floating) {
     auto *kp = get(plugin);
+    fprintf(stderr, "keepsake: gui_create('%s', floating=%d)\n", api, is_floating);
     if (!kp->has_editor || kp->crashed) return false;
 #ifdef __APPLE__
     if (!is_floating) return false;
@@ -94,6 +97,8 @@ static void gui_suggest_title(const clap_plugin_t *, const char *) {}
 
 static bool gui_show(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
+    fprintf(stderr, "keepsake: gui_show() floating=%d editor_open=%d\n",
+            kp->gui_is_floating, kp->editor_open);
     if (kp->crashed || !kp->has_editor) return false;
     if (kp->gui_is_floating && !kp->editor_open) {
         if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN)) return false;
