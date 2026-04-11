@@ -134,25 +134,17 @@ static inline bool platform_spawn(const std::string &binary,
         return false;
     }
 
-    // Use posix_spawn instead of fork+exec.
-    // fork() deadlocks in multithreaded hosts (REAPER) because it takes
-    // the dyld lock, which other host threads may also hold.
+    // Use posix_spawn — fork() deadlocks in multithreaded hosts (REAPER)
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
-
-    // stdin = command pipe read end
     posix_spawn_file_actions_adddup2(&actions, to_child[0], STDIN_FILENO);
-    // stdout = response pipe write end
     posix_spawn_file_actions_adddup2(&actions, from_child[1], STDOUT_FILENO);
-    // close unused ends in child
     posix_spawn_file_actions_addclose(&actions, to_child[1]);
     posix_spawn_file_actions_addclose(&actions, from_child[0]);
     posix_spawn_file_actions_addclose(&actions, wake[1]);
 
-    // wake[0] stays open, pass its fd as argv[1]
     char wake_fd_str[16];
     snprintf(wake_fd_str, sizeof(wake_fd_str), "%d", wake[0]);
-
     char *argv[] = {
         const_cast<char *>("keepsake-bridge"),
         wake_fd_str,
@@ -162,19 +154,15 @@ static inline bool platform_spawn(const std::string &binary,
     pid_t pid;
     int err = posix_spawn(&pid, binary.c_str(), &actions, nullptr,
                            argv, environ);
-
     posix_spawn_file_actions_destroy(&actions);
 
-    // Close child-side fds in parent
     close(to_child[0]);
     close(from_child[1]);
     close(wake[0]);
 
     if (err != 0) {
         fprintf(stderr, "keepsake: posix_spawn failed: %s\n", strerror(err));
-        close(to_child[1]);
-        close(from_child[0]);
-        close(wake[1]);
+        close(to_child[1]); close(from_child[0]); close(wake[1]);
         return false;
     }
 

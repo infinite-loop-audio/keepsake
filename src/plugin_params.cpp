@@ -6,7 +6,7 @@
 
 // Lazy-load parameter info from bridge on first access.
 static void ensure_params_loaded(KeepsakePlugin *kp) {
-    if (kp->params_loaded || kp->crashed || !kp->bridge_ok || !kp->active) return;
+    if (kp->params_loaded || kp->crashed || !kp->bridge_ok) return;
     kp->params_loaded = true;
     kp->params.resize(static_cast<size_t>(kp->num_params));
     for (int32_t i = 0; i < kp->num_params; i++) {
@@ -29,30 +29,13 @@ static void ensure_params_loaded(KeepsakePlugin *kp) {
 uint32_t keepsake_params_count(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
     ensure_params_loaded(kp);
-    // Return known count even if params aren't loaded yet
-    if (kp->params.empty() && kp->num_params > 0)
-        return static_cast<uint32_t>(kp->num_params);
     return static_cast<uint32_t>(kp->params.size());
 }
 
 bool keepsake_params_get_info(const clap_plugin_t *plugin, uint32_t index,
                                clap_param_info_t *info) {
     auto *kp = get(plugin);
-    ensure_params_loaded(kp);
-    if (index >= kp->params.size()) {
-        // Params not loaded yet — return placeholder
-        if (index < static_cast<uint32_t>(kp->num_params)) {
-            memset(info, 0, sizeof(*info));
-            info->id = static_cast<clap_id>(index);
-            info->flags = CLAP_PARAM_IS_AUTOMATABLE;
-            snprintf(info->name, sizeof(info->name), "Param %u", index);
-            info->min_value = 0.0;
-            info->max_value = 1.0;
-            info->default_value = 0.5;
-            return true;
-        }
-        return false;
-    }
+    if (index >= kp->params.size()) return false;
     const auto &cp = kp->params[index];
 
     memset(info, 0, sizeof(*info));
@@ -103,10 +86,8 @@ void keepsake_params_flush(const clap_plugin_t *plugin,
                             const clap_input_events_t *in,
                             const clap_output_events_t *) {
     auto *kp = get(plugin);
-    if (!in || kp->crashed || !kp->bridge || !kp->active) return;
-    // Try to lock — if the init thread holds it, skip this flush
-    std::unique_lock<std::mutex> lock(kp->ipc_mutex, std::try_to_lock);
-    if (!lock.owns_lock()) return;
+    if (!in || kp->crashed || !kp->bridge) return;
+    std::lock_guard<std::mutex> lock(kp->ipc_mutex);
     uint32_t count = in->size(in);
     for (uint32_t i = 0; i < count; i++) {
         auto *hdr = in->get(in, i);

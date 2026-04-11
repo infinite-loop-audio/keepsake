@@ -59,16 +59,9 @@ struct KeepsakePlugin {
 
     // State
     bool bridge_ok = false;
-    bool bridge_loading = false;
     bool active = false;
     bool processing = false;
     bool crashed = false;
-    pthread_t init_thread = 0;
-
-    // Deferred activation (stored until bridge is ready)
-    bool needs_activate = false;
-    double deferred_sample_rate = 44100.0;
-    uint32_t deferred_max_frames = 512;
 };
 
 // Create a KeepsakePlugin. Returns a clap_plugin_t pointer (the plugin's

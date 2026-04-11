@@ -56,91 +56,62 @@ static void output_silence(const clap_process_t *process) {
 
 // --- CLAP plugin callbacks ---
 
-static bool do_activate(KeepsakePlugin *kp); // forward declaration
-
 static bool plugin_init(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
 
-    // Launch bridge initialization on a background thread.
-    // plugin_init returns IMMEDIATELY — the host never blocks.
-    // process() outputs silence until bridge_ok becomes true.
-    kp->bridge_loading = true;
+    // Acquire bridge process from pool
+    kp->bridge = s_pool->acquire(
+        kp->bridge_binary, kp->vst2_path, kp->format, kp->isolation);
+    if (!kp->bridge) return false;
 
-#ifndef _WIN32
-    pthread_create(&kp->init_thread, nullptr, [](void *arg) -> void * {
-        auto *kp2 = static_cast<KeepsakePlugin *>(arg);
+    // Send INIT with [format][path] — instance_id=0 for new instance
+    std::vector<uint8_t> init_payload(4 + kp->vst2_path.size());
+    memcpy(init_payload.data(), &kp->format, 4);
+    memcpy(init_payload.data() + 4, kp->vst2_path.data(), kp->vst2_path.size());
 
-        kp2->bridge = s_pool->acquire(
-            kp2->bridge_binary, kp2->vst2_path, kp2->format, kp2->isolation);
-        if (!kp2->bridge) {
-            fprintf(stderr, "keepsake: bridge spawn failed\n");
-            kp2->bridge_loading = false;
-            return nullptr;
-        }
+    // INIT with instance_id=0 (bridge assigns a real one)
+    if (!ipc_write_instance_msg(kp->bridge->proc.pipe_to, IPC_OP_INIT, 0,
+                                 init_payload.data(),
+                                 static_cast<uint32_t>(init_payload.size()))) {
+        s_pool->release(kp->bridge); kp->bridge = nullptr;
+        return false;
+    }
 
-        std::vector<uint8_t> init_payload(4 + kp2->vst2_path.size());
-        memcpy(init_payload.data(), &kp2->format, 4);
-        memcpy(init_payload.data() + 4, kp2->vst2_path.data(),
-               kp2->vst2_path.size());
+    uint32_t resp_op;
+    std::vector<uint8_t> ok_data;
+    if (!ipc_read_msg(kp->bridge->proc.pipe_from, resp_op, ok_data, 10000) ||
+        resp_op != IPC_OP_OK) {
+        s_pool->release(kp->bridge); kp->bridge = nullptr;
+        return false;
+    }
 
-        {
-            std::lock_guard<std::mutex> lock(kp2->ipc_mutex);
-            if (!ipc_write_instance_msg(kp2->bridge->proc.pipe_to,
-                                         IPC_OP_INIT, 0,
-                                         init_payload.data(),
-                                         static_cast<uint32_t>(
-                                             init_payload.size()))) {
-                fprintf(stderr, "keepsake: INIT write failed\n");
-                s_pool->release(kp2->bridge);
-                kp2->bridge = nullptr;
-                kp2->bridge_loading = false;
-                return nullptr;
-            }
+    // Parse response: [instance_id][IpcPluginInfo][strings...]
+    if (ok_data.size() >= 4 + sizeof(IpcPluginInfo)) {
+        memcpy(&kp->instance_id, ok_data.data(), 4);
+        IpcPluginInfo pi;
+        memcpy(&pi, ok_data.data() + 4, sizeof(pi));
+        kp->num_inputs = pi.num_inputs;
+        kp->num_outputs = pi.num_outputs;
+        kp->num_params = pi.num_params;
+    }
 
-            uint32_t resp_op;
-            std::vector<uint8_t> ok_data;
-            // 15 second timeout for slow Rosetta plugins
-            if (!ipc_read_msg(kp2->bridge->proc.pipe_from, resp_op,
-                               ok_data, 15000) || resp_op != IPC_OP_OK) {
-                fprintf(stderr, "keepsake: INIT response failed/timeout\n");
-                s_pool->release(kp2->bridge);
-                kp2->bridge = nullptr;
-                kp2->bridge_loading = false;
-                return nullptr;
-            }
+    kp->bridge_ok = true;
 
-            if (ok_data.size() >= 4 + sizeof(IpcPluginInfo)) {
-                memcpy(&kp2->instance_id, ok_data.data(), 4);
-                IpcPluginInfo pi;
-                memcpy(&pi, ok_data.data() + 4, sizeof(pi));
-                kp2->num_inputs = pi.num_inputs;
-                kp2->num_outputs = pi.num_outputs;
-                kp2->num_params = pi.num_params;
-                kp2->has_editor = (pi.flags & 1) != 0;
-            }
-        }
-
-        kp2->bridge_ok = true;
-        kp2->bridge_loading = false;
+    // Read editor flag from plugin info (already in ok_data)
+    if (ok_data.size() >= 4 + sizeof(IpcPluginInfo)) {
+        IpcPluginInfo pi2;
+        memcpy(&pi2, ok_data.data() + 4, sizeof(pi2));
+        kp->has_editor = (pi2.flags & 1) != 0;
         fprintf(stderr, "keepsake: init OK — in=%d out=%d params=%d editor=%d\n",
-                kp2->num_inputs, kp2->num_outputs, kp2->num_params,
-                kp2->has_editor);
+                kp->num_inputs, kp->num_outputs, kp->num_params, kp->has_editor);
+    }
 
-        // Complete deferred activation if the host already called activate
-        if (kp2->needs_activate) {
-            do_activate(kp2);
-            kp2->needs_activate = false;
-        }
-        return nullptr;
-    }, kp);
-    pthread_detach(kp->init_thread);
-#endif
-
-    return true; // always succeeds — bridge loads in background
+    // Parameter and editor rect queries are deferred to first access
+    // to keep init() fast (REAPER times out on slow init).
+    return true;
 }
 
 static void plugin_destroy(const clap_plugin_t *plugin) {
-    fprintf(stderr, "keepsake: destroy() called\n");
     auto *kp = get(plugin);
     if (kp->bridge_ok && !kp->crashed && kp->bridge) {
         // Shutdown this instance (not the whole process)
@@ -154,22 +125,29 @@ static void plugin_destroy(const clap_plugin_t *plugin) {
     delete kp;
 }
 
-// Actually perform the activation (called when bridge is ready)
-static bool do_activate(KeepsakePlugin *kp) {
-    fprintf(stderr, "keepsake: do_activate() starting\n");
-    kp->max_frames = kp->deferred_max_frames;
+static bool plugin_activate(const clap_plugin_t *plugin,
+                              double sample_rate,
+                              uint32_t min_frames,
+                              uint32_t max_frames) {
+    auto *kp = get(plugin);
+    if (!kp->bridge_ok || kp->crashed) return false;
+    (void)min_frames;
 
+    kp->max_frames = max_frames;
+
+    // Create shared memory for audio buffers
     char instance_id[32];
     snprintf(instance_id, sizeof(instance_id), "%p", static_cast<void *>(kp));
     std::string shm_name = platform_shm_name(instance_id);
 
-    size_t shm_size = shm_total_size(kp->num_inputs, kp->num_outputs,
-                                      kp->max_frames);
+    size_t shm_size = shm_total_size(kp->num_inputs, kp->num_outputs, max_frames);
 
     if (!platform_shm_create(kp->shm, shm_name, shm_size)) return false;
-    shm_init_sync(shm_control(kp->shm.ptr));
-    fprintf(stderr, "keepsake: do_activate() shm created, sending SET_SHM\n");
 
+    // Initialize shared-memory mutex + condition variable
+    shm_init_sync(shm_control(kp->shm.ptr));
+
+    // Send SET_SHM: [name_len][name][shm_size]
     uint32_t name_len = static_cast<uint32_t>(shm_name.size());
     uint32_t shm_size32 = static_cast<uint32_t>(shm_size);
     std::vector<uint8_t> shm_payload(4 + name_len + 4);
@@ -184,51 +162,18 @@ static bool do_activate(KeepsakePlugin *kp) {
         return false;
     }
 
-    fprintf(stderr, "keepsake: do_activate() SET_SHM OK, sending ACTIVATE\n");
-    IpcActivatePayload ap = { kp->deferred_sample_rate, kp->max_frames };
+    // Send ACTIVATE
+    IpcActivatePayload ap = { sample_rate, max_frames };
     if (!send_and_wait(kp, IPC_OP_ACTIVATE, &ap, sizeof(ap))) {
         platform_shm_close(kp->shm);
         return false;
     }
 
-    send_and_wait(kp, IPC_OP_START_PROC);
     kp->active = true;
-    kp->processing = true;
-    fprintf(stderr, "keepsake: deferred activation complete\n");
-    return true;
-}
-
-static bool plugin_activate(const clap_plugin_t *plugin,
-                              double sample_rate,
-                              uint32_t min_frames,
-                              uint32_t max_frames) {
-    auto *kp = get(plugin);
-    (void)min_frames;
-
-    fprintf(stderr, "keepsake: activate() called sr=%.0f frames=%u\n",
-            sample_rate, max_frames);
-    kp->deferred_sample_rate = sample_rate;
-    kp->deferred_max_frames = max_frames;
-    kp->needs_activate = true;
-
-    // If bridge is already ready, activate on a background thread
-    // — NEVER block the host's main thread with IPC
-    if (kp->bridge_ok && !kp->crashed) {
-#ifndef _WIN32
-        pthread_t t;
-        pthread_create(&t, nullptr, [](void *arg) -> void * {
-            do_activate(static_cast<KeepsakePlugin *>(arg));
-            return nullptr;
-        }, kp);
-        pthread_detach(t);
-#endif
-    }
-    // Otherwise: init thread will call do_activate when bridge is ready
     return true;
 }
 
 static void plugin_deactivate(const clap_plugin_t *plugin) {
-    fprintf(stderr, "keepsake: deactivate() called\n");
     auto *kp = get(plugin);
     if (kp->active && !kp->crashed) {
         send_and_wait(kp, IPC_OP_DEACTIVATE);
@@ -239,15 +184,8 @@ static void plugin_deactivate(const clap_plugin_t *plugin) {
 }
 
 static bool plugin_start_processing(const clap_plugin_t *plugin) {
-    fprintf(stderr, "keepsake: start_processing() called\n");
     auto *kp = get(plugin);
-    if (kp->crashed) return false;
-    // If bridge not ready yet, just set the flag — deferred activate
-    // will handle START_PROC when activation completes
-    if (!kp->bridge_ok || !kp->active) {
-        kp->processing = true;
-        return true;
-    }
+    if (!kp->active || kp->crashed) return false;
     if (!send_and_wait(kp, IPC_OP_START_PROC)) return false;
     kp->processing = true;
     return true;
@@ -269,13 +207,9 @@ static clap_process_status plugin_process(const clap_plugin_t *plugin,
                                             const clap_process_t *process) {
     auto *kp = get(plugin);
 
-    if (kp->crashed) {
+    if (kp->crashed || !kp->processing || !kp->shm.ptr) {
         output_silence(process);
-        return CLAP_PROCESS_ERROR;
-    }
-    if (!kp->bridge_ok || !kp->processing || !kp->shm.ptr) {
-        output_silence(process);
-        return CLAP_PROCESS_CONTINUE; // still loading or not active
+        return kp->crashed ? CLAP_PROCESS_ERROR : CLAP_PROCESS_SLEEP;
     }
 
     uint32_t frames = process->frames_count;
@@ -450,7 +384,6 @@ static const clap_plugin_latency_t s_latency = {
 
 static const void *plugin_get_extension(const clap_plugin_t *plugin,
                                           const char *id) {
-    fprintf(stderr, "keepsake: get_extension('%s')\n", id);
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) return &s_audio_ports;
     if (strcmp(id, CLAP_EXT_PARAMS) == 0) return &keepsake_params_ext;
     if (strcmp(id, CLAP_EXT_STATE) == 0) return &keepsake_state_ext;
