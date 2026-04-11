@@ -10,6 +10,7 @@
 #include <clap/clap.h>
 #include <string>
 #include <vector>
+#include <mutex>
 
 struct CachedParamInfo {
     uint32_t index;
@@ -37,6 +38,7 @@ struct KeepsakePlugin {
     // Bridge process (from pool)
     BridgeProcess *bridge = nullptr;
     uint32_t instance_id = 0; // assigned by bridge on INIT
+    std::mutex ipc_mutex; // serializes pipe I/O between threads
 
     // Shared memory
     PlatformShm shm;

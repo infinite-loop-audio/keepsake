@@ -12,6 +12,7 @@ bool send_and_wait(KeepsakePlugin *kp, uint32_t opcode,
                     uint32_t size,
                     std::vector<uint8_t> *ok_payload) {
     if (kp->crashed || !kp->bridge) return false;
+    std::lock_guard<std::mutex> lock(kp->ipc_mutex);
     if (!ipc_write_instance_msg(kp->bridge->proc.pipe_to, opcode,
                                  kp->instance_id, payload, size)) {
         kp->crashed = true;
@@ -212,6 +213,10 @@ static clap_process_status plugin_process(const clap_plugin_t *plugin,
 
     uint32_t frames = process->frames_count;
     if (frames > kp->max_frames) frames = kp->max_frames;
+
+    // Lock IPC for the entire process cycle (prevents main-thread GUI
+    // commands from interleaving with audio-thread process messages)
+    std::lock_guard<std::mutex> lock(kp->ipc_mutex);
 
     // Copy input audio to shared memory
     auto *shm_base = static_cast<float *>(kp->shm.ptr);
