@@ -21,7 +21,7 @@ Started: 2026-04-10
 | `012` | [Windows and Linux GUI](012-windows-linux-gui.md) | complete |
 | `013` | [Embedded Editors](013-embedded-editors.md) | complete |
 | `014` | [Scan Robustness](014-scan-robustness.md) | complete |
-| `015` | [Codebase Health](015-codebase-health.md) | planned |
+| `015` | [Codebase Health](015-codebase-health.md) | complete |
 | `016` | [Soundcheck Integration](016-soundcheck-integration.md) | deferred |
 
 ## Sequencing Intent
