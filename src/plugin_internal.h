@@ -9,6 +9,10 @@
 #include <cstdlib>
 #include <vector>
 
+#ifndef _WIN32
+#include <sched.h>
+#endif
+
 // Get the KeepsakePlugin from a clap_plugin_t pointer.
 inline KeepsakePlugin *get(const clap_plugin_t *plugin) {
     return reinterpret_cast<KeepsakePlugin *>(plugin->plugin_data);

@@ -140,9 +140,7 @@ static bool plugin_activate(const clap_plugin_t *plugin,
     snprintf(instance_id, sizeof(instance_id), "%p", static_cast<void *>(kp));
     std::string shm_name = platform_shm_name(instance_id);
 
-    size_t shm_size = static_cast<size_t>(kp->num_inputs + kp->num_outputs) *
-                      max_frames * sizeof(float);
-    if (shm_size == 0) shm_size = max_frames * sizeof(float);
+    size_t shm_size = shm_total_size(kp->num_inputs, kp->num_outputs, max_frames);
 
     if (!platform_shm_create(kp->shm, shm_name, shm_size)) return false;
 
@@ -214,14 +212,12 @@ static clap_process_status plugin_process(const clap_plugin_t *plugin,
     uint32_t frames = process->frames_count;
     if (frames > kp->max_frames) frames = kp->max_frames;
 
-    // Lock IPC for the entire process cycle (prevents main-thread GUI
-    // commands from interleaving with audio-thread process messages)
-    std::lock_guard<std::mutex> lock(kp->ipc_mutex);
+    // --- Shared-memory audio hot path (zero syscalls) ---
+    auto *ctrl = shm_control(kp->shm.ptr);
 
     // Copy input audio to shared memory
-    auto *shm_base = static_cast<float *>(kp->shm.ptr);
     for (int ch = 0; ch < kp->num_inputs; ch++) {
-        float *dst = shm_base + ch * kp->max_frames;
+        float *dst = shm_audio_inputs(kp->shm.ptr, ch, kp->max_frames);
         if (process->audio_inputs_count > 0 &&
             ch < static_cast<int>(process->audio_inputs[0].channel_count) &&
             process->audio_inputs[0].data32 &&
@@ -233,102 +229,85 @@ static clap_process_status plugin_process(const clap_plugin_t *plugin,
         }
     }
 
-    // Batch all events + PROCESS command into a single pipe write.
-    // This reduces syscalls from N+1 (one per event + PROCESS) to just 1.
-    std::vector<uint8_t> batch;
-    batch.reserve(256);
-
-    auto append_event = [&](uint32_t opcode, const void *data, uint32_t sz) {
-        // Build instance-aware message: [opcode][size][instance_id][payload]
-        uint32_t total = 4 + sz;
-        IpcHeader hdr = { opcode, total };
-        size_t off = batch.size();
-        batch.resize(off + sizeof(hdr) + total);
-        memcpy(batch.data() + off, &hdr, sizeof(hdr));
-        memcpy(batch.data() + off + sizeof(hdr), &kp->instance_id, 4);
-        if (sz > 0)
-            memcpy(batch.data() + off + sizeof(hdr) + 4, data, sz);
-    };
-
-    // Collect MIDI/note/param events
+    // Write MIDI and param events into shared memory
+    uint32_t midi_idx = 0;
+    uint32_t param_idx = 0;
     if (process->in_events) {
         uint32_t ev_count = process->in_events->size(process->in_events);
         for (uint32_t i = 0; i < ev_count; i++) {
             auto *hdr = process->in_events->get(process->in_events, i);
 
-            if (hdr->type == CLAP_EVENT_MIDI) {
+            ShmMidiEvent *me = nullptr;
+            if (hdr->type == CLAP_EVENT_MIDI && midi_idx < SHM_MAX_MIDI_EVENTS) {
                 auto *midi = reinterpret_cast<const clap_event_midi_t *>(hdr);
-                IpcMidiEventPayload mp;
-                mp.delta_frames = static_cast<int32_t>(hdr->time);
-                mp.data[0] = midi->data[0]; mp.data[1] = midi->data[1];
-                mp.data[2] = midi->data[2]; mp.data[3] = 0;
-                append_event(IPC_OP_MIDI_EVENT, &mp, sizeof(mp));
+                me = &ctrl->midi_events[midi_idx++];
+                me->delta_frames = static_cast<int32_t>(hdr->time);
+                me->data[0] = midi->data[0]; me->data[1] = midi->data[1];
+                me->data[2] = midi->data[2]; me->data[3] = 0;
 
-            } else if (hdr->type == CLAP_EVENT_NOTE_ON) {
+            } else if (hdr->type == CLAP_EVENT_NOTE_ON && midi_idx < SHM_MAX_MIDI_EVENTS) {
                 auto *note = reinterpret_cast<const clap_event_note_t *>(hdr);
-                IpcMidiEventPayload mp;
-                mp.delta_frames = static_cast<int32_t>(hdr->time);
+                me = &ctrl->midi_events[midi_idx++];
+                me->delta_frames = static_cast<int32_t>(hdr->time);
                 uint8_t vel = static_cast<uint8_t>(note->velocity * 127.0);
                 if (vel == 0) vel = 1;
-                mp.data[0] = static_cast<uint8_t>(0x90 | (note->channel & 0x0F));
-                mp.data[1] = static_cast<uint8_t>(note->key & 0x7F);
-                mp.data[2] = vel; mp.data[3] = 0;
-                append_event(IPC_OP_MIDI_EVENT, &mp, sizeof(mp));
+                me->data[0] = static_cast<uint8_t>(0x90 | (note->channel & 0x0F));
+                me->data[1] = static_cast<uint8_t>(note->key & 0x7F);
+                me->data[2] = vel; me->data[3] = 0;
 
-            } else if (hdr->type == CLAP_EVENT_NOTE_OFF) {
+            } else if (hdr->type == CLAP_EVENT_NOTE_OFF && midi_idx < SHM_MAX_MIDI_EVENTS) {
                 auto *note = reinterpret_cast<const clap_event_note_t *>(hdr);
-                IpcMidiEventPayload mp;
-                mp.delta_frames = static_cast<int32_t>(hdr->time);
-                mp.data[0] = static_cast<uint8_t>(0x80 | (note->channel & 0x0F));
-                mp.data[1] = static_cast<uint8_t>(note->key & 0x7F);
-                mp.data[2] = static_cast<uint8_t>(note->velocity * 127.0);
-                mp.data[3] = 0;
-                append_event(IPC_OP_MIDI_EVENT, &mp, sizeof(mp));
+                me = &ctrl->midi_events[midi_idx++];
+                me->delta_frames = static_cast<int32_t>(hdr->time);
+                me->data[0] = static_cast<uint8_t>(0x80 | (note->channel & 0x0F));
+                me->data[1] = static_cast<uint8_t>(note->key & 0x7F);
+                me->data[2] = static_cast<uint8_t>(note->velocity * 127.0);
+                me->data[3] = 0;
 
-            } else if (hdr->type == CLAP_EVENT_PARAM_VALUE) {
+            } else if (hdr->type == CLAP_EVENT_PARAM_VALUE && param_idx < 64) {
                 auto *pv = reinterpret_cast<const clap_event_param_value_t *>(hdr);
-                IpcSetParamPayload sp;
-                sp.index = static_cast<uint32_t>(pv->param_id);
-                sp.value = static_cast<float>(pv->value);
-                append_event(IPC_OP_SET_PARAM, &sp, sizeof(sp));
+                ctrl->params[param_idx].index = static_cast<uint32_t>(pv->param_id);
+                ctrl->params[param_idx].value = static_cast<float>(pv->value);
+                param_idx++;
             }
         }
     }
 
-    // Append PROCESS command at the end of the batch
-    IpcProcessPayload pp = { frames };
-    append_event(IPC_OP_PROCESS, &pp, sizeof(pp));
+    // Set control fields and signal the bridge
+    ctrl->num_frames = frames;
+    ctrl->midi_count = midi_idx;
+    ctrl->param_count = param_idx;
+    shm_store_release(&ctrl->state, SHM_STATE_PROCESS_REQUESTED);
 
-    // Single pipe write for everything
-    if (!platform_write(kp->bridge->proc.pipe_to, batch.data(), batch.size())) {
+    // Spin-wait for bridge to complete processing (no syscalls)
+    // Timeout: ~100ms (enough for any reasonable buffer, catch crashes)
+    for (int spin = 0; spin < 10000000; spin++) {
+        uint32_t st = shm_load_acquire(&ctrl->state);
+        if (st == SHM_STATE_PROCESS_DONE) break;
+        if (spin > 0 && (spin % 1000) == 0) {
+            // Brief yield after ~10μs of spinning to avoid burning CPU
+#ifndef _WIN32
+            sched_yield();
+#else
+            SwitchToThread();
+#endif
+        }
+    }
+
+    if (shm_load_acquire(&ctrl->state) != SHM_STATE_PROCESS_DONE) {
+        fprintf(stderr, "keepsake: bridge process timeout\n");
         kp->crashed = true;
         output_silence(process);
         return CLAP_PROCESS_ERROR;
     }
 
-    // Wait for PROCESS_DONE
-    uint32_t resp_op;
-    std::vector<uint8_t> resp_payload;
-    // Timeout: generous for real-time — 2 seconds
-    if (!ipc_read_msg(kp->bridge->proc.pipe_from, resp_op, resp_payload, 2000)) {
-        fprintf(stderr, "keepsake: bridge timeout/crash during process\n");
-        kp->crashed = true;
-        output_silence(process);
-        return CLAP_PROCESS_ERROR;
-    }
-
-    if (resp_op != IPC_OP_PROCESS_DONE) {
-        fprintf(stderr, "keepsake: unexpected response 0x%02X during process\n",
-                resp_op);
-        kp->crashed = true;
-        output_silence(process);
-        return CLAP_PROCESS_ERROR;
-    }
+    // Reset state for next cycle
+    ctrl->state = SHM_STATE_IDLE;
 
     // Copy output audio from shared memory
-    float *out_base = shm_base + kp->num_inputs * kp->max_frames;
     for (int ch = 0; ch < kp->num_outputs; ch++) {
-        float *src = out_base + ch * kp->max_frames;
+        float *src = shm_audio_outputs(kp->shm.ptr, kp->num_inputs,
+                                        ch, kp->max_frames);
         if (process->audio_outputs_count > 0 &&
             ch < static_cast<int>(process->audio_outputs[0].channel_count) &&
             process->audio_outputs[0].data32 &&

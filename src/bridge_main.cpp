@@ -250,26 +250,67 @@ int main(int /*argc*/, char * /*argv*/[]) {
     fprintf(stderr, "bridge: started (pid=%d)\n", getpid());
 
     while (true) {
-        // When editor is open, use a short timeout so we can service GUI.
-        // But always drain ALL pending pipe messages before doing GUI work
-        // — audio processing must never be starved by GUI events.
-        int read_timeout = gui_is_open() ? 1 : -1; // 1ms, not 16ms
+        // Check for shared-memory process requests (audio hot path)
+        // This is checked FIRST, before any pipe or GUI work.
+        bool did_shm_process = false;
+        for (auto &kv : g_instances) {
+            auto *inst = kv.second;
+            if (!inst->shm.ptr || !inst->active) continue;
+            auto *ctrl = shm_control(inst->shm.ptr);
+            if (shm_load_acquire(&ctrl->state) == SHM_STATE_PROCESS_REQUESTED) {
+                // Process audio via shared memory
+                uint32_t nframes = ctrl->num_frames;
+                if (nframes > inst->max_frames) nframes = inst->max_frames;
+
+                // Apply param changes from shared memory
+                for (uint32_t p = 0; p < ctrl->param_count && p < 64; p++) {
+                    inst->loader->set_param(ctrl->params[p].index,
+                                             ctrl->params[p].value);
+                }
+
+                // Send MIDI events from shared memory
+                for (uint32_t m = 0; m < ctrl->midi_count && m < SHM_MAX_MIDI_EVENTS; m++) {
+                    inst->loader->send_midi(ctrl->midi_events[m].delta_frames,
+                                             ctrl->midi_events[m].data);
+                }
+
+                // Set up channel pointers
+                std::vector<float *> in_ptrs(static_cast<size_t>(inst->num_inputs));
+                std::vector<float *> out_ptrs(static_cast<size_t>(inst->num_outputs));
+                for (int i = 0; i < inst->num_inputs; i++)
+                    in_ptrs[static_cast<size_t>(i)] =
+                        shm_audio_inputs(inst->shm.ptr, i, inst->max_frames);
+                for (int i = 0; i < inst->num_outputs; i++)
+                    out_ptrs[static_cast<size_t>(i)] =
+                        shm_audio_outputs(inst->shm.ptr, inst->num_inputs,
+                                           i, inst->max_frames);
+
+                inst->loader->process(
+                    inst->num_inputs > 0 ? in_ptrs.data() : nullptr,
+                    inst->num_inputs,
+                    inst->num_outputs > 0 ? out_ptrs.data() : nullptr,
+                    inst->num_outputs, nframes);
+
+                shm_store_release(&ctrl->state, SHM_STATE_PROCESS_DONE);
+                did_shm_process = true;
+            }
+        }
+
+        // If we handled shm process, loop back immediately — don't
+        // block on pipe reads while audio might need processing
+        if (did_shm_process) continue;
+
+        // Check for non-RT commands on the pipe (short timeout)
+        int read_timeout = gui_is_open() ? 1 : 5; // ms
 
         uint32_t opcode;
         std::vector<uint8_t> payload;
 
         if (!ipc_read_msg(g_pipe_in, opcode, payload, read_timeout)) {
-            if (gui_is_open()) {
-                // No pending messages — safe to do GUI work now
-                gui_idle(nullptr);
-                continue;
-            }
-            fprintf(stderr, "bridge: pipe closed, exiting\n");
-            break;
+            // Timeout — service GUI if open
+            if (gui_is_open()) gui_idle(nullptr);
+            continue;
         }
-
-        // Don't gui_idle between messages — process all pending pipe
-        // messages first, gui_idle only happens on timeout (above)
 
         // Extract instance ID from payload (first 4 bytes)
         uint32_t instance_id = ipc_extract_instance_id(payload);
@@ -309,7 +350,10 @@ int main(int /*argc*/, char * /*argv*/[]) {
             inst->processing = true;
             ipc_write_ok(g_pipe_out);
             break;
-        case IPC_OP_PROCESS:    handle_process(inst, payload); break;
+        case IPC_OP_PROCESS:
+            // Legacy pipe-based process (fallback, normally handled via shm)
+            handle_process(inst, payload);
+            break;
         case IPC_OP_SET_PARAM:  handle_set_param(inst, payload); break;
         case IPC_OP_MIDI_EVENT: handle_midi_event(inst, payload); break;
         case IPC_OP_GET_PARAM_INFO: handle_get_param_info(inst, payload); break;

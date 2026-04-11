@@ -196,4 +196,65 @@ static inline uint32_t ipc_extract_instance_id(std::vector<uint8_t> &payload) {
     return id;
 }
 
+// --- Shared memory process control ---
+// The audio hot path uses atomic flags in shared memory instead of pipes.
+// Zero syscalls during process: host writes inputs + sets flag, bridge
+// processes + sets done flag, host reads outputs.
+
+static constexpr uint32_t SHM_STATE_IDLE              = 0;
+static constexpr uint32_t SHM_STATE_PROCESS_REQUESTED = 1;
+static constexpr uint32_t SHM_STATE_PROCESS_DONE      = 2;
+
+static constexpr uint32_t SHM_MAX_MIDI_EVENTS = 256;
+
+#pragma pack(push, 1)
+struct ShmMidiEvent {
+    int32_t delta_frames;
+    uint8_t data[4];
+};
+
+struct ShmProcessControl {
+    volatile uint32_t state;       // SHM_STATE_*
+    uint32_t num_frames;           // frames to process this cycle
+    uint32_t midi_count;           // number of MIDI events this cycle
+    uint32_t param_count;          // number of param changes this cycle
+    ShmMidiEvent midi_events[SHM_MAX_MIDI_EVENTS];
+    IpcSetParamPayload params[64]; // batched param changes
+    // Audio buffers follow after this struct
+};
+#pragma pack(pop)
+
+// Get pointer to audio input buffers (after the control region)
+static inline float *shm_audio_inputs(void *shm_ptr, int channel, uint32_t max_frames) {
+    auto *base = reinterpret_cast<uint8_t *>(shm_ptr) + sizeof(ShmProcessControl);
+    return reinterpret_cast<float *>(base) + channel * max_frames;
+}
+
+// Get pointer to audio output buffers
+static inline float *shm_audio_outputs(void *shm_ptr, int num_inputs,
+                                         int channel, uint32_t max_frames) {
+    auto *base = reinterpret_cast<uint8_t *>(shm_ptr) + sizeof(ShmProcessControl);
+    return reinterpret_cast<float *>(base) + (num_inputs + channel) * max_frames;
+}
+
+// Get the process control struct from shared memory
+static inline ShmProcessControl *shm_control(void *shm_ptr) {
+    return reinterpret_cast<ShmProcessControl *>(shm_ptr);
+}
+
+// Atomic helpers for cross-process shared memory
+static inline void shm_store_release(volatile uint32_t *ptr, uint32_t val) {
+    __atomic_store_n(ptr, val, __ATOMIC_RELEASE);
+}
+
+static inline uint32_t shm_load_acquire(volatile uint32_t *ptr) {
+    return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
+}
+
+// Total shared memory size needed
+static inline size_t shm_total_size(int num_inputs, int num_outputs, uint32_t max_frames) {
+    return sizeof(ShmProcessControl) +
+           static_cast<size_t>(num_inputs + num_outputs) * max_frames * sizeof(float);
+}
+
 // Shared memory: use PlatformShm and platform_shm_* from platform.h
