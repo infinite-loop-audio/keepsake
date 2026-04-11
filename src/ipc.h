@@ -32,7 +32,9 @@ static constexpr uint32_t IPC_OP_SET_CHUNK      = 0x0D;  // payload: chunk bytes
 static constexpr uint32_t IPC_OP_EDITOR_OPEN    = 0x10;  // no payload
 static constexpr uint32_t IPC_OP_EDITOR_CLOSE   = 0x11;  // no payload
 static constexpr uint32_t IPC_OP_EDITOR_GET_RECT = 0x12; // no payload
-static constexpr uint32_t IPC_OP_EDITOR_SET_PARENT = 0x13; // payload: uint64_t native_handle
+static constexpr uint32_t IPC_OP_EDITOR_SET_PARENT  = 0x13; // payload: uint64_t native_handle
+static constexpr uint32_t IPC_OP_EDITOR_MOUSE       = 0x14; // payload: IpcMouseEvent
+static constexpr uint32_t IPC_OP_EDITOR_KEY          = 0x15; // payload: IpcKeyEvent
 
 // Bridge → Host
 static constexpr uint32_t IPC_OP_OK           = 0x81;
@@ -149,6 +151,32 @@ struct IpcParamInfoResponse {
     float current_value;
     char name[64];
     char label[16]; // unit label (dB, Hz, etc.)
+};
+
+// Mouse event forwarding (host → bridge)
+struct IpcMouseEvent {
+    int32_t x;
+    int32_t y;
+    int32_t type;     // 0=move, 1=down, 2=up, 3=drag, 4=scroll
+    int32_t button;   // 0=left, 1=right, 2=middle
+    float scroll_dx;
+    float scroll_dy;
+};
+
+// Key event forwarding (host → bridge)
+struct IpcKeyEvent {
+    uint32_t keycode;
+    uint32_t modifiers;
+    int32_t type;     // 0=down, 1=up
+    char character;
+    char pad[3];
+};
+
+// IOSurface ID response (bridge → host, in OK payload for EDITOR_OPEN)
+struct IpcEditorSurface {
+    uint32_t surface_id;  // IOSurfaceID for cross-process GPU sharing
+    int32_t width;
+    int32_t height;
 };
 
 // Sent as OK payload for EDITOR_GET_RECT

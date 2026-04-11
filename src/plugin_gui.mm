@@ -4,6 +4,12 @@
 
 #include "plugin_internal.h"
 
+#ifdef __APPLE__
+#import <IOSurface/IOSurface.h>
+#import <QuartzCore/QuartzCore.h>
+#import <Cocoa/Cocoa.h>
+#endif
+
 static bool gui_is_api_supported(const clap_plugin_t *plugin,
                                    const char *api, bool is_floating) {
     auto *kp = get(plugin);
@@ -81,10 +87,51 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
     if (kp->crashed || !kp->has_editor || !kp->bridge || !window) return false;
 
 #ifdef __APPLE__
-    // macOS: can't embed across processes. Open a floating window instead.
-    // The host thinks we're embedded, but we open our own window.
+    // Send EDITOR_OPEN — bridge will try IOSurface mode
     if (!kp->editor_open) {
-        if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN)) return false;
+        std::vector<uint8_t> resp;
+        if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN, nullptr, 0, &resp))
+            return false;
+
+        // Check if bridge returned an IOSurface ID
+        if (resp.size() >= sizeof(IpcEditorSurface)) {
+            IpcEditorSurface surf;
+            memcpy(&surf, resp.data(), sizeof(surf));
+
+            if (surf.surface_id > 0) {
+                // IOSurface mode: composite into host's NSView
+                fprintf(stderr, "keepsake: IOSurface mode, surfaceID=%u %dx%d\n",
+                        surf.surface_id, surf.width, surf.height);
+
+                // Import the IOSurface and display it in the host's view
+                // This runs in the host process — we have direct access to
+                // the host's NSView from the clap_window_t.
+                @autoreleasepool {
+                    IOSurfaceRef surface = IOSurfaceLookup(surf.surface_id);
+                    if (surface) {
+                        NSView *parent = (__bridge NSView *)window->cocoa;
+                        [parent setWantsLayer:YES];
+
+                        CALayer *surfaceLayer = [CALayer layer];
+                        surfaceLayer.contents = (__bridge id)surface;
+                        surfaceLayer.frame = CGRectMake(0, 0,
+                            surf.width, surf.height);
+                        surfaceLayer.contentsGravity = kCAGravityTopLeft;
+                        [parent.layer addSublayer:surfaceLayer];
+
+                        // Store for event forwarding
+                        kp->editor_width = surf.width;
+                        kp->editor_height = surf.height;
+
+                        CFRelease(surface);
+                        fprintf(stderr, "keepsake: IOSurface composited into host view\n");
+                    } else {
+                        fprintf(stderr, "keepsake: IOSurfaceLookup failed for ID %u\n",
+                                surf.surface_id);
+                    }
+                }
+            }
+        }
         kp->editor_open = true;
     }
     return true;

@@ -48,7 +48,7 @@ add_library(keepsake MODULE
     src/plugin.cpp
     src/plugin_params.cpp
     src/plugin_state.cpp
-    src/plugin_gui.cpp
+    src/plugin_gui.mm
     src/config.cpp
     src/bridge_pool.cpp
 )
@@ -84,6 +84,9 @@ if(APPLE)
     target_link_libraries(keepsake PRIVATE
         "-framework CoreFoundation"
         "-framework AudioToolbox"
+        "-framework IOSurface"
+        "-framework QuartzCore"
+        "-framework Cocoa"
     )
 
     # Universal binary support (x86_64 + arm64)
@@ -142,6 +145,8 @@ if(APPLE)
         "-framework CoreFoundation"
         "-framework Cocoa"
         "-framework AudioToolbox"
+        "-framework IOSurface"
+        "-framework QuartzCore"
     )
 
     # Install bridge binary inside the .clap bundle
@@ -186,6 +191,8 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
         "-framework CoreFoundation"
         "-framework Cocoa"
         "-framework AudioToolbox"
+        "-framework IOSurface"
+        "-framework QuartzCore"
     )
 
     set_target_properties(keepsake-bridge-x86_64 PROPERTIES
