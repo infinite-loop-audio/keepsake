@@ -591,7 +591,8 @@ bool scan_plugin_via_bridge(const std::string &path,
     uint32_t op;
     std::vector<uint8_t> payload;
     // 30-second timeout for slow plugins (license checks, network, etc.)
-    if (!ipc_read_msg(proc.pipe_from, op, payload, 30000)) {
+    // 5-second timeout: if the plugin can't load in 5s, skip it
+    if (!ipc_read_msg(proc.pipe_from, op, payload, 5000)) {
         fprintf(stderr, "keepsake: scan timeout for '%s'\n", path.c_str());
         platform_kill(proc);
         return false;

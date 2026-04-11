@@ -1,9 +1,10 @@
-// keepsake-scan: standalone scanner that populates the cache.
-// Run this OUTSIDE the DAW to discover all plugins (including slow VST3
-// and cross-architecture VST2). The cache is then loaded instantly by
-// the CLAP plugin on next host startup.
+// keepsake-scan: discover plugins the host can't load natively.
 //
-// Usage: keepsake-scan [--bridge <path>] [--bridge-x86_64 <path>]
+// Default: checks VST2 plugin architectures WITHOUT loading them.
+// x86_64-only plugins are flagged for Keepsake bridging. Instant.
+//
+// --deep: also loads each x86_64 plugin via bridge to get full metadata
+//         (name, vendor, params). Slower but gives better descriptions.
 
 #include "ipc.h"
 #include "vst2_loader.h"
@@ -16,8 +17,8 @@
 
 namespace fs = std::filesystem;
 
-static std::string g_bridge;
 static std::string g_bridge_x86;
+static bool g_deep = false;
 
 static bool is_vst2(const fs::path &p) {
 #ifdef __APPLE__
@@ -29,34 +30,32 @@ static bool is_vst2(const fs::path &p) {
 #endif
 }
 
-static bool is_vst3(const fs::path &p) {
-    return p.extension() == ".vst3";
+// Extract filename stem from path
+static std::string stem(const std::string &path) {
+    size_t sep = path.find_last_of("/\\");
+    size_t start = (sep != std::string::npos) ? sep + 1 : 0;
+    size_t dot = path.find_last_of('.');
+    if (dot != std::string::npos && dot > start)
+        return path.substr(start, dot - start);
+    return path.substr(start);
 }
 
 int main(int argc, char *argv[]) {
-    // Find bridge binaries
 #ifdef __APPLE__
-    // Default: look relative to this binary or in known locations
-    g_bridge = "/Users/betterthanclay/Library/Audio/Plug-Ins/CLAP/keepsake.clap/Contents/Helpers/keepsake-bridge";
     g_bridge_x86 = "/Users/betterthanclay/Library/Audio/Plug-Ins/CLAP/keepsake.clap/Contents/Helpers/keepsake-bridge-x86_64";
 #endif
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--bridge") == 0 && i + 1 < argc)
-            g_bridge = argv[++i];
+        if (strcmp(argv[i], "--deep") == 0) g_deep = true;
         else if (strcmp(argv[i], "--bridge-x86_64") == 0 && i + 1 < argc)
             g_bridge_x86 = argv[++i];
     }
 
-    printf("Keepsake Scanner\n");
-    printf("Bridge: %s\n", g_bridge.c_str());
-    if (!g_bridge_x86.empty())
-        printf("Bridge x86_64: %s\n", g_bridge_x86.c_str());
-    printf("\n");
+    printf("Keepsake Scanner%s\n\n", g_deep ? " (deep)" : "");
 
-    std::vector<Vst2PluginInfo> all_plugins;
+    std::vector<Vst2PluginInfo> results;
 
-    // --- VST2 scan ---
+    // VST2 scan paths
     std::vector<std::string> vst2_paths;
 #ifdef __APPLE__
     const char *home = getenv("HOME");
@@ -64,80 +63,74 @@ int main(int argc, char *argv[]) {
     vst2_paths.push_back("/Library/Audio/Plug-Ins/VST");
 #elif defined(_WIN32)
     const char *pf = getenv("PROGRAMFILES");
-    if (pf) { vst2_paths.push_back(std::string(pf) + "\\VSTPlugins"); }
+    if (pf) vst2_paths.push_back(std::string(pf) + "\\VSTPlugins");
 #else
-    const char *home = getenv("HOME");
     if (home) vst2_paths.push_back(std::string(home) + "/.vst");
     vst2_paths.push_back("/usr/lib/vst");
 #endif
 
-    printf("Scanning VST2...\n");
+    int native = 0, cross = 0, fail = 0;
+
     for (const auto &dir : vst2_paths) {
         std::error_code ec;
         if (!fs::is_directory(dir, ec)) continue;
+
         for (const auto &entry : fs::directory_iterator(dir, ec)) {
             if (!is_vst2(entry.path())) continue;
             std::string path = entry.path().string();
 
+            // Try native in-process load (fast)
             Vst2PluginInfo info;
             info.format = FORMAT_VST2;
-
-            // Try native first
             if (vst2_load_metadata(path, info)) {
-                all_plugins.push_back(std::move(info));
-            } else if (!g_bridge_x86.empty()) {
-                // Try cross-arch via Rosetta bridge
-                Vst2PluginInfo cross;
-                cross.format = FORMAT_VST2;
-                if (scan_plugin_via_bridge(path, g_bridge_x86, FORMAT_VST2, cross)) {
-                    cross.needs_cross_arch = true;
-                    all_plugins.push_back(std::move(cross));
+                native++;
+                continue; // Host handles this natively
+            }
+
+            // Native failed — this is a candidate for Keepsake
+            cross++;
+
+            if (g_deep && !g_bridge_x86.empty()) {
+                // Deep mode: load via bridge for full metadata
+                Vst2PluginInfo deep_info;
+                deep_info.format = FORMAT_VST2;
+                if (scan_plugin_via_bridge(path, g_bridge_x86,
+                                            FORMAT_VST2, deep_info)) {
+                    deep_info.needs_cross_arch = true;
+                    results.push_back(std::move(deep_info));
+                    printf("  [x86_64] %s — %s (%s)\n",
+                           results.back().name.c_str(),
+                           results.back().vendor.c_str(),
+                           path.c_str());
+                    continue;
                 }
             }
+
+            // Quick mode: use filename as name, minimal metadata
+            Vst2PluginInfo quick;
+            quick.format = FORMAT_VST2;
+            quick.file_path = path;
+            quick.name = stem(path);
+            quick.vendor = "Unknown";
+            quick.needs_cross_arch = true;
+            quick.unique_id = 0; // will be assigned a hash-based ID
+            // Generate a stable ID from the path
+            uint32_t hash = 0;
+            for (char c : path) hash = hash * 31 + static_cast<uint32_t>(c);
+            quick.unique_id = static_cast<int32_t>(hash);
+            results.push_back(std::move(quick));
+            printf("  [x86_64] %s — %s\n", results.back().name.c_str(),
+                   path.c_str());
         }
     }
-    printf("Found %zu VST2 plugin(s)\n\n", all_plugins.size());
 
-    // --- VST3 scan ---
-    std::vector<std::string> vst3_paths;
-#ifdef __APPLE__
-    if (home) vst3_paths.push_back(std::string(home) + "/Library/Audio/Plug-Ins/VST3");
-    vst3_paths.push_back("/Library/Audio/Plug-Ins/VST3");
-#elif defined(_WIN32)
-    const char *cpf = getenv("COMMONPROGRAMFILES");
-    if (cpf) vst3_paths.push_back(std::string(cpf) + "\\VST3");
-#else
-    if (home) vst3_paths.push_back(std::string(home) + "/.vst3");
-    vst3_paths.push_back("/usr/lib/vst3");
-#endif
+    printf("\n");
+    printf("Native (host handles):  %d\n", native);
+    printf("Cross-arch (Keepsake):  %d\n", cross);
+    printf("Keepsake will expose:   %zu plugin(s)\n", results.size());
 
-    size_t vst3_start = all_plugins.size();
-    printf("Scanning VST3 (this may take a while)...\n");
-    for (const auto &dir : vst3_paths) {
-        std::error_code ec;
-        if (!fs::is_directory(dir, ec)) continue;
-        for (const auto &entry : fs::directory_iterator(dir, ec)) {
-            if (!is_vst3(entry.path())) continue;
-            Vst2PluginInfo info;
-            if (scan_plugin_via_bridge(entry.path().string(), g_bridge,
-                                        FORMAT_VST3, info)) {
-                all_plugins.push_back(std::move(info));
-            }
-        }
-    }
-    printf("Found %zu VST3 plugin(s)\n\n",
-           all_plugins.size() - vst3_start);
-
-    // --- AU scan (macOS only, in-process) ---
-#ifdef __APPLE__
-    // AU enumeration would go here but requires AudioToolbox linked
-    // into this binary. Skip for now — the CLAP plugin handles AU.
-#endif
-
-    // --- Save cache ---
-    printf("Total: %zu plugins\n", all_plugins.size());
-    cache_save(all_plugins);
-    printf("Cache saved. Restart your DAW to see all plugins.\n");
+    cache_save(results);
+    printf("\nCache saved. Restart your DAW.\n");
 
     return 0;
 }
