@@ -1,6 +1,6 @@
 # G01.012 — Windows and Linux GUI Backends
 
-Status: planned
+Status: ready
 Owner: Infinite Loop Audio
 Updated: 2026-04-11
 Governing refs:

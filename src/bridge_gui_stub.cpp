@@ -41,27 +41,104 @@ void gui_init() {
     RegisterClassA(&wc);
 }
 
+static const int WIN_HEADER_HEIGHT = 24;
+static HWND g_header_hwnd = nullptr;
+static EditorHeaderInfo g_header_info;
+
+static LRESULT CALLBACK HeaderWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+
+        // Dark background
+        HBRUSH bg = CreateSolidBrush(RGB(38, 38, 38));
+        FillRect(hdc, &rc, bg);
+        DeleteObject(bg);
+
+        // Text
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, RGB(220, 220, 220));
+        HFONT font = CreateFontA(13, 0, 0, 0, FW_MEDIUM, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, "Segoe UI");
+        HFONT old_font = (HFONT)SelectObject(hdc, font);
+
+        // Plugin name + badges
+        char text[512];
+        snprintf(text, sizeof(text), "  %s   [%s]  [%s]  [%s]",
+                 g_header_info.plugin_name.c_str(),
+                 g_header_info.format.c_str(),
+                 g_header_info.architecture.c_str(),
+                 g_header_info.isolation.c_str());
+        rc.left += 4;
+        rc.top += 4;
+        DrawTextA(hdc, text, -1, &rc, DT_LEFT | DT_SINGLELINE);
+
+        SelectObject(hdc, old_font);
+        DeleteObject(font);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    return DefWindowProcA(hwnd, msg, wParam, lParam);
+}
+
 bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     if (!loader || !loader->has_editor()) return false;
     if (g_editor_open) return true;
 
+    g_header_info = header;
     int w = 640, h = 480;
     loader->get_editor_rect(w, h);
 
+    // Register header class
+    static bool header_registered = false;
+    if (!header_registered) {
+        WNDCLASSA wc = {};
+        wc.lpfnWndProc = HeaderWndProc;
+        wc.hInstance = GetModuleHandle(nullptr);
+        wc.lpszClassName = "KeepsakeHeader";
+        wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+        RegisterClassA(&wc);
+        header_registered = true;
+    }
+
+    // Title with plugin info
+    char title[256];
+    snprintf(title, sizeof(title), "Keepsake \xe2\x80\x94 %s",
+             header.plugin_name.c_str());
+
+    // Window sized for header + editor
+    RECT wr = {0, 0, w, h + WIN_HEADER_HEIGHT};
+    AdjustWindowRect(&wr, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, FALSE);
+
     g_editor_hwnd = CreateWindowExA(
-        WS_EX_TOOLWINDOW, "KeepsakeEditor", "Keepsake",
+        WS_EX_TOOLWINDOW, "KeepsakeEditor", title,
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
-        CW_USEDEFAULT, CW_USEDEFAULT, w, h,
+        CW_USEDEFAULT, CW_USEDEFAULT,
+        wr.right - wr.left, wr.bottom - wr.top,
         nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
 
     if (!g_editor_hwnd) return false;
 
-    loader->open_editor(static_cast<void *>(g_editor_hwnd));
+    // Header bar at top
+    g_header_hwnd = CreateWindowExA(
+        0, "KeepsakeHeader", nullptr, WS_CHILD | WS_VISIBLE,
+        0, 0, w, WIN_HEADER_HEIGHT,
+        g_editor_hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
+
+    // Editor panel below header — create a child for the plugin to draw into
+    HWND editor_panel = CreateWindowExA(
+        0, "KeepsakeEditor", nullptr, WS_CHILD | WS_VISIBLE,
+        0, WIN_HEADER_HEIGHT, w, h,
+        g_editor_hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
+
+    loader->open_editor(static_cast<void *>(editor_panel));
     g_active_loader = loader;
     g_editor_open = true;
 
     ShowWindow(g_editor_hwnd, SW_SHOW);
-    g_idle_timer = SetTimer(g_editor_hwnd, 1, 16, nullptr); // ~60fps
+    g_idle_timer = SetTimer(g_editor_hwnd, 1, 16, nullptr);
     return true;
 }
 
@@ -141,24 +218,80 @@ void gui_init() {
     }
 }
 
-bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &) {
+static const int X11_HEADER_HEIGHT = 24;
+static Window g_header_window = 0;
+static GC g_header_gc = nullptr;
+static EditorHeaderInfo g_header_info_x11;
+
+static void x11_draw_header() {
+    if (!g_display || !g_header_window || !g_header_gc) return;
+
+    int screen = DefaultScreen(g_display);
+
+    // Dark background
+    XSetForeground(g_display, g_header_gc, 0x262626);
+    XFillRectangle(g_display, g_header_window, g_header_gc,
+                   0, 0, 2000, X11_HEADER_HEIGHT);
+
+    // Text
+    XSetForeground(g_display, g_header_gc, 0xDDDDDD);
+    char text[512];
+    snprintf(text, sizeof(text), "  %s   [%s]  [%s]  [%s]",
+             g_header_info_x11.plugin_name.c_str(),
+             g_header_info_x11.format.c_str(),
+             g_header_info_x11.architecture.c_str(),
+             g_header_info_x11.isolation.c_str());
+    XDrawString(g_display, g_header_window, g_header_gc,
+                8, 16, text, static_cast<int>(strlen(text)));
+}
+
+bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     if (!loader || !loader->has_editor() || !g_display) return false;
     if (g_editor_open) return true;
 
+    g_header_info_x11 = header;
     int w = 640, h = 480;
     loader->get_editor_rect(w, h);
 
     int screen = DefaultScreen(g_display);
+
+    // Main window (header + editor)
+    Window root = RootWindow(g_display, screen);
     g_editor_window = XCreateSimpleWindow(
-        g_display, RootWindow(g_display, screen),
-        200, 200, w, h, 1,
+        g_display, root,
+        200, 200, w, h + X11_HEADER_HEIGHT, 1,
         BlackPixel(g_display, screen),
-        WhitePixel(g_display, screen));
+        0x262626);
+
+    // Set window title
+    char title[256];
+    snprintf(title, sizeof(title), "Keepsake — %s",
+             header.plugin_name.c_str());
+    XStoreName(g_display, g_editor_window, title);
+
+    // Header bar (child window at top)
+    g_header_window = XCreateSimpleWindow(
+        g_display, g_editor_window,
+        0, 0, w, X11_HEADER_HEIGHT, 0,
+        0, 0x262626);
+    XMapWindow(g_display, g_header_window);
+    XSelectInput(g_display, g_header_window, ExposureMask);
+
+    g_header_gc = XCreateGC(g_display, g_header_window, 0, nullptr);
+
+    // Editor area (child window below header)
+    Window editor_area = XCreateSimpleWindow(
+        g_display, g_editor_window,
+        0, X11_HEADER_HEIGHT, w, h, 0,
+        0, WhitePixel(g_display, screen));
+    XMapWindow(g_display, editor_area);
 
     XMapWindow(g_display, g_editor_window);
     XFlush(g_display);
 
-    loader->open_editor(reinterpret_cast<void *>(g_editor_window));
+    x11_draw_header();
+
+    loader->open_editor(reinterpret_cast<void *>(editor_area));
     g_active_loader = loader;
     g_editor_open = true;
     return true;
@@ -194,9 +327,10 @@ void gui_close_editor(BridgeLoader *loader) {
     if (!g_editor_open) return;
     if (loader) loader->close_editor();
     else if (g_active_loader) g_active_loader->close_editor();
-    if (g_display && g_editor_window) {
-        XDestroyWindow(g_display, g_editor_window);
-        g_editor_window = 0;
+    if (g_display) {
+        if (g_header_gc) { XFreeGC(g_display, g_header_gc); g_header_gc = nullptr; }
+        if (g_editor_window) { XDestroyWindow(g_display, g_editor_window); g_editor_window = 0; }
+        g_header_window = 0;
     }
     g_active_loader = nullptr;
     g_parent_window = 0;
@@ -212,6 +346,9 @@ void gui_idle(BridgeLoader *loader) {
     while (XPending(g_display)) {
         XEvent ev;
         XNextEvent(g_display, &ev);
+        if (ev.type == Expose && ev.xexpose.window == g_header_window) {
+            x11_draw_header();
+        }
     }
     if (loader) loader->editor_idle();
     else if (g_active_loader) g_active_loader->editor_idle();
