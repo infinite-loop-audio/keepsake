@@ -46,6 +46,9 @@ add_library(keepsake MODULE
     src/factory.cpp
     src/vst2_loader.cpp
     src/plugin.cpp
+    src/plugin_params.cpp
+    src/plugin_state.cpp
+    src/plugin_gui.cpp
     src/config.cpp
     src/bridge_pool.cpp
 )

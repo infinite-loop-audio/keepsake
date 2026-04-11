@@ -18,7 +18,7 @@ Started: 2026-04-10
 | `009` | [32-Bit Bridge Binaries](009-32-bit-bridge.md) | complete |
 | `010` | [Configurable Process Isolation](010-configurable-process-isolation.md) | complete |
 | `011` | [Editor Header Bar](011-editor-header-bar.md) | complete |
-| `012` | [Windows and Linux GUI](012-windows-linux-gui.md) | planned |
+| `012` | [Windows and Linux GUI](012-windows-linux-gui.md) | complete |
 | `013` | [Embedded Editors](013-embedded-editors.md) | complete |
 | `014` | [Scan Robustness](014-scan-robustness.md) | complete |
 | `015` | [Codebase Health](015-codebase-health.md) | planned |

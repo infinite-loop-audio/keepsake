@@ -3,23 +3,14 @@
 // Each instance manages its own keepsake-bridge subprocess.
 //
 
-#include "plugin.h"
-#include <cstdio>
-#include <cstring>
-#include <cstdlib>
+#include "plugin_internal.h"
 
 // --- Helpers ---
 
-static KeepsakePlugin *get(const clap_plugin_t *plugin) {
-    return reinterpret_cast<KeepsakePlugin *>(plugin->plugin_data);
-}
-
-// Send a command and wait for OK/ERROR response.
-// Returns true if OK received.
-static bool send_and_wait(KeepsakePlugin *kp, uint32_t opcode,
-                           const void *payload = nullptr,
-                           uint32_t size = 0,
-                           std::vector<uint8_t> *ok_payload = nullptr) {
+bool send_and_wait(KeepsakePlugin *kp, uint32_t opcode,
+                    const void *payload,
+                    uint32_t size,
+                    std::vector<uint8_t> *ok_payload) {
     if (kp->crashed || !kp->bridge) return false;
     if (!ipc_write_instance_msg(kp->bridge->proc.pipe_to, opcode,
                                  kp->instance_id, payload, size)) {
@@ -391,318 +382,26 @@ static const clap_plugin_audio_ports_t s_audio_ports = {
     .get = audio_ports_get,
 };
 
-// --- Params extension ---
-
-static uint32_t params_count(const clap_plugin_t *plugin) {
-    return static_cast<uint32_t>(get(plugin)->params.size());
-}
-
-static bool params_get_info(const clap_plugin_t *plugin, uint32_t index,
-                              clap_param_info_t *info) {
-    auto *kp = get(plugin);
-    if (index >= kp->params.size()) return false;
-    const auto &cp = kp->params[index];
-
-    memset(info, 0, sizeof(*info));
-    info->id = static_cast<clap_id>(cp.index);
-    info->flags = CLAP_PARAM_IS_AUTOMATABLE;
-    snprintf(info->name, sizeof(info->name), "%s", cp.name);
-    info->module[0] = '\0';
-    info->min_value = 0.0;
-    info->max_value = 1.0;
-    info->default_value = static_cast<double>(cp.default_value);
-    return true;
-}
-
-static bool params_get_value(const clap_plugin_t *plugin, clap_id param_id,
-                               double *value) {
-    auto *kp = get(plugin);
-    if (kp->crashed || !kp->bridge_ok) return false;
-    // For real-time safety, return cached default. True live value would
-    // require bridge round-trip which isn't RT-safe.
-    if (param_id < kp->params.size()) {
-        *value = static_cast<double>(kp->params[param_id].default_value);
-        return true;
-    }
-    return false;
-}
-
-static bool params_value_to_text(const clap_plugin_t *plugin,
-                                   clap_id param_id, double value,
-                                   char *buf, uint32_t buf_size) {
-    auto *kp = get(plugin);
-    if (param_id >= kp->params.size()) return false;
-    const auto &cp = kp->params[param_id];
-    if (cp.label[0]) {
-        snprintf(buf, buf_size, "%.2f %s", value, cp.label);
-    } else {
-        snprintf(buf, buf_size, "%.2f", value);
-    }
-    return true;
-}
-
-static bool params_text_to_value(const clap_plugin_t * /*plugin*/,
-                                   clap_id /*param_id*/,
-                                   const char *text, double *value) {
-    char *end = nullptr;
-    double v = strtod(text, &end);
-    if (end == text) return false;
-    *value = v;
-    return true;
-}
-
-static void params_flush(const clap_plugin_t *plugin,
-                           const clap_input_events_t *in,
-                           const clap_output_events_t * /*out*/) {
-    auto *kp = get(plugin);
-    if (!in || kp->crashed) return;
-    uint32_t count = in->size(in);
-    for (uint32_t i = 0; i < count; i++) {
-        auto *hdr = in->get(in, i);
-        if (hdr->type == CLAP_EVENT_PARAM_VALUE) {
-            auto *pv = reinterpret_cast<const clap_event_param_value_t *>(hdr);
-            IpcSetParamPayload sp;
-            sp.index = static_cast<uint32_t>(pv->param_id);
-            sp.value = static_cast<float>(pv->value);
-            ipc_write_instance_msg(kp->bridge->proc.pipe_to,
-                IPC_OP_SET_PARAM, kp->instance_id, &sp, sizeof(sp));
-        }
-    }
-}
-
-static const clap_plugin_params_t s_params = {
-    .count = params_count,
-    .get_info = params_get_info,
-    .get_value = params_get_value,
-    .value_to_text = params_value_to_text,
-    .text_to_value = params_text_to_value,
-    .flush = params_flush,
-};
-
-// --- State extension ---
-
-static bool state_save(const clap_plugin_t *plugin,
-                         const clap_ostream_t *stream) {
-    auto *kp = get(plugin);
-    if (kp->crashed || !kp->bridge_ok) return false;
-
-    std::vector<uint8_t> chunk_data;
-    if (!send_and_wait(kp, IPC_OP_GET_CHUNK, nullptr, 0, &chunk_data))
-        return false;
-
-    if (chunk_data.empty()) return true; // plugin has no state
-
-    // Write chunk size then chunk data
-    uint32_t size = static_cast<uint32_t>(chunk_data.size());
-    if (stream->write(stream, &size, sizeof(size)) != sizeof(size))
-        return false;
-    if (stream->write(stream, chunk_data.data(), size) !=
-        static_cast<int64_t>(size))
-        return false;
-
-    return true;
-}
-
-static bool state_load(const clap_plugin_t *plugin,
-                         const clap_istream_t *stream) {
-    auto *kp = get(plugin);
-    if (kp->crashed || !kp->bridge_ok) return false;
-
-    uint32_t size = 0;
-    if (stream->read(stream, &size, sizeof(size)) != sizeof(size))
-        return false;
-    if (size == 0) return true;
-    if (size > 64 * 1024 * 1024) return false; // sanity limit: 64 MB
-
-    std::vector<uint8_t> chunk(size);
-    if (stream->read(stream, chunk.data(), size) != static_cast<int64_t>(size))
-        return false;
-
-    return send_and_wait(kp, IPC_OP_SET_CHUNK, chunk.data(), size);
-}
-
-static const clap_plugin_state_t s_state = {
-    .save = state_save,
-    .load = state_load,
-};
-
-// --- GUI extension (floating window) ---
-
-static bool gui_is_api_supported(const clap_plugin_t *plugin,
-                                   const char *api, bool is_floating) {
-    auto *kp = get(plugin);
-    if (!kp->has_editor) return false;
-#ifdef __APPLE__
-    // macOS: floating only (no cross-process NSView embedding)
-    if (!is_floating) return false;
-    return strcmp(api, CLAP_WINDOW_API_COCOA) == 0;
-#elif defined(_WIN32)
-    // Windows: both embedded (SetParent) and floating
-    return strcmp(api, CLAP_WINDOW_API_WIN32) == 0;
-#else
-    // Linux: both embedded (XReparentWindow) and floating
-    return strcmp(api, CLAP_WINDOW_API_X11) == 0;
-#endif
-}
-
-static bool gui_get_preferred_api(const clap_plugin_t * /*plugin*/,
-                                    const char **api, bool *is_floating) {
-#ifdef __APPLE__
-    *api = CLAP_WINDOW_API_COCOA;
-    *is_floating = true; // macOS: floating only
-#elif defined(_WIN32)
-    *api = CLAP_WINDOW_API_WIN32;
-    *is_floating = false; // Windows: prefer embedded
-#else
-    *api = CLAP_WINDOW_API_X11;
-    *is_floating = false; // Linux: prefer embedded
-#endif
-    return true;
-}
-
-static bool gui_create(const clap_plugin_t *plugin,
-                         const char * /*api*/, bool is_floating) {
-    auto *kp = get(plugin);
-    if (!kp->has_editor || kp->crashed) return false;
-#ifdef __APPLE__
-    if (!is_floating) return false; // macOS: floating only
-#else
-    (void)is_floating; // Windows/Linux: both modes supported
-#endif
-    kp->gui_is_floating = is_floating;
-    return true;
-}
-
-static void gui_destroy(const clap_plugin_t *plugin) {
-    auto *kp = get(plugin);
-    if (kp->editor_open && !kp->crashed) {
-        send_and_wait(kp, IPC_OP_EDITOR_CLOSE);
-        kp->editor_open = false;
-    }
-}
-
-static bool gui_set_scale(const clap_plugin_t * /*plugin*/, double /*scale*/) {
-    return false; // VST2 doesn't support DPI scaling
-}
-
-static bool gui_get_size(const clap_plugin_t *plugin,
-                           uint32_t *width, uint32_t *height) {
-    auto *kp = get(plugin);
-    if (kp->editor_width > 0 && kp->editor_height > 0) {
-        *width = static_cast<uint32_t>(kp->editor_width);
-        *height = static_cast<uint32_t>(kp->editor_height);
-        return true;
-    }
-    return false;
-}
-
-static bool gui_can_resize(const clap_plugin_t * /*plugin*/) {
-    return false; // VST2 editors are fixed size
-}
-
-static bool gui_get_resize_hints(const clap_plugin_t * /*plugin*/,
-                                   clap_gui_resize_hints_t * /*hints*/) {
-    return false;
-}
-
-static bool gui_adjust_size(const clap_plugin_t * /*plugin*/,
-                              uint32_t * /*width*/, uint32_t * /*height*/) {
-    return false;
-}
-
-static bool gui_set_size(const clap_plugin_t * /*plugin*/,
-                           uint32_t /*width*/, uint32_t /*height*/) {
-    return false;
-}
-
-static bool gui_set_parent(const clap_plugin_t *plugin,
-                             const clap_window_t *window) {
-    auto *kp = get(plugin);
-    if (kp->crashed || !kp->has_editor || !kp->bridge || !window) return false;
-
-    // Send the native window handle to the bridge for embedding
-    uint64_t handle = 0;
-#ifdef _WIN32
-    handle = reinterpret_cast<uint64_t>(window->win32);
-#elif defined(__linux__)
-    handle = static_cast<uint64_t>(window->x11);
-#else
-    return false; // macOS doesn't support embedded mode
-#endif
-
-    if (!send_and_wait(kp, IPC_OP_EDITOR_SET_PARENT, &handle, sizeof(handle)))
-        return false;
-
-    kp->editor_open = true;
-    return true;
-}
-
-static bool gui_set_transient(const clap_plugin_t * /*plugin*/,
-                                const clap_window_t * /*window*/) {
-    // Could position the floating window relative to the host window.
-    // Not implemented yet.
-    return true;
-}
-
-static void gui_suggest_title(const clap_plugin_t * /*plugin*/,
-                                const char * /*title*/) {
-    // Could set the floating window title
-}
-
-static bool gui_show(const clap_plugin_t *plugin) {
-    auto *kp = get(plugin);
-    if (kp->crashed || !kp->has_editor) return false;
-    // For floating mode, send EDITOR_OPEN to create the floating window.
-    // For embedded mode, the editor was already opened via set_parent.
-    if (kp->gui_is_floating && !kp->editor_open) {
-        if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN)) return false;
-        kp->editor_open = true;
-    }
-    return true;
-}
-
-static bool gui_hide(const clap_plugin_t *plugin) {
-    auto *kp = get(plugin);
-    if (kp->editor_open && !kp->crashed) {
-        send_and_wait(kp, IPC_OP_EDITOR_CLOSE);
-        kp->editor_open = false;
-    }
-    return true;
-}
-
-static const clap_plugin_gui_t s_gui = {
-    .is_api_supported = gui_is_api_supported,
-    .get_preferred_api = gui_get_preferred_api,
-    .create = gui_create,
-    .destroy = gui_destroy,
-    .set_scale = gui_set_scale,
-    .get_size = gui_get_size,
-    .can_resize = gui_can_resize,
-    .get_resize_hints = gui_get_resize_hints,
-    .adjust_size = gui_adjust_size,
-    .set_size = gui_set_size,
-    .set_parent = gui_set_parent,
-    .set_transient = gui_set_transient,
-    .suggest_title = gui_suggest_title,
-    .show = gui_show,
-    .hide = gui_hide,
-};
+// Extensions defined in separate files
+extern const clap_plugin_params_t keepsake_params_ext;
+extern const clap_plugin_state_t keepsake_state_ext;
+extern const clap_plugin_gui_t keepsake_gui_ext;
 
 // --- get_extension ---
 
 static const void *plugin_get_extension(const clap_plugin_t *plugin,
                                           const char *id) {
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) return &s_audio_ports;
-    if (strcmp(id, CLAP_EXT_PARAMS) == 0) return &s_params;
-    if (strcmp(id, CLAP_EXT_STATE) == 0) return &s_state;
+    if (strcmp(id, CLAP_EXT_PARAMS) == 0) return &keepsake_params_ext;
+    if (strcmp(id, CLAP_EXT_STATE) == 0) return &keepsake_state_ext;
     if (strcmp(id, CLAP_EXT_GUI) == 0 && get(plugin)->has_editor)
-        return &s_gui;
+        return &keepsake_gui_ext;
     return nullptr;
 }
 
-static void plugin_on_main_thread(const clap_plugin_t * /*plugin*/) {
-    // No-op
-}
+// (params, state, and GUI extensions moved to plugin_params.cpp, plugin_state.cpp, plugin_gui.cpp)
+
+static void plugin_on_main_thread(const clap_plugin_t *) {}
 
 // --- Factory entry point ---
 
