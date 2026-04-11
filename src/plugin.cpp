@@ -140,6 +140,7 @@ static bool plugin_init(const clap_plugin_t *plugin) {
 }
 
 static void plugin_destroy(const clap_plugin_t *plugin) {
+    fprintf(stderr, "keepsake: destroy() called\n");
     auto *kp = get(plugin);
     if (kp->bridge_ok && !kp->crashed && kp->bridge) {
         // Shutdown this instance (not the whole process)
@@ -155,6 +156,7 @@ static void plugin_destroy(const clap_plugin_t *plugin) {
 
 // Actually perform the activation (called when bridge is ready)
 static bool do_activate(KeepsakePlugin *kp) {
+    fprintf(stderr, "keepsake: do_activate() starting\n");
     kp->max_frames = kp->deferred_max_frames;
 
     char instance_id[32];
@@ -166,6 +168,7 @@ static bool do_activate(KeepsakePlugin *kp) {
 
     if (!platform_shm_create(kp->shm, shm_name, shm_size)) return false;
     shm_init_sync(shm_control(kp->shm.ptr));
+    fprintf(stderr, "keepsake: do_activate() shm created, sending SET_SHM\n");
 
     uint32_t name_len = static_cast<uint32_t>(shm_name.size());
     uint32_t shm_size32 = static_cast<uint32_t>(shm_size);
@@ -181,6 +184,7 @@ static bool do_activate(KeepsakePlugin *kp) {
         return false;
     }
 
+    fprintf(stderr, "keepsake: do_activate() SET_SHM OK, sending ACTIVATE\n");
     IpcActivatePayload ap = { kp->deferred_sample_rate, kp->max_frames };
     if (!send_and_wait(kp, IPC_OP_ACTIVATE, &ap, sizeof(ap))) {
         platform_shm_close(kp->shm);
@@ -201,6 +205,8 @@ static bool plugin_activate(const clap_plugin_t *plugin,
     auto *kp = get(plugin);
     (void)min_frames;
 
+    fprintf(stderr, "keepsake: activate() called sr=%.0f frames=%u\n",
+            sample_rate, max_frames);
     kp->deferred_sample_rate = sample_rate;
     kp->deferred_max_frames = max_frames;
     kp->needs_activate = true;
@@ -222,6 +228,7 @@ static bool plugin_activate(const clap_plugin_t *plugin,
 }
 
 static void plugin_deactivate(const clap_plugin_t *plugin) {
+    fprintf(stderr, "keepsake: deactivate() called\n");
     auto *kp = get(plugin);
     if (kp->active && !kp->crashed) {
         send_and_wait(kp, IPC_OP_DEACTIVATE);
@@ -232,6 +239,7 @@ static void plugin_deactivate(const clap_plugin_t *plugin) {
 }
 
 static bool plugin_start_processing(const clap_plugin_t *plugin) {
+    fprintf(stderr, "keepsake: start_processing() called\n");
     auto *kp = get(plugin);
     if (kp->crashed) return false;
     // If bridge not ready yet, just set the flag — deferred activate
@@ -442,6 +450,7 @@ static const clap_plugin_latency_t s_latency = {
 
 static const void *plugin_get_extension(const clap_plugin_t *plugin,
                                           const char *id) {
+    fprintf(stderr, "keepsake: get_extension('%s')\n", id);
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) return &s_audio_ports;
     if (strcmp(id, CLAP_EXT_PARAMS) == 0) return &keepsake_params_ext;
     if (strcmp(id, CLAP_EXT_STATE) == 0) return &keepsake_state_ext;
