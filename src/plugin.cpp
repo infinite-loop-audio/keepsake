@@ -277,6 +277,7 @@ static clap_process_status plugin_process(const clap_plugin_t *plugin,
     ctrl->num_frames = frames;
     ctrl->midi_count = midi_idx;
     ctrl->param_count = param_idx;
+
     shm_store_release(&ctrl->state, SHM_STATE_PROCESS_REQUESTED);
 
     // Spin-wait for bridge to complete processing (no syscalls)
@@ -295,10 +296,13 @@ static clap_process_status plugin_process(const clap_plugin_t *plugin,
     }
 
     if (shm_load_acquire(&ctrl->state) != SHM_STATE_PROCESS_DONE) {
-        fprintf(stderr, "keepsake: bridge process timeout\n");
-        kp->crashed = true;
+        // Bridge didn't respond in time — output silence THIS buffer
+        // but don't mark as crashed. The bridge may be busy with a
+        // non-RT operation (e.g., opening the editor window).
+        // Reset state so the bridge doesn't process a stale request.
+        ctrl->state = SHM_STATE_IDLE;
         output_silence(process);
-        return CLAP_PROCESS_ERROR;
+        return CLAP_PROCESS_CONTINUE; // keep trying next buffer
     }
 
     // Reset state for next cycle

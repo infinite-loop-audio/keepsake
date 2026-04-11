@@ -257,7 +257,9 @@ int main(int /*argc*/, char * /*argv*/[]) {
             auto *inst = kv.second;
             if (!inst->shm.ptr || !inst->active) continue;
             auto *ctrl = shm_control(inst->shm.ptr);
-            if (shm_load_acquire(&ctrl->state) == SHM_STATE_PROCESS_REQUESTED) {
+            uint32_t st = shm_load_acquire(&ctrl->state);
+
+            if (st == SHM_STATE_PROCESS_REQUESTED) {
                 // Process audio via shared memory
                 uint32_t nframes = ctrl->num_frames;
                 if (nframes > inst->max_frames) nframes = inst->max_frames;
