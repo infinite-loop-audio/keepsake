@@ -61,7 +61,7 @@ public:
 private:
     std::unordered_map<std::string, BridgeProcess *> pool;
     std::vector<Override> overrides;
-    IsolationMode default_mode = IsolationMode::SHARED;
+    IsolationMode default_mode = IsolationMode::PER_INSTANCE;
     uint32_t instance_counter = 0;
 
     std::string make_key(const std::string &bridge_binary,

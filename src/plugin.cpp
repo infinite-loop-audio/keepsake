@@ -116,9 +116,9 @@ static bool plugin_init(const clap_plugin_t *plugin) {
     fprintf(stderr, "keepsake: cached %d parameter(s)\n", kp->num_params);
 
     // Check for editor support and query size
-    if (ok_data.size() >= sizeof(IpcPluginInfo)) {
+    if (ok_data.size() >= 4 + sizeof(IpcPluginInfo)) {
         IpcPluginInfo pi2;
-        memcpy(&pi2, ok_data.data(), sizeof(pi2));
+        memcpy(&pi2, ok_data.data() + 4, sizeof(pi2)); // +4 for instance_id
         kp->has_editor = (pi2.flags & 1) != 0; // effFlagsHasEditor = 1
     }
     if (kp->has_editor) {
