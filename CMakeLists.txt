@@ -220,6 +220,18 @@ if(APPLE OR UNIX)
     )
     target_link_libraries(bridge-test PRIVATE clap)
 
+    add_executable(keepsake-scan tools/keepsake-scan.cpp
+        src/vst2_loader.cpp src/config.cpp)
+    target_include_directories(keepsake-scan PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_BINARY_DIR}/_deps/vst3-include
+    )
+    target_link_libraries(keepsake-scan PRIVATE clap dl)
+    if(APPLE)
+        target_link_libraries(keepsake-scan PRIVATE "-framework CoreFoundation")
+    endif()
+
     # Test plugin — minimal VST2 for CI
     add_library(test-plugin MODULE tools/test-plugin.cpp)
     target_include_directories(test-plugin PRIVATE
