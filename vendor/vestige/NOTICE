@@ -1,0 +1,15 @@
+VeSTige — VST-compatibility header
+
+Copyright (c) 2006 Javier Serrano Polo <jasp00/at/users.sourceforge.net>
+
+Licensed under the GNU General Public License v2 or later.
+
+This header is a clean-room reverse-engineered implementation of the VST2
+binary ABI. It does not use, reference, or contain any code from the
+Steinberg VST2 SDK. It has been used by LMMS, Carla, Ardour, and other
+open-source audio projects for over 20 years.
+
+This copy is derived from the Carla project's vendored VeSTige header:
+https://github.com/falkTX/Carla
+
+The Keepsake project vendors this header under the same GPL v2+ terms.

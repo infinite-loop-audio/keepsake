@@ -21,16 +21,11 @@ contracts.
 
 ## Status
 
-No milestones yet. The first milestone should cover:
-
-1. Build system setup (CMake / CLAP SDK / VeSTige dependency)
-2. CLAP plugin factory stub — single hardcoded descriptor
-3. VeSTige loader proof-of-concept — load one VST2 `.dll`/`.so`/`.dylib`
-4. CLAP factory integration — expose discovered plugin as a descriptor
-5. Manual test: plugin appears in a CLAP host
-
-This is the proof-of-concept gate before crash isolation, scanning, and caching
-work begins.
+**g01 sequencing intent met.** All four milestones complete:
+- g01.001: CLAP factory + VeSTige loader
+- g01.002: Audio bridge + subprocess isolation
+- g01.003: Cross-platform + cross-architecture
+- g01.004: Scan cache + configuration
 
 ## Batch and Logging Rule
 
@@ -41,5 +36,5 @@ work begins.
 
 ## Next Task
 
-Create `g01/001-clap-factory-and-vst2-loader-poc.md` as the first roadmap
-milestone.
+Ship g01.005 (MIDI/params/state) — makes bridged plugins actually usable
+for music production.

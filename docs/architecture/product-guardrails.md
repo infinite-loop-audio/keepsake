@@ -26,6 +26,9 @@ Vision refs: docs/vision/001-keepsake-vision.md
 - The Steinberg VST2 SDK must never appear in this repository.
 - Only VeSTige (LGPL v2.1, clean-room ABI) is permitted as the VST2 ABI
   surface.
+- The VST3 SDK (GPLv3 or proprietary) may be used for VST3 hosting, but
+  the VST3 loader must run in a separate subprocess so the license boundary
+  is at the process/IPC edge. Resolve GPLv3 compatibility before VST3 ships.
 - CLAP remains the outer plugin format. Do not introduce a VST3 outer format —
   the VST3 SDK licence explicitly excludes VST2 hosting.
 - Do not use the VST Compatible logo or claim Steinberg certification.
@@ -39,7 +42,7 @@ Vision refs: docs/vision/001-keepsake-vision.md
 - Do not leave disconnected gesture work behind and imply the real path now
   exists.
 - If a seam is still scaffolded or unproven, name it explicitly as incomplete.
-- "Works" means: loads, initializes, and exposes a VST2 plugin through the CLAP
+- "Works" means: loads, initializes, and exposes a plugin through the CLAP
   factory with correct metadata. Not: compiles with no errors.
 
 ## Delivery Expectations

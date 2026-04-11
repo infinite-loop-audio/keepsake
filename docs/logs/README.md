@@ -14,8 +14,15 @@ Logs capture dated evidence and assessments.
 
 ## Recent Evidence
 
-No logs yet. First log should be written after the first roadmap milestone
-batch completes.
+- [`2026-04/11-091500-handoff-keepsake-thread-002.md`](2026-04/11-091500-handoff-keepsake-thread-002.md) — thread-002 handoff: 7 milestones complete, context for next thread
+- [`2026-04/11-093000-g01-009-32-bit-bridge.md`](2026-04/11-093000-g01-009-32-bit-bridge.md) — g01.009 complete: packed IPC structs, PE/ELF arch detection, 32-bit bridge routing
+- [`2026-04/11-090000-g01-008-multi-format-loaders.md`](2026-04/11-090000-g01-008-multi-format-loaders.md) — g01.008 complete: bridge loader abstraction, AU v2 scanning + loading, multi-format factory
+- [`2026-04/10-230000-g01-006-gui-forwarding.md`](2026-04/10-230000-g01-006-gui-forwarding.md) — g01.006 complete: floating window GUI, macOS Cocoa editor hosting, CLAP GUI extension
+- [`2026-04/10-225000-g01-005-midi-params-state.md`](2026-04/10-225000-g01-005-midi-params-state.md) — g01.005 complete: note events, parameter automation, state save/restore
+- [`2026-04/10-223000-g01-004-scan-cache-config.md`](2026-04/10-223000-g01-004-scan-cache-config.md) — g01.004 complete: scan caching, config.toml, rescan sentinel
+- [`2026-04/10-220000-g01-003-cross-platform-cross-arch.md`](2026-04/10-220000-g01-003-cross-platform-cross-arch.md) — g01.003 complete: platform abstraction, x86_64 bridge under Rosetta, Windows/Linux backends
+- [`2026-04/10-214500-g01-002-audio-bridge-subprocess.md`](2026-04/10-214500-g01-002-audio-bridge-subprocess.md) — g01.002 complete: subprocess bridge, IPC protocol, shared memory audio, CLAP plugin lifecycle
+- [`2026-04/10-210000-g01-001-clap-factory-vst2-loader.md`](2026-04/10-210000-g01-001-clap-factory-vst2-loader.md) — g01.001 complete: build system, CLAP factory, VeSTige loader, architecture detection
 
 ## Templates
 
@@ -24,5 +31,5 @@ batch completes.
 
 ## Next Task
 
-Create `2026-04/` and write the first batch log once the initial roadmap
-milestone batch is complete.
+Continue from the thread-002 handoff: g01.009 (32-bit bridge), VST3 SDK
+integration, or CI setup.

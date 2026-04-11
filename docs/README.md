@@ -35,6 +35,6 @@ If `specs/` exists, treat it as provisional planning that should promote into
 
 ## Current Posture
 
-Early setup — Northstar baseline + stricter spine just installed. No active
-roadmap milestones yet. The next work is to author the first roadmap milestone
-for the initial build system and CLAP/VeSTige proof of concept.
+G01 complete. The full pipeline works: config → scan → cache → factory → bridge
+→ audio. Both arm64 and x86_64 VST2 plugins work on Apple Silicon. Platform
+abstraction covers macOS, Windows, and Linux. Next: assess g02.

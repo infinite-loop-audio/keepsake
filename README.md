@@ -1,14 +1,16 @@
 # Keepsake
 
-**A CLAP plugin that gives your VST2 legacy plugins a home in modern hosts.**
+**A CLAP plugin that gives your legacy plugins a home in modern hosts.**
 
-Keepsake bridges the gap between VST2 plugins — the format Steinberg discontinued in 2018 — and [CLAP](https://cleveraudio.org/), the open plugin standard supported by an increasing number of modern hosts. Install it once, and your old plugins appear in your plugin browser alongside everything else, with their correct names, vendors, and categories. No special host support required.
+Keepsake bridges the gap between legacy plugin formats — VST2, VST3, AU v2, including 32-bit binaries — and [CLAP](https://cleveraudio.org/), the open plugin standard supported by an increasing number of modern hosts. Install it once, and your old plugins appear in your plugin browser alongside everything else, with their correct names, vendors, and categories. Each plugin runs in its own isolated process for crash safety and 32-to-64-bit bridging. No special host support required.
 
 ---
 
 ## The problem it solves
 
-VST2 is dead as a living standard. Steinberg discontinued the SDK in 2018, closed all new license agreements, and is actively phasing it out of their own products. But the plugins aren't dead. Synths, compressors, and effects built in VST2 — some of them irreplaceable, some of them made by developers who will never port them — still work, still sound good, and still deserve to run.
+Legacy plugins are getting left behind. VST2 is dead as a living standard — Steinberg discontinued the SDK in 2018 and closed all new license agreements. 32-bit plugins are orphaned as hosts and operating systems drop 32-bit support. Crash-prone plugins can take down an entire session.
+
+But the plugins aren't dead. Synths, compressors, and effects — some of them irreplaceable, some of them made by developers who will never port them — still work, still sound good, and still deserve to run.
 
 Keepsake is for those plugins.
 
@@ -16,21 +18,23 @@ Keepsake is for those plugins.
 
 ## How it works
 
-Keepsake is a standard `.clap` plugin file. When your host scans it, it doesn't just appear as a single plugin — it exposes every VST2 plugin it has found as its own distinct CLAP plugin entry, complete with the original plugin's name, vendor, version, and feature tags.
+Keepsake is a standard `.clap` plugin file. When your host scans it, it doesn't just appear as a single plugin — it exposes every legacy plugin it has found (VST2, VST3, AU v2) as its own distinct CLAP plugin entry, complete with the original plugin's name, vendor, version, and feature tags.
 
-From your host's perspective, your VST2 plugins are CLAP plugins. Loading one is seamless. There is no special workflow.
+From your host's perspective, your legacy plugins are CLAP plugins. Loading one is seamless. There is no special workflow.
 
-Each VST2 plugin runs in an isolated subprocess, so a crash in a legacy plugin produces silence and an error state rather than taking down your session.
+Each plugin runs in an isolated subprocess, so a crash in a legacy plugin produces silence and an error state rather than taking down your session. 32-bit plugins run in a 32-bit helper process, bridged to your 64-bit host automatically.
 
 ---
 
 ## Requirements
 
 - A CLAP-capable host (version 1.0 or later)
-- VST2 plugins you want to load
+- Legacy plugins you want to bridge (VST2, VST3, or AU v2)
 - macOS 11+, Windows 10+, or Linux (x86_64)
 
-> **Apple Silicon note:** x86_64 VST2 plugins require Rosetta 2. Native arm64 VST2 plugins will run natively. This is a VST2 limitation, not a Keepsake one.
+> **Apple Silicon note:** x86_64 plugins require Rosetta 2. Native arm64 plugins run natively.
+>
+> **32-bit note:** 32-bit plugins are supported on Windows (via WoW64) and Linux (via multilib). macOS 10.15+ dropped 32-bit support entirely — this is a platform limitation.
 
 ---
 
@@ -52,9 +56,9 @@ Rescan plugins in your host. Your VST2 plugins will appear.
 
 ---
 
-## Configuring VST2 scan paths
+## Configuring scan paths
 
-On first load, Keepsake scans the standard VST2 locations for your platform. You can configure additional scan paths — and trigger a manual rescan — via Keepsake's settings panel or a configuration file at:
+On first load, Keepsake scans the standard plugin locations for each format on your platform. You can configure additional scan paths — and trigger a manual rescan — via Keepsake's settings panel or a configuration file at:
 
 | Platform | Path |
 |---|---|
@@ -78,13 +82,13 @@ Keepsake was created by [Infinite Loop Audio](https://github.com/infinite-loop-a
 
 **Keepsake is a separate, standalone open-source project.** Signal does not ship VST2 support and does not include any VST2 code. Keepsake is not bundled with Signal or distributed as part of any Infinite Loop Audio commercial product. It exists as a community tool for users who need it, and is published here separately on that basis.
 
-If you are a developer of another CLAP host and want to offer tighter Keepsake integration (rescan triggers, legacy badges, VST2 path configuration), the stable plugin ID namespace is `keepsake.vst2.*`. See [`docs/project-brief.md`](docs/project-brief.md) for the integration tier details.
+If you are a developer of another CLAP host and want to offer tighter Keepsake integration (rescan triggers, legacy badges, scan path configuration), the stable plugin ID namespace is `keepsake.<format>.*` (e.g., `keepsake.vst2.*`, `keepsake.vst3.*`, `keepsake.au.*`). See [`docs/project-brief.md`](docs/project-brief.md) for the integration tier details.
 
 ---
 
 ## Building from source
 
-> Build instructions will be added as the project takes shape. The project is C/C++, depends on [VeSTige](https://github.com/LMMS/lmms/blob/master/plugins/vst_base/vestige/aeffect.h) and the [CLAP SDK](https://github.com/free-audio/clap), and targets macOS, Windows, and Linux.
+> Build instructions will be added as the project takes shape. The project is C/C++, depends on [VeSTige](https://github.com/LMMS/lmms/blob/master/plugins/vst_base/vestige/aeffect.h), the [CLAP SDK](https://github.com/free-audio/clap), and optionally the [VST3 SDK](https://github.com/steinbergmedia/vst3sdk), and targets macOS, Windows, and Linux.
 
 ---
 
@@ -103,7 +107,11 @@ Please open an issue before starting significant work so effort isn't duplicated
 
 ## Legal
 
-Keepsake uses [VeSTige](https://github.com/LMMS/lmms/blob/master/plugins/vst_base/vestige/aeffect.h), a clean-room reverse-engineered implementation of the VST2 ABI originally written by Javier Serrano Polo and used by LMMS for over 20 years. The Steinberg VST2 SDK is not used, not referenced, and not present in this repository.
+**VST2:** Keepsake uses [VeSTige](https://github.com/LMMS/lmms/blob/master/plugins/vst_base/vestige/aeffect.h), a clean-room reverse-engineered implementation of the VST2 ABI originally written by Javier Serrano Polo and used by LMMS for over 20 years. The Steinberg VST2 SDK is not used, not referenced, and not present in this repository.
+
+**VST3:** Keepsake hosts VST3 plugins using the [VST3 SDK](https://github.com/steinbergmedia/vst3sdk) (GPLv3 or proprietary license). The VST3 loader runs in a separate subprocess, placing the license boundary at the process/IPC edge.
+
+**AU v2:** Keepsake hosts Audio Unit v2 plugins on macOS using Apple's AudioToolbox system framework.
 
 Keepsake is not affiliated with, endorsed by, or certified by Steinberg Media Technologies GmbH. It does not carry the VST Compatible mark.
 

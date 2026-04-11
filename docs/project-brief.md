@@ -1,6 +1,6 @@
 # Keepsake — Project Brief
 
-> A standalone open-source CLAP plugin that hosts VST2 legacy plugins, giving them a clean, modern entry point into CLAP-capable hosts.
+> A standalone open-source CLAP plugin that bridges legacy plugins — VST2, VST3, and AU v2, including 32-bit binaries — into CLAP-capable hosts.
 
 Published by [Infinite Loop Audio](https://github.com/infinite-loop-audio) under the GNU Lesser General Public License v2.1.
 
@@ -8,9 +8,11 @@ Published by [Infinite Loop Audio](https://github.com/infinite-loop-audio) under
 
 ## What Keepsake is
 
-Keepsake is a CLAP plugin that internally loads and runs VST2 plugins using the VeSTige clean-room header implementation. It exposes each discovered VST2 plugin as a distinct CLAP plugin entry via the CLAP plugin factory, so that any CLAP-capable host sees them as ordinary CLAP plugins — with their correct names, vendors, categories, and feature tags.
+Keepsake is a CLAP plugin that internally loads and runs legacy plugins using format-specific loaders: VeSTige (clean-room) for VST2, the VST3 SDK for VST3, and Apple's AudioToolbox for AU v2. It exposes each discovered plugin as a distinct CLAP plugin entry via the CLAP plugin factory, so that any CLAP-capable host sees them as ordinary CLAP plugins — with their correct names, vendors, categories, and feature tags.
 
-The user installs Keepsake once. Their CLAP host scans it, and their VST2 plugins appear alongside everything else in the plugin browser.
+Each plugin runs in an isolated subprocess, providing crash isolation and bitness bridging — 32-bit plugins run in a 32-bit helper process while the host stays 64-bit.
+
+The user installs Keepsake once. Their CLAP host scans it, and their legacy plugins appear alongside everything else in the plugin browser.
 
 ---
 
@@ -18,13 +20,17 @@ The user installs Keepsake once. Their CLAP host scans it, and their VST2 plugin
 
 Signal (the audio engine behind Loophole) already hosts CLAP, VST3, AU, and LV2 natively via clean-room Rust implementations. VST2 cannot be added to Signal directly — Steinberg discontinued the VST2 SDK in October 2018, closed new license agreements, and has explicitly stated that new VST2 host products are not permitted without a pre-2018 signed license. Signal does not hold one.
 
-The user need is real. Many useful legacy plugins — including tools built by the Signal/Loophole developers themselves — exist only in VST2 format and will never be ported to VST3 or CLAP.
+The user need is real and goes beyond VST2:
+
+- **VST2 plugins** — many useful legacy plugins exist only in VST2 format and will never be ported.
+- **32-bit plugins** — all formats, increasingly orphaned as hosts and OSes drop 32-bit support.
+- **Crash-prone plugins** — any format, where process isolation prevents a bad plugin from taking down the host session.
 
 Keepsake solves this cleanly:
 
-- **Signal ships zero VST2 code.** It hosts CLAP. Keepsake is a CLAP plugin. Signal never touches VST2.
+- **Signal ships zero legacy bridge code.** It hosts CLAP. Keepsake is a CLAP plugin. Signal's relationship with each format stays at its own native hosting boundary.
 - **Keepsake is a standalone open-source project.** It is not bundled with Signal or distributed by Infinite Loop Audio as part of any commercial product.
-- **Users self-install.** The legal exposure stays with the open-source project and its VeSTige lineage, not with Signal or Loophole.
+- **Users self-install.** The legal exposure stays with the open-source project and its format-specific lineage, not with Signal or Loophole.
 
 ---
 
@@ -69,25 +75,36 @@ The VST3 SDK licence explicitly states: *"This Agreement neither applies to the 
 
 ### CLAP plugin factory model
 
-A single `.clap` binary exposes a plugin factory that returns one descriptor per discovered VST2 plugin. Each descriptor carries the VST2 plugin's own name, vendor, version, and feature tags (mapped from VST2 category flags to CLAP feature strings).
+A single `.clap` binary exposes a plugin factory that returns one descriptor per discovered legacy plugin. Each descriptor carries the plugin's own name, vendor, version, and feature tags (mapped from the source format's metadata to CLAP feature strings).
 
-From the host's perspective, every VST2 plugin appears as a distinct, named CLAP plugin. No special host support is required beyond standard CLAP scanning.
+From the host's perspective, every bridged plugin appears as a distinct, named CLAP plugin. No special host support is required beyond standard CLAP scanning.
 
 ```
 keepsake.clap
   └─ factory
        ├─ "Vintage Synth X"     (id: keepsake.vst2.1234ABCD, vendor: Acme, features: [instrument])
-       ├─ "Classic Compressor"  (id: keepsake.vst2.5678EFGH, vendor: Acme, features: [audio-effect])
-       └─ "Old Reverb"          (id: keepsake.vst2.9012IJKL, vendor: Whoever, features: [audio-effect, reverb])
+       ├─ "Classic Compressor"  (id: keepsake.vst3.AABB...., vendor: Acme, features: [audio-effect])
+       └─ "Old Reverb"          (id: keepsake.au.RvbXAcme,   vendor: Whoever, features: [audio-effect, reverb])
 ```
 
 ### Out-of-process hosting
 
-VST2 plugins are historically crash-prone. Keepsake loads each VST2 plugin in a subprocess, isolating crashes from the host. A crashed plugin produces silence and an error state rather than taking down the session.
+Keepsake loads each plugin in an isolated subprocess. This provides:
+
+- **Crash isolation:** a crashed plugin produces silence and an error state rather than taking down the session.
+- **Bitness bridging:** 32-bit plugins run in a 32-bit helper process (`keepsake-bridge-32`) while the host stays 64-bit. 64-bit plugins use `keepsake-bridge-64`.
+
+### Format loaders
+
+| Format | ABI surface | Licence | Platforms | Notes |
+|---|---|---|---|---|
+| VST2 | VeSTige (clean-room) | LGPL v2.1 | macOS, Windows, Linux | No Steinberg SDK |
+| VST3 | VST3 SDK | GPLv3 or proprietary | macOS, Windows, Linux | Runs in subprocess; license at process boundary |
+| AU v2 | AudioToolbox | macOS system framework | macOS only | Component Manager AU; AUv3 deferred |
 
 ### Scan and cache
 
-Keepsake scans configured VST2 paths at startup and caches results so the CLAP factory can respond immediately without blocking the host's scan cycle. A rescan can be triggered via a Keepsake configuration utility or preferences entry.
+Keepsake scans configured plugin paths per format at startup and caches results so the CLAP factory can respond immediately without blocking the host's scan cycle. A rescan can be triggered via a Keepsake configuration utility or preferences entry.
 
 ---
 
@@ -108,7 +125,7 @@ Optional deeper integration (to be implemented separately in Signal) can include
 | 3 | Plugin browser grouping/filtering by legacy format | Medium — browser data model |
 | 3 | Crash isolation reporting if bridge process goes down | Medium — CLAP error state surfacing |
 
-Keepsake's CLAP plugin ID namespace (`keepsake.vst2.*`) is stable and intended for Signal to use as a detection key.
+Keepsake's CLAP plugin ID namespace (`keepsake.<format>.*`) is stable and intended for Signal to use as a detection key. The `keepsake.*` prefix identifies all bridged plugins; the format segment (`vst2`, `vst3`, `au`) distinguishes the source format.
 
 ---
 
@@ -117,9 +134,11 @@ Keepsake's CLAP plugin ID namespace (`keepsake.vst2.*`) is stable and intended f
 ### Language and dependencies
 
 - **C or C++** — VeSTige is a C header; the project does not need to be in Rust
-- **VeSTige** — LGPL v2.1, drop-in header, no SDK required
+- **VeSTige** — LGPL v2.1, drop-in header for VST2 ABI, no Steinberg SDK required
+- **VST3 SDK** — GPLv3 or proprietary, for VST3 hosting; runs in subprocess to isolate license
+- **AudioToolbox** — macOS system framework, for AU v2 hosting
 - **CLAP SDK** — MIT licensed, no complications
-- **No Steinberg SDK** — not used, not referenced, not present in the repository
+- **No Steinberg VST2 SDK** — not used, not referenced, not present in the repository
 
 ### Prior art to study
 
@@ -141,7 +160,7 @@ VST2 on Apple Silicon macOS requires Rosetta 2 for x86_64 VST2 binaries, or nati
 
 - It is not a commercial product and is not sold
 - It is not affiliated with or endorsed by Steinberg Media Technologies
-- It is not a replacement for proper VST3 or CLAP ports of legacy plugins
+- It is not a replacement for proper CLAP ports of legacy plugins
 - It does not bundle the Steinberg VST2 SDK or any Steinberg intellectual property
 - It is not part of the Signal or Loophole commercial distribution
 

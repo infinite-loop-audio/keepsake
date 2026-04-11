@@ -1,0 +1,198 @@
+#pragma once
+//
+// Keepsake IPC — protocol constants, pipe I/O, and shared memory helpers.
+// Shared between the main plugin and the bridge subprocess.
+// Contract ref: docs/contracts/004-ipc-bridge-protocol.md
+//
+
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <vector>
+
+#include "platform.h"
+
+// --- Protocol opcodes ---
+
+// Host → Bridge
+static constexpr uint32_t IPC_OP_INIT       = 0x01;
+static constexpr uint32_t IPC_OP_SET_SHM    = 0x02;
+static constexpr uint32_t IPC_OP_ACTIVATE   = 0x03;
+static constexpr uint32_t IPC_OP_PROCESS    = 0x04;
+static constexpr uint32_t IPC_OP_SET_PARAM  = 0x05;
+static constexpr uint32_t IPC_OP_STOP_PROC  = 0x06;
+static constexpr uint32_t IPC_OP_START_PROC = 0x07;
+static constexpr uint32_t IPC_OP_DEACTIVATE = 0x08;
+static constexpr uint32_t IPC_OP_SHUTDOWN   = 0x09;
+static constexpr uint32_t IPC_OP_MIDI_EVENT    = 0x0A;
+static constexpr uint32_t IPC_OP_GET_PARAM_INFO = 0x0B; // payload: uint32_t index
+static constexpr uint32_t IPC_OP_GET_CHUNK      = 0x0C;  // no payload
+static constexpr uint32_t IPC_OP_SET_CHUNK      = 0x0D;  // payload: chunk bytes
+static constexpr uint32_t IPC_OP_EDITOR_OPEN    = 0x10;  // no payload
+static constexpr uint32_t IPC_OP_EDITOR_CLOSE   = 0x11;  // no payload
+static constexpr uint32_t IPC_OP_EDITOR_GET_RECT = 0x12; // no payload
+
+// Bridge → Host
+static constexpr uint32_t IPC_OP_OK           = 0x81;
+static constexpr uint32_t IPC_OP_ERROR        = 0x82;
+static constexpr uint32_t IPC_OP_PROCESS_DONE = 0x84;
+
+// --- Message header ---
+// All IPC structs are packed to ensure identical layout across 32-bit
+// and 64-bit processes communicating over the bridge.
+
+#pragma pack(push, 1)
+
+struct IpcHeader {
+    uint32_t opcode;
+    uint32_t payload_size;
+};
+
+// --- Payload structures ---
+
+struct IpcActivatePayload {
+    double sample_rate;
+    uint32_t max_frames;
+};
+
+struct IpcProcessPayload {
+    uint32_t num_frames;
+};
+
+struct IpcSetParamPayload {
+    uint32_t index;
+    float value;
+};
+
+struct IpcMidiEventPayload {
+    int32_t delta_frames;
+    uint8_t data[4];
+};
+
+// Plugin format identifier — sent with INIT
+enum PluginFormat : uint32_t {
+    FORMAT_VST2 = 0,
+    FORMAT_VST3 = 1,
+    FORMAT_AU   = 2,
+};
+
+// Extended INIT payload: [uint32_t format][path bytes...]
+// (format prepended before path in the payload)
+
+// Sent as OK payload after successful INIT.
+// Fixed-size fields followed by null-terminated strings.
+struct IpcPluginInfo {
+    int32_t unique_id;
+    int32_t num_inputs;
+    int32_t num_outputs;
+    int32_t num_params;
+    int32_t flags;
+    int32_t category;
+    int32_t vendor_version;
+    // Followed by: name\0vendor\0product\0
+};
+
+// --- Pipe I/O helpers ---
+// These use PlatformPipe from platform.h for cross-platform support.
+
+// Write a message: [opcode][size][payload]
+static inline bool ipc_write_msg(PlatformPipe fd, uint32_t opcode,
+                                  const void *payload = nullptr,
+                                  uint32_t size = 0) {
+    IpcHeader hdr = { opcode, size };
+    if (!platform_write(fd, &hdr, sizeof(hdr))) return false;
+    if (size > 0 && payload) {
+        if (!platform_write(fd, payload, size)) return false;
+    }
+    return true;
+}
+
+// Read a message. Returns false on EOF or error.
+// timeout_ms: -1 = block, 0 = non-blocking, >0 = timeout
+static inline bool ipc_read_msg(PlatformPipe fd, uint32_t &opcode,
+                                 std::vector<uint8_t> &payload,
+                                 int timeout_ms = -1) {
+    if (timeout_ms >= 0) {
+        if (!platform_read_ready(fd, timeout_ms)) return false;
+    }
+    IpcHeader hdr;
+    if (!platform_read(fd, &hdr, sizeof(hdr))) return false;
+    opcode = hdr.opcode;
+    payload.resize(hdr.payload_size);
+    if (hdr.payload_size > 0) {
+        if (!platform_read(fd, payload.data(), hdr.payload_size)) return false;
+    }
+    return true;
+}
+
+// Convenience writers
+static inline bool ipc_write_ok(PlatformPipe fd,
+                                 const void *data = nullptr,
+                                 uint32_t size = 0) {
+    return ipc_write_msg(fd, IPC_OP_OK, data, size);
+}
+
+static inline bool ipc_write_error(PlatformPipe fd, const char *msg) {
+    return ipc_write_msg(fd, IPC_OP_ERROR, msg,
+                          static_cast<uint32_t>(strlen(msg)));
+}
+
+static inline bool ipc_write_process_done(PlatformPipe fd) {
+    return ipc_write_msg(fd, IPC_OP_PROCESS_DONE);
+}
+
+// Sent as OK payload for GET_PARAM_INFO
+struct IpcParamInfoResponse {
+    uint32_t index;
+    float current_value;
+    char name[64];
+    char label[16]; // unit label (dB, Hz, etc.)
+};
+
+// Sent as OK payload for EDITOR_GET_RECT
+struct IpcEditorRect {
+    int32_t width;
+    int32_t height;
+};
+
+#pragma pack(pop)
+
+// Static assertions: verify IPC struct sizes are consistent across
+// 32-bit and 64-bit builds (no pointer-sized fields, no padding surprises).
+static_assert(sizeof(IpcHeader) == 8, "IpcHeader size mismatch");
+static_assert(sizeof(IpcActivatePayload) == 12, "IpcActivatePayload size mismatch");
+static_assert(sizeof(IpcProcessPayload) == 4, "IpcProcessPayload size mismatch");
+static_assert(sizeof(IpcSetParamPayload) == 8, "IpcSetParamPayload size mismatch");
+static_assert(sizeof(IpcMidiEventPayload) == 8, "IpcMidiEventPayload size mismatch");
+static_assert(sizeof(IpcPluginInfo) == 28, "IpcPluginInfo size mismatch");
+static_assert(sizeof(IpcParamInfoResponse) == 88, "IpcParamInfoResponse size mismatch");
+static_assert(sizeof(IpcEditorRect) == 8, "IpcEditorRect size mismatch");
+
+// --- Instance-aware message helpers ---
+// For multi-instance bridges, the instance_id is the first 4 bytes of
+// every payload. These helpers wrap the base functions.
+
+static inline bool ipc_write_instance_msg(PlatformPipe fd, uint32_t opcode,
+                                            uint32_t instance_id,
+                                            const void *payload = nullptr,
+                                            uint32_t size = 0) {
+    uint32_t total = 4 + size;
+    std::vector<uint8_t> buf(total);
+    memcpy(buf.data(), &instance_id, 4);
+    if (size > 0 && payload)
+        memcpy(buf.data() + 4, payload, size);
+    return ipc_write_msg(fd, opcode, buf.data(), total);
+}
+
+// Read instance ID from the front of a payload. Modifies payload in-place
+// to strip the ID.
+static inline uint32_t ipc_extract_instance_id(std::vector<uint8_t> &payload) {
+    if (payload.size() < 4) return 0;
+    uint32_t id;
+    memcpy(&id, payload.data(), 4);
+    payload.erase(payload.begin(), payload.begin() + 4);
+    return id;
+}
+
+// Shared memory: use PlatformShm and platform_shm_* from platform.h
