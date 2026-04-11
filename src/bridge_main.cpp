@@ -250,21 +250,26 @@ int main(int /*argc*/, char * /*argv*/[]) {
     fprintf(stderr, "bridge: started (pid=%d)\n", getpid());
 
     while (true) {
-        int read_timeout = gui_is_open() ? 16 : -1;
+        // When editor is open, use a short timeout so we can service GUI.
+        // But always drain ALL pending pipe messages before doing GUI work
+        // — audio processing must never be starved by GUI events.
+        int read_timeout = gui_is_open() ? 1 : -1; // 1ms, not 16ms
 
         uint32_t opcode;
         std::vector<uint8_t> payload;
 
         if (!ipc_read_msg(g_pipe_in, opcode, payload, read_timeout)) {
             if (gui_is_open()) {
-                gui_idle(nullptr) /* TODO: pass active editor's loader */;
+                // No pending messages — safe to do GUI work now
+                gui_idle(nullptr);
                 continue;
             }
             fprintf(stderr, "bridge: pipe closed, exiting\n");
             break;
         }
 
-        if (gui_is_open()) gui_idle(nullptr) /* TODO: pass active editor's loader */;
+        // Don't gui_idle between messages — process all pending pipe
+        // messages first, gui_idle only happens on timeout (above)
 
         // Extract instance ID from payload (first 4 bytes)
         uint32_t instance_id = ipc_extract_instance_id(payload);

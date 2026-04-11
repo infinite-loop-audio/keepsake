@@ -86,7 +86,8 @@ void keepsake_params_flush(const clap_plugin_t *plugin,
                             const clap_input_events_t *in,
                             const clap_output_events_t *) {
     auto *kp = get(plugin);
-    if (!in || kp->crashed) return;
+    if (!in || kp->crashed || !kp->bridge) return;
+    std::lock_guard<std::mutex> lock(kp->ipc_mutex);
     uint32_t count = in->size(in);
     for (uint32_t i = 0; i < count; i++) {
         auto *hdr = in->get(in, i);
