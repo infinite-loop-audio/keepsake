@@ -404,38 +404,23 @@ int main(int /*argc*/, char * /*argv*/[]) {
         case IPC_OP_SET_CHUNK:  handle_set_chunk(inst, payload); break;
         case IPC_OP_EDITOR_OPEN:
             if (inst->loader && inst->loader->has_editor()) {
-                int ew = 640, eh = 480;
-                inst->loader->get_editor_rect(ew, eh);
+                EditorHeaderInfo hdr;
+                hdr.format = "VST2";
+                hdr.architecture = "native";
+                hdr.isolation = "per-instance";
+                IpcPluginInfo pi2 = {};
+                std::vector<uint8_t> extra2;
+                inst->loader->get_info(pi2, extra2);
+                if (!extra2.empty())
+                    hdr.plugin_name = std::string(
+                        reinterpret_cast<const char *>(extra2.data()));
+                else
+                    hdr.plugin_name = "Plugin";
 
-                // Try IOSurface embedded mode first (macOS)
-                uint32_t sid = gui_open_editor_iosurface(inst->loader, ew, eh);
-                if (sid > 0) {
-                    // Send IOSurface ID back to host
-                    IpcEditorSurface surf = {};
-                    surf.surface_id = sid;
-                    surf.width = ew;
-                    surf.height = eh;
-                    ipc_write_ok(g_pipe_out, &surf, sizeof(surf));
-                } else {
-                    // Fall back to floating window
-                    EditorHeaderInfo hdr;
-                    hdr.format = "VST2";
-                    hdr.architecture = "native";
-                    hdr.isolation = "per-instance";
-                    IpcPluginInfo pi2 = {};
-                    std::vector<uint8_t> extra2;
-                    inst->loader->get_info(pi2, extra2);
-                    if (!extra2.empty())
-                        hdr.plugin_name = std::string(
-                            reinterpret_cast<const char *>(extra2.data()));
-                    else
-                        hdr.plugin_name = "Plugin";
-
-                    if (gui_open_editor(inst->loader, hdr))
-                        ipc_write_ok(g_pipe_out);
-                    else
-                        ipc_write_error(g_pipe_out, "EDITOR_OPEN: failed");
-                }
+                if (gui_open_editor(inst->loader, hdr))
+                    ipc_write_ok(g_pipe_out);
+                else
+                    ipc_write_error(g_pipe_out, "EDITOR_OPEN: failed");
             } else {
                 ipc_write_error(g_pipe_out, "EDITOR_OPEN: no editor");
             }

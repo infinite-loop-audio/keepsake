@@ -87,69 +87,9 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
     if (kp->crashed || !kp->has_editor || !kp->bridge || !window) return false;
 
 #ifdef __APPLE__
-    // Send EDITOR_OPEN — bridge will try IOSurface mode
+    // macOS: open a floating window (cross-process embedding not viable)
     if (!kp->editor_open) {
-        std::vector<uint8_t> resp;
-        if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN, nullptr, 0, &resp))
-            return false;
-
-        // Check if bridge returned an IOSurface ID
-        if (resp.size() >= sizeof(IpcEditorSurface)) {
-            IpcEditorSurface surf;
-            memcpy(&surf, resp.data(), sizeof(surf));
-
-            if (surf.surface_id > 0) {
-                // IOSurface mode: composite into host's NSView
-                fprintf(stderr, "keepsake: IOSurface mode, surfaceID=%u %dx%d\n",
-                        surf.surface_id, surf.width, surf.height);
-
-                // Import the IOSurface and display it in the host's view
-                // This runs in the host process — we have direct access to
-                // the host's NSView from the clap_window_t.
-                @autoreleasepool {
-                    IOSurfaceRef surface = IOSurfaceLookup(surf.surface_id);
-                    if (surface) {
-                        NSView *parent = (__bridge NSView *)window->cocoa;
-                        [parent setWantsLayer:YES];
-
-                        CALayer *surfaceLayer = [CALayer layer];
-                        surfaceLayer.contents = (__bridge id)surface;
-                        surfaceLayer.frame = CGRectMake(0, 0,
-                            surf.width, surf.height);
-                        surfaceLayer.contentsGravity = kCAGravityTopLeft;
-                        [parent.layer addSublayer:surfaceLayer];
-
-                        // Store layer for periodic refresh
-                        kp->iosurface_layer = (__bridge_retained void *)surfaceLayer;
-                        kp->editor_width = surf.width;
-                        kp->editor_height = surf.height;
-
-                        // Timer to refresh the layer at 60fps
-                        dispatch_source_t timer = dispatch_source_create(
-                            DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
-                            dispatch_get_main_queue());
-                        dispatch_source_set_timer(timer,
-                            dispatch_time(DISPATCH_TIME_NOW, 0),
-                            16 * NSEC_PER_MSEC, // 60fps
-                            1 * NSEC_PER_MSEC);
-                        dispatch_source_set_event_handler(timer, ^{
-                            if (kp->iosurface_layer) {
-                                CALayer *l = (__bridge CALayer *)kp->iosurface_layer;
-                                // Force the layer to re-read the IOSurface contents
-                                [l setContents:l.contents];
-                            }
-                        });
-                        dispatch_resume(timer);
-
-                        CFRelease(surface);
-                        fprintf(stderr, "keepsake: IOSurface composited into host view\n");
-                    } else {
-                        fprintf(stderr, "keepsake: IOSurfaceLookup failed for ID %u\n",
-                                surf.surface_id);
-                    }
-                }
-            }
-        }
+        if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN)) return false;
         kp->editor_open = true;
     }
     return true;
