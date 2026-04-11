@@ -1,6 +1,6 @@
 # G01.013 — Embedded Editors
 
-Status: planned
+Status: ready
 Owner: Infinite Loop Audio
 Updated: 2026-04-11
 Governing refs:

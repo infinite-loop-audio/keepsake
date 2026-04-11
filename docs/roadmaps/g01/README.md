@@ -13,7 +13,7 @@ Started: 2026-04-10
 | `004` | [Scan Cache and Configuration](004-scan-cache-and-configuration.md) | complete |
 | `005` | [MIDI, Parameter Automation, and State](005-midi-params-and-state.md) | complete |
 | `006` | [GUI Forwarding](006-gui-forwarding.md) | complete |
-| `007` | [CI and Cross-Platform Testing](007-ci-and-cross-platform-testing.md) | planned (deferred) |
+| `007` | [CI and Cross-Platform Testing](007-ci-and-cross-platform-testing.md) | complete |
 | `008` | [VST3 and AU v2 Loaders](008-vst3-and-au-loaders.md) | complete |
 | `009` | [32-Bit Bridge Binaries](009-32-bit-bridge.md) | complete |
 | `010` | [Configurable Process Isolation](010-configurable-process-isolation.md) | complete |

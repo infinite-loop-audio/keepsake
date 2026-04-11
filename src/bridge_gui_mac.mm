@@ -164,6 +164,13 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     return true;
 }
 
+bool gui_open_editor_embedded(BridgeLoader * /*loader*/, uint64_t /*native_handle*/) {
+    // macOS does not support cross-process NSView embedding.
+    // Floating windows are the permanent approach on macOS.
+    fprintf(stderr, "bridge: embedded editor not supported on macOS (use floating)\n");
+    return false;
+}
+
 void gui_close_editor(BridgeLoader *loader) {
     if (!g_editor_open) return;
 

@@ -112,6 +112,7 @@ if(APPLE)
     set(BRIDGE_GUI_SRC src/bridge_gui_mac.mm)
     set(BRIDGE_AU_SRC  src/bridge_loader_au.mm)
 else()
+    # Windows and Linux GUI with embedded editor support
     set(BRIDGE_GUI_SRC src/bridge_gui_stub.cpp)
     set(BRIDGE_AU_SRC)
 endif()
@@ -150,7 +151,12 @@ if(APPLE)
         COMMENT "Installing keepsake-bridge into .clap bundle"
     )
 elseif(UNIX)
+    find_package(X11 QUIET)
     target_link_libraries(keepsake-bridge PRIVATE dl rt)
+    if(X11_FOUND)
+        target_link_libraries(keepsake-bridge PRIVATE ${X11_LIBRARIES})
+        target_include_directories(keepsake-bridge PRIVATE ${X11_INCLUDE_DIR})
+    endif()
 endif()
 
 # --- macOS cross-architecture bridge (x86_64 under Rosetta) ---

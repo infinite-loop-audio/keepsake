@@ -1,6 +1,6 @@
 # G01.007 — CI and Cross-Platform Testing
 
-Status: ready
+Status: complete
 Owner: Infinite Loop Audio
 Updated: 2026-04-10
 Governing refs:

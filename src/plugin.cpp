@@ -532,13 +532,15 @@ static bool gui_is_api_supported(const clap_plugin_t *plugin,
                                    const char *api, bool is_floating) {
     auto *kp = get(plugin);
     if (!kp->has_editor) return false;
-    // We support floating windows only (bridge manages its own window)
-    if (!is_floating) return false;
 #ifdef __APPLE__
+    // macOS: floating only (no cross-process NSView embedding)
+    if (!is_floating) return false;
     return strcmp(api, CLAP_WINDOW_API_COCOA) == 0;
 #elif defined(_WIN32)
+    // Windows: both embedded (SetParent) and floating
     return strcmp(api, CLAP_WINDOW_API_WIN32) == 0;
 #else
+    // Linux: both embedded (XReparentWindow) and floating
     return strcmp(api, CLAP_WINDOW_API_X11) == 0;
 #endif
 }
@@ -547,20 +549,28 @@ static bool gui_get_preferred_api(const clap_plugin_t * /*plugin*/,
                                     const char **api, bool *is_floating) {
 #ifdef __APPLE__
     *api = CLAP_WINDOW_API_COCOA;
+    *is_floating = true; // macOS: floating only
 #elif defined(_WIN32)
     *api = CLAP_WINDOW_API_WIN32;
+    *is_floating = false; // Windows: prefer embedded
 #else
     *api = CLAP_WINDOW_API_X11;
+    *is_floating = false; // Linux: prefer embedded
 #endif
-    *is_floating = true;
     return true;
 }
 
 static bool gui_create(const clap_plugin_t *plugin,
                          const char * /*api*/, bool is_floating) {
-    if (!is_floating) return false;
     auto *kp = get(plugin);
-    return kp->has_editor && !kp->crashed;
+    if (!kp->has_editor || kp->crashed) return false;
+#ifdef __APPLE__
+    if (!is_floating) return false; // macOS: floating only
+#else
+    (void)is_floating; // Windows/Linux: both modes supported
+#endif
+    kp->gui_is_floating = is_floating;
+    return true;
 }
 
 static void gui_destroy(const clap_plugin_t *plugin) {
@@ -605,9 +615,26 @@ static bool gui_set_size(const clap_plugin_t * /*plugin*/,
     return false;
 }
 
-static bool gui_set_parent(const clap_plugin_t * /*plugin*/,
-                             const clap_window_t * /*window*/) {
-    return false; // Floating window — no parent embedding
+static bool gui_set_parent(const clap_plugin_t *plugin,
+                             const clap_window_t *window) {
+    auto *kp = get(plugin);
+    if (kp->crashed || !kp->has_editor || !kp->bridge || !window) return false;
+
+    // Send the native window handle to the bridge for embedding
+    uint64_t handle = 0;
+#ifdef _WIN32
+    handle = reinterpret_cast<uint64_t>(window->win32);
+#elif defined(__linux__)
+    handle = static_cast<uint64_t>(window->x11);
+#else
+    return false; // macOS doesn't support embedded mode
+#endif
+
+    if (!send_and_wait(kp, IPC_OP_EDITOR_SET_PARENT, &handle, sizeof(handle)))
+        return false;
+
+    kp->editor_open = true;
+    return true;
 }
 
 static bool gui_set_transient(const clap_plugin_t * /*plugin*/,
@@ -625,7 +652,9 @@ static void gui_suggest_title(const clap_plugin_t * /*plugin*/,
 static bool gui_show(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
     if (kp->crashed || !kp->has_editor) return false;
-    if (!kp->editor_open) {
+    // For floating mode, send EDITOR_OPEN to create the floating window.
+    // For embedded mode, the editor was already opened via set_parent.
+    if (kp->gui_is_floating && !kp->editor_open) {
         if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN)) return false;
         kp->editor_open = true;
     }

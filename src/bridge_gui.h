@@ -20,9 +20,12 @@ struct EditorHeaderInfo {
 void gui_init();
 
 // Open the editor in a floating window with header bar.
-// The loader provides the editor (effEditOpen / IPlugView).
-// Returns true on success.
 bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header);
+
+// Open the editor embedded in a host-provided parent window.
+// native_handle is platform-specific: HWND on Windows, X11 Window on Linux.
+// On macOS, embedded mode is not supported — returns false (use floating).
+bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle);
 
 // Close the editor window.
 void gui_close_editor(BridgeLoader *loader);

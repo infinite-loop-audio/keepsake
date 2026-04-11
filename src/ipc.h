@@ -32,6 +32,7 @@ static constexpr uint32_t IPC_OP_SET_CHUNK      = 0x0D;  // payload: chunk bytes
 static constexpr uint32_t IPC_OP_EDITOR_OPEN    = 0x10;  // no payload
 static constexpr uint32_t IPC_OP_EDITOR_CLOSE   = 0x11;  // no payload
 static constexpr uint32_t IPC_OP_EDITOR_GET_RECT = 0x12; // no payload
+static constexpr uint32_t IPC_OP_EDITOR_SET_PARENT = 0x13; // payload: uint64_t native_handle
 
 // Bridge → Host
 static constexpr uint32_t IPC_OP_OK           = 0x81;

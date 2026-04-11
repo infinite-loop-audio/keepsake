@@ -346,6 +346,18 @@ int main(int /*argc*/, char * /*argv*/[]) {
             ipc_write_ok(g_pipe_out);
             break;
         case IPC_OP_EDITOR_GET_RECT: handle_editor_get_rect(inst); break;
+        case IPC_OP_EDITOR_SET_PARENT:
+            if (inst->loader && payload.size() >= 8) {
+                uint64_t handle;
+                memcpy(&handle, payload.data(), 8);
+                if (gui_open_editor_embedded(inst->loader, handle))
+                    ipc_write_ok(g_pipe_out);
+                else
+                    ipc_write_error(g_pipe_out, "EDITOR_SET_PARENT: failed");
+            } else {
+                ipc_write_error(g_pipe_out, "EDITOR_SET_PARENT: not ready");
+            }
+            break;
         case IPC_OP_STOP_PROC:
             inst->processing = false;
             ipc_write_ok(g_pipe_out);

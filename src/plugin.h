@@ -48,6 +48,7 @@ struct KeepsakePlugin {
     // Editor
     bool has_editor = false;
     bool editor_open = false;
+    bool gui_is_floating = true;
     int32_t editor_width = 0;
     int32_t editor_height = 0;
 
