@@ -233,7 +233,24 @@ static clap_process_status plugin_process(const clap_plugin_t *plugin,
         }
     }
 
-    // Forward input events to bridge: MIDI, notes, and param changes
+    // Batch all events + PROCESS command into a single pipe write.
+    // This reduces syscalls from N+1 (one per event + PROCESS) to just 1.
+    std::vector<uint8_t> batch;
+    batch.reserve(256);
+
+    auto append_event = [&](uint32_t opcode, const void *data, uint32_t sz) {
+        // Build instance-aware message: [opcode][size][instance_id][payload]
+        uint32_t total = 4 + sz;
+        IpcHeader hdr = { opcode, total };
+        size_t off = batch.size();
+        batch.resize(off + sizeof(hdr) + total);
+        memcpy(batch.data() + off, &hdr, sizeof(hdr));
+        memcpy(batch.data() + off + sizeof(hdr), &kp->instance_id, 4);
+        if (sz > 0)
+            memcpy(batch.data() + off + sizeof(hdr) + 4, data, sz);
+    };
+
+    // Collect MIDI/note/param events
     if (process->in_events) {
         uint32_t ev_count = process->in_events->size(process->in_events);
         for (uint32_t i = 0; i < ev_count; i++) {
@@ -243,25 +260,20 @@ static clap_process_status plugin_process(const clap_plugin_t *plugin,
                 auto *midi = reinterpret_cast<const clap_event_midi_t *>(hdr);
                 IpcMidiEventPayload mp;
                 mp.delta_frames = static_cast<int32_t>(hdr->time);
-                mp.data[0] = midi->data[0];
-                mp.data[1] = midi->data[1];
-                mp.data[2] = midi->data[2];
-                mp.data[3] = 0;
-                ipc_write_instance_msg(kp->bridge->proc.pipe_to,
-                    IPC_OP_MIDI_EVENT, kp->instance_id, &mp, sizeof(mp));
+                mp.data[0] = midi->data[0]; mp.data[1] = midi->data[1];
+                mp.data[2] = midi->data[2]; mp.data[3] = 0;
+                append_event(IPC_OP_MIDI_EVENT, &mp, sizeof(mp));
 
             } else if (hdr->type == CLAP_EVENT_NOTE_ON) {
                 auto *note = reinterpret_cast<const clap_event_note_t *>(hdr);
                 IpcMidiEventPayload mp;
                 mp.delta_frames = static_cast<int32_t>(hdr->time);
                 uint8_t vel = static_cast<uint8_t>(note->velocity * 127.0);
-                if (vel == 0) vel = 1; // note-on with vel 0 = note-off
+                if (vel == 0) vel = 1;
                 mp.data[0] = static_cast<uint8_t>(0x90 | (note->channel & 0x0F));
                 mp.data[1] = static_cast<uint8_t>(note->key & 0x7F);
-                mp.data[2] = vel;
-                mp.data[3] = 0;
-                ipc_write_instance_msg(kp->bridge->proc.pipe_to,
-                    IPC_OP_MIDI_EVENT, kp->instance_id, &mp, sizeof(mp));
+                mp.data[2] = vel; mp.data[3] = 0;
+                append_event(IPC_OP_MIDI_EVENT, &mp, sizeof(mp));
 
             } else if (hdr->type == CLAP_EVENT_NOTE_OFF) {
                 auto *note = reinterpret_cast<const clap_event_note_t *>(hdr);
@@ -271,24 +283,24 @@ static clap_process_status plugin_process(const clap_plugin_t *plugin,
                 mp.data[1] = static_cast<uint8_t>(note->key & 0x7F);
                 mp.data[2] = static_cast<uint8_t>(note->velocity * 127.0);
                 mp.data[3] = 0;
-                ipc_write_instance_msg(kp->bridge->proc.pipe_to,
-                    IPC_OP_MIDI_EVENT, kp->instance_id, &mp, sizeof(mp));
+                append_event(IPC_OP_MIDI_EVENT, &mp, sizeof(mp));
 
             } else if (hdr->type == CLAP_EVENT_PARAM_VALUE) {
                 auto *pv = reinterpret_cast<const clap_event_param_value_t *>(hdr);
                 IpcSetParamPayload sp;
                 sp.index = static_cast<uint32_t>(pv->param_id);
                 sp.value = static_cast<float>(pv->value);
-                ipc_write_instance_msg(kp->bridge->proc.pipe_to,
-                    IPC_OP_SET_PARAM, kp->instance_id, &sp, sizeof(sp));
+                append_event(IPC_OP_SET_PARAM, &sp, sizeof(sp));
             }
         }
     }
 
-    // Send PROCESS command
+    // Append PROCESS command at the end of the batch
     IpcProcessPayload pp = { frames };
-    if (!ipc_write_instance_msg(kp->bridge->proc.pipe_to, IPC_OP_PROCESS,
-                                 kp->instance_id, &pp, sizeof(pp))) {
+    append_event(IPC_OP_PROCESS, &pp, sizeof(pp));
+
+    // Single pipe write for everything
+    if (!platform_write(kp->bridge->proc.pipe_to, batch.data(), batch.size())) {
         kp->crashed = true;
         output_silence(process);
         return CLAP_PROCESS_ERROR;
@@ -365,6 +377,22 @@ extern const clap_plugin_params_t keepsake_params_ext;
 extern const clap_plugin_state_t keepsake_state_ext;
 extern const clap_plugin_gui_t keepsake_gui_ext;
 
+// (params, state, and GUI extensions moved to plugin_params.cpp, plugin_state.cpp, plugin_gui.cpp)
+
+// --- Latency extension ---
+// The IPC round-trip adds inherent latency. Report it so the host
+// can compensate for timing.
+
+static uint32_t plugin_latency_get(const clap_plugin_t *plugin) {
+    auto *kp = get(plugin);
+    // Report one buffer of latency for the IPC round-trip
+    return kp->max_frames;
+}
+
+static const clap_plugin_latency_t s_latency = {
+    .get = plugin_latency_get,
+};
+
 // --- get_extension ---
 
 static const void *plugin_get_extension(const clap_plugin_t *plugin,
@@ -372,12 +400,11 @@ static const void *plugin_get_extension(const clap_plugin_t *plugin,
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) return &s_audio_ports;
     if (strcmp(id, CLAP_EXT_PARAMS) == 0) return &keepsake_params_ext;
     if (strcmp(id, CLAP_EXT_STATE) == 0) return &keepsake_state_ext;
+    if (strcmp(id, CLAP_EXT_LATENCY) == 0) return &s_latency;
     if (strcmp(id, CLAP_EXT_GUI) == 0 && get(plugin)->has_editor)
         return &keepsake_gui_ext;
     return nullptr;
 }
-
-// (params, state, and GUI extensions moved to plugin_params.cpp, plugin_state.cpp, plugin_gui.cpp)
 
 static void plugin_on_main_thread(const clap_plugin_t *) {}
 
