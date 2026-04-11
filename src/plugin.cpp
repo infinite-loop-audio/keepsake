@@ -115,15 +115,8 @@ static void plugin_destroy(const clap_plugin_t *plugin) {
         send_and_wait(kp, IPC_OP_SHUTDOWN);
     }
     if (kp->bridge && s_pool) {
-        // Don't block — release on a background thread if bridge is busy
-        auto *bp = kp->bridge;
+        s_pool->release(kp->bridge);
         kp->bridge = nullptr;
-        pthread_t t;
-        pthread_create(&t, nullptr, [](void *arg) -> void * {
-            s_pool->release(static_cast<BridgeProcess *>(arg));
-            return nullptr;
-        }, bp);
-        pthread_detach(t);
     }
     if (kp->shm.ptr) platform_shm_close(kp->shm);
     delete kp;
