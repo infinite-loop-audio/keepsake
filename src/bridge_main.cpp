@@ -250,7 +250,25 @@ int main(int /*argc*/, char * /*argv*/[]) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     gui_init();
 
-    fprintf(stderr, "bridge: started (pid=%d)\n", getpid());
+    // Validate wake pipe (fd 3). If not available (e.g., launched from
+    // bridge-test without wake pipe), fall back to pipe-only mode.
+    bool has_wake_pipe = false;
+#ifndef _WIN32
+    if (g_wake_fd >= 0) {
+        struct pollfd test_pfd = { g_wake_fd, POLLIN, 0 };
+        int r = poll(&test_pfd, 1, 0);
+        if (r < 0 || (test_pfd.revents & POLLNVAL)) {
+            fprintf(stderr, "bridge: no wake pipe (fd %d), using pipe-only mode\n",
+                    g_wake_fd);
+            g_wake_fd = -1;
+        } else {
+            has_wake_pipe = true;
+        }
+    }
+#endif
+
+    fprintf(stderr, "bridge: started (pid=%d) wake=%s\n", getpid(),
+            has_wake_pipe ? "pipe" : "poll");
 
     // Pre-allocated channel pointer arrays (avoid malloc in audio path)
     std::vector<float *> proc_in_ptrs;
@@ -266,25 +284,73 @@ int main(int /*argc*/, char * /*argv*/[]) {
     };
 
     while (true) {
-        // Poll BOTH pipes: command pipe (non-RT) and wake pipe (RT audio).
 #ifndef _WIN32
+        // Poll available pipes. If wake pipe exists, poll both.
+        // Otherwise, poll command pipe only with short timeout for shm check.
+        int nfds = has_wake_pipe ? 2 : 1;
         struct pollfd pfds[2];
-        pfds[0].fd = g_wake_fd;
-        pfds[0].events = POLLIN;
-        pfds[1].fd = g_pipe_in;
-        pfds[1].events = POLLIN;
+        if (has_wake_pipe) {
+            pfds[0].fd = g_wake_fd;
+            pfds[0].events = POLLIN;
+            pfds[1].fd = g_pipe_in;
+            pfds[1].events = POLLIN;
+        } else {
+            pfds[0].fd = g_pipe_in;
+            pfds[0].events = POLLIN;
+        }
 
-        int timeout = gui_is_open() ? 16 : -1;
-        int pr = poll(pfds, 2, timeout);
+        // When no wake pipe, use short timeout to poll shm
+        bool has_active_shm = false;
+        if (!has_wake_pipe) {
+            for (auto &kv : g_instances) {
+                if (kv.second->shm.ptr && kv.second->active) {
+                    has_active_shm = true;
+                    break;
+                }
+            }
+        }
+
+        int timeout = has_active_shm ? 1 :
+                      (gui_is_open() ? 16 : -1);
+        int pr = poll(pfds, nfds, timeout);
 
         if (pr == 0) {
+            // Timeout — check shm if active, service GUI
+            if (has_active_shm) {
+                for (auto &kv : g_instances) {
+                    auto *inst = kv.second;
+                    if (!inst->shm.ptr || !inst->active) continue;
+                    auto *ctrl = shm_control(inst->shm.ptr);
+                    if (shm_load_acquire(&ctrl->state) == SHM_STATE_PROCESS_REQUESTED) {
+                        uint32_t nframes = ctrl->num_frames;
+                        if (nframes > inst->max_frames) nframes = inst->max_frames;
+                        for (uint32_t p = 0; p < ctrl->param_count && p < 64; p++)
+                            inst->loader->set_param(ctrl->params[p].index, ctrl->params[p].value);
+                        for (uint32_t m = 0; m < ctrl->midi_count && m < SHM_MAX_MIDI_EVENTS; m++)
+                            inst->loader->send_midi(ctrl->midi_events[m].delta_frames, ctrl->midi_events[m].data);
+                        proc_in_ptrs.resize(static_cast<size_t>(inst->num_inputs));
+                        proc_out_ptrs.resize(static_cast<size_t>(inst->num_outputs));
+                        for (int i = 0; i < inst->num_inputs; i++)
+                            proc_in_ptrs[static_cast<size_t>(i)] = shm_audio_inputs(inst->shm.ptr, i, inst->max_frames);
+                        for (int i = 0; i < inst->num_outputs; i++)
+                            proc_out_ptrs[static_cast<size_t>(i)] = shm_audio_outputs(inst->shm.ptr, inst->num_inputs, i, inst->max_frames);
+                        inst->loader->process(
+                            inst->num_inputs > 0 ? proc_in_ptrs.data() : nullptr, inst->num_inputs,
+                            inst->num_outputs > 0 ? proc_out_ptrs.data() : nullptr, inst->num_outputs, nframes);
+                        shm_store_release(&ctrl->state, SHM_STATE_PROCESS_DONE);
+                    }
+                }
+            }
             if (gui_is_open()) gui_idle(nullptr);
             continue;
         }
         if (pr < 0) continue;
 
-        // Wake pipe: audio process request
-        if (pfds[0].revents & POLLIN) {
+        // Wake pipe: audio process request (only when wake pipe exists)
+        int wake_idx = has_wake_pipe ? 0 : -1;
+        int cmd_idx = has_wake_pipe ? 1 : 0;
+
+        if (wake_idx >= 0 && (pfds[wake_idx].revents & POLLIN)) {
             // Drain all wake bytes
             uint8_t drain[64];
             read(g_wake_fd, drain, sizeof(drain));
@@ -338,7 +404,7 @@ int main(int /*argc*/, char * /*argv*/[]) {
         }
 
         // Command pipe: non-RT IPC messages
-        if (!(pfds[1].revents & POLLIN)) continue;
+        if (!(pfds[cmd_idx].revents & POLLIN)) continue;
 #else
         // Windows: simplified path (TODO: proper dual-pipe polling)
         if (!platform_read_ready(g_pipe_in, gui_is_open() ? 16 : -1)) {
