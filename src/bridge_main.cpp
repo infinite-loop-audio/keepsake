@@ -22,6 +22,8 @@
 #include <unistd.h>
 #else
 #include <windows.h>
+#include <process.h>
+#define getpid _getpid
 #endif
 
 // Bridge I/O pipes

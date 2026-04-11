@@ -18,13 +18,17 @@ int main(int argc, char *argv[]) {
 
     const char *clap_path = argv[1];
 
-    // On macOS, the loadable binary is inside the bundle
+    // Try loading: on macOS it's a bundle, on Linux it's the .clap directly
+    void *lib = nullptr;
+#ifdef __APPLE__
     char lib_path[4096];
     snprintf(lib_path, sizeof(lib_path), "%s/Contents/MacOS/keepsake", clap_path);
-
-    void *lib = dlopen(lib_path, RTLD_LAZY | RTLD_LOCAL);
+    lib = dlopen(lib_path, RTLD_LAZY | RTLD_LOCAL);
+#else
+    lib = dlopen(clap_path, RTLD_LAZY | RTLD_LOCAL);
+#endif
     if (!lib) {
-        fprintf(stderr, "failed to load '%s': %s\n", lib_path, dlerror());
+        fprintf(stderr, "failed to load '%s': %s\n", clap_path, dlerror());
         return 1;
     }
 
