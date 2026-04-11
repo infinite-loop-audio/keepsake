@@ -59,9 +59,11 @@ struct KeepsakePlugin {
 
     // State
     bool bridge_ok = false;
+    bool bridge_loading = false; // async init in progress
     bool active = false;
     bool processing = false;
     bool crashed = false;
+    pthread_t init_thread = 0;
 };
 
 // Create a KeepsakePlugin. Returns a clap_plugin_t pointer (the plugin's

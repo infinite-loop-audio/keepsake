@@ -59,56 +59,76 @@ static void output_silence(const clap_process_t *process) {
 static bool plugin_init(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
 
-    // Acquire bridge process from pool
-    kp->bridge = s_pool->acquire(
-        kp->bridge_binary, kp->vst2_path, kp->format, kp->isolation);
-    if (!kp->bridge) return false;
+    // Launch bridge initialization on a background thread.
+    // plugin_init returns IMMEDIATELY — the host never blocks.
+    // process() outputs silence until bridge_ok becomes true.
+    kp->bridge_loading = true;
 
-    // Send INIT with [format][path] — instance_id=0 for new instance
-    std::vector<uint8_t> init_payload(4 + kp->vst2_path.size());
-    memcpy(init_payload.data(), &kp->format, 4);
-    memcpy(init_payload.data() + 4, kp->vst2_path.data(), kp->vst2_path.size());
+#ifndef _WIN32
+    pthread_create(&kp->init_thread, nullptr, [](void *arg) -> void * {
+        auto *kp2 = static_cast<KeepsakePlugin *>(arg);
 
-    // INIT with instance_id=0 (bridge assigns a real one)
-    if (!ipc_write_instance_msg(kp->bridge->proc.pipe_to, IPC_OP_INIT, 0,
-                                 init_payload.data(),
-                                 static_cast<uint32_t>(init_payload.size()))) {
-        s_pool->release(kp->bridge); kp->bridge = nullptr;
-        return false;
-    }
+        kp2->bridge = s_pool->acquire(
+            kp2->bridge_binary, kp2->vst2_path, kp2->format, kp2->isolation);
+        if (!kp2->bridge) {
+            fprintf(stderr, "keepsake: bridge spawn failed\n");
+            kp2->bridge_loading = false;
+            return nullptr;
+        }
 
-    uint32_t resp_op;
-    std::vector<uint8_t> ok_data;
-    if (!ipc_read_msg(kp->bridge->proc.pipe_from, resp_op, ok_data, 10000) ||
-        resp_op != IPC_OP_OK) {
-        s_pool->release(kp->bridge); kp->bridge = nullptr;
-        return false;
-    }
+        std::vector<uint8_t> init_payload(4 + kp2->vst2_path.size());
+        memcpy(init_payload.data(), &kp2->format, 4);
+        memcpy(init_payload.data() + 4, kp2->vst2_path.data(),
+               kp2->vst2_path.size());
 
-    // Parse response: [instance_id][IpcPluginInfo][strings...]
-    if (ok_data.size() >= 4 + sizeof(IpcPluginInfo)) {
-        memcpy(&kp->instance_id, ok_data.data(), 4);
-        IpcPluginInfo pi;
-        memcpy(&pi, ok_data.data() + 4, sizeof(pi));
-        kp->num_inputs = pi.num_inputs;
-        kp->num_outputs = pi.num_outputs;
-        kp->num_params = pi.num_params;
-    }
+        {
+            std::lock_guard<std::mutex> lock(kp2->ipc_mutex);
+            if (!ipc_write_instance_msg(kp2->bridge->proc.pipe_to,
+                                         IPC_OP_INIT, 0,
+                                         init_payload.data(),
+                                         static_cast<uint32_t>(
+                                             init_payload.size()))) {
+                fprintf(stderr, "keepsake: INIT write failed\n");
+                s_pool->release(kp2->bridge);
+                kp2->bridge = nullptr;
+                kp2->bridge_loading = false;
+                return nullptr;
+            }
 
-    kp->bridge_ok = true;
+            uint32_t resp_op;
+            std::vector<uint8_t> ok_data;
+            // 15 second timeout for slow Rosetta plugins
+            if (!ipc_read_msg(kp2->bridge->proc.pipe_from, resp_op,
+                               ok_data, 15000) || resp_op != IPC_OP_OK) {
+                fprintf(stderr, "keepsake: INIT response failed/timeout\n");
+                s_pool->release(kp2->bridge);
+                kp2->bridge = nullptr;
+                kp2->bridge_loading = false;
+                return nullptr;
+            }
 
-    // Read editor flag from plugin info (already in ok_data)
-    if (ok_data.size() >= 4 + sizeof(IpcPluginInfo)) {
-        IpcPluginInfo pi2;
-        memcpy(&pi2, ok_data.data() + 4, sizeof(pi2));
-        kp->has_editor = (pi2.flags & 1) != 0;
+            if (ok_data.size() >= 4 + sizeof(IpcPluginInfo)) {
+                memcpy(&kp2->instance_id, ok_data.data(), 4);
+                IpcPluginInfo pi;
+                memcpy(&pi, ok_data.data() + 4, sizeof(pi));
+                kp2->num_inputs = pi.num_inputs;
+                kp2->num_outputs = pi.num_outputs;
+                kp2->num_params = pi.num_params;
+                kp2->has_editor = (pi.flags & 1) != 0;
+            }
+        }
+
+        kp2->bridge_ok = true;
+        kp2->bridge_loading = false;
         fprintf(stderr, "keepsake: init OK — in=%d out=%d params=%d editor=%d\n",
-                kp->num_inputs, kp->num_outputs, kp->num_params, kp->has_editor);
-    }
+                kp2->num_inputs, kp2->num_outputs, kp2->num_params,
+                kp2->has_editor);
+        return nullptr;
+    }, kp);
+    pthread_detach(kp->init_thread);
+#endif
 
-    // Parameter and editor rect queries are deferred to first access
-    // to keep init() fast (REAPER times out on slow init).
-    return true;
+    return true; // always succeeds — bridge loads in background
 }
 
 static void plugin_destroy(const clap_plugin_t *plugin) {
@@ -207,9 +227,13 @@ static clap_process_status plugin_process(const clap_plugin_t *plugin,
                                             const clap_process_t *process) {
     auto *kp = get(plugin);
 
-    if (kp->crashed || !kp->processing || !kp->shm.ptr) {
+    if (kp->crashed) {
         output_silence(process);
-        return kp->crashed ? CLAP_PROCESS_ERROR : CLAP_PROCESS_SLEEP;
+        return CLAP_PROCESS_ERROR;
+    }
+    if (!kp->bridge_ok || !kp->processing || !kp->shm.ptr) {
+        output_silence(process);
+        return CLAP_PROCESS_CONTINUE; // still loading or not active
     }
 
     uint32_t frames = process->frames_count;
