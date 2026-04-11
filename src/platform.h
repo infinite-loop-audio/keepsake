@@ -141,14 +141,16 @@ static inline bool platform_spawn(const std::string &binary,
     }
 
     if (pid == 0) {
-        // Child: stdin=commands, stdout=responses, fd3=wake
+        // Child: stdin=commands, stdout=responses, wake fd passed as arg
         dup2(to_child[0], STDIN_FILENO);
         dup2(from_child[1], STDOUT_FILENO);
-        dup2(wake[0], 3);
+        // Keep wake[0] open, pass its fd number as argv[1]
         close(to_child[0]); close(to_child[1]);
         close(from_child[0]); close(from_child[1]);
-        close(wake[0]); close(wake[1]);
-        execl(binary.c_str(), "keepsake-bridge", nullptr);
+        close(wake[1]); // close write end in child
+        char wake_fd_str[16];
+        snprintf(wake_fd_str, sizeof(wake_fd_str), "%d", wake[0]);
+        execl(binary.c_str(), "keepsake-bridge", wake_fd_str, nullptr);
         perror("keepsake: execl");
         _exit(1);
     }

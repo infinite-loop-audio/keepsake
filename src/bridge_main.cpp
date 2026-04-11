@@ -246,23 +246,23 @@ static void handle_editor_get_rect(PluginInstance *inst) {
 
 // --- Main loop ---
 
-int main(int /*argc*/, char * /*argv*/[]) {
+int main(int argc, char *argv[]) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     gui_init();
 
-    // Validate wake pipe (fd 3). If not available (e.g., launched from
-    // bridge-test without wake pipe), fall back to pipe-only mode.
+    // Wake pipe fd passed as argv[1] by the host
     bool has_wake_pipe = false;
 #ifndef _WIN32
-    if (g_wake_fd >= 0) {
-        struct pollfd test_pfd = { g_wake_fd, POLLIN, 0 };
-        int r = poll(&test_pfd, 1, 0);
-        if (r < 0 || (test_pfd.revents & POLLNVAL)) {
-            fprintf(stderr, "bridge: no wake pipe (fd %d), using pipe-only mode\n",
-                    g_wake_fd);
-            g_wake_fd = -1;
-        } else {
-            has_wake_pipe = true;
+    g_wake_fd = -1;
+    if (argc > 1) {
+        int fd = atoi(argv[1]);
+        if (fd > 0) {
+            struct pollfd test_pfd = { fd, POLLIN, 0 };
+            int r = poll(&test_pfd, 1, 0);
+            if (r >= 0 && !(test_pfd.revents & POLLNVAL)) {
+                g_wake_fd = fd;
+                has_wake_pipe = true;
+            }
         }
     }
 #endif
