@@ -4,8 +4,12 @@
 
 #include "bridge_loader.h"
 
-// Forward declarations — each loader registers via its own .cpp/.mm
+// Forward declarations
+#ifdef __APPLE__
 extern BridgeLoader *create_au_loader();
+#else
+static BridgeLoader *create_au_loader() { return nullptr; }
+#endif
 
 // VST2 loader is compiled in bridge_loader_vst2.cpp
 class Vst2Loader;
