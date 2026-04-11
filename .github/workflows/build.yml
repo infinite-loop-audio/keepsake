@@ -1,0 +1,112 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-macos:
+    runs-on: macos-14  # arm64 runner
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake --preset default
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Verify build outputs
+        run: |
+          test -f build/keepsake.clap/Contents/MacOS/keepsake
+          test -f build/keepsake.clap/Contents/Helpers/keepsake-bridge
+          test -f build/keepsake-bridge-x86_64
+          test -f build/clap-scan
+          test -f build/bridge-test
+          test -f build/test-plugin.dylib
+          echo "All build outputs present"
+
+      - name: Verify CLAP entry symbol
+        run: nm -gU build/keepsake.clap/Contents/MacOS/keepsake | grep _clap_entry
+
+      - name: Test — bridge with test plugin
+        run: |
+          # Wrap test plugin as a .vst bundle for macOS
+          mkdir -p /tmp/test-plugin.vst/Contents/MacOS
+          cp build/test-plugin.dylib /tmp/test-plugin.vst/Contents/MacOS/test-plugin
+          cat > /tmp/test-plugin.vst/Contents/Info.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleExecutable</key><string>test-plugin</string>
+            <key>CFBundlePackageType</key><string>BNDL</string>
+          </dict></plist>
+          PLIST
+
+          build/bridge-test \
+            build/keepsake.clap/Contents/Helpers/keepsake-bridge \
+            /tmp/test-plugin.vst
+
+      - name: Test — clap-scan with test plugin
+        run: |
+          mkdir -p /tmp/ktest
+          ln -sf /tmp/test-plugin.vst /tmp/ktest/
+          KEEPSAKE_VST2_PATH=/tmp/ktest \
+            build/clap-scan build/keepsake.clap 2>&1 | tee /tmp/scan-output.txt
+          grep "Keepsake Test Plugin" /tmp/scan-output.txt
+          grep "keepsake.vst2.4B505354" /tmp/scan-output.txt
+          echo "Scan verification passed"
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Verify build outputs
+        run: |
+          test -f build/keepsake.clap
+          test -f build/keepsake-bridge
+          test -f build/bridge-test
+          test -f build/test-plugin.so
+          echo "All build outputs present"
+
+      - name: Test — bridge with test plugin
+        run: |
+          build/bridge-test build/keepsake-bridge build/test-plugin.so
+
+      - name: Test — clap-scan with test plugin
+        run: |
+          mkdir -p /tmp/ktest
+          cp build/test-plugin.so /tmp/ktest/
+          KEEPSAKE_VST2_PATH=/tmp/ktest \
+            build/clap-scan build/keepsake.clap 2>&1 | tee /tmp/scan-output.txt
+          grep "Keepsake Test Plugin" /tmp/scan-output.txt
+          echo "Scan verification passed"
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build --config Debug
+
+      - name: Verify build outputs
+        shell: bash
+        run: |
+          test -f build/Debug/keepsake.clap || test -f build/keepsake.clap
+          echo "Build output present"

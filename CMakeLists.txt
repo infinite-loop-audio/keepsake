@@ -203,4 +203,17 @@ if(APPLE OR UNIX)
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
     target_link_libraries(bridge-test PRIVATE clap)
+
+    # Test plugin — minimal VST2 for CI
+    add_library(test-plugin MODULE tools/test-plugin.cpp)
+    target_include_directories(test-plugin PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor
+    )
+    set_target_properties(test-plugin PROPERTIES PREFIX "" SUFFIX ".so")
+    if(APPLE)
+        set_target_properties(test-plugin PROPERTIES
+            SUFFIX ".dylib"
+            BUNDLE FALSE
+        )
+    endif()
 endif()
