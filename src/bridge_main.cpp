@@ -250,33 +250,57 @@ int main(int /*argc*/, char * /*argv*/[]) {
     fprintf(stderr, "bridge: started (pid=%d)\n", getpid());
 
     while (true) {
-        // Check for shared-memory process requests (audio hot path)
-        // This is checked FIRST, before any pipe or GUI work.
-        bool did_shm_process = false;
+
+        // Read from pipe — this is the wake-up mechanism.
+        // When audio is active, the host sends a 1-byte signal before
+        // each process cycle. We read it, then check shared memory.
+        // When audio is idle, non-RT commands arrive as full messages.
+        //
+        // Use a short timeout when GUI is open for responsiveness.
+        int read_timeout = gui_is_open() ? 16 : -1; // block when no GUI
+
+        // Try to read one byte (could be a wake signal or start of a message)
+        uint8_t first_byte;
+        bool got_byte = false;
+        if (read_timeout >= 0) {
+            if (platform_read_ready(g_pipe_in, read_timeout)) {
+                got_byte = platform_read(g_pipe_in, &first_byte, 1);
+            }
+        } else {
+            got_byte = platform_read(g_pipe_in, &first_byte, 1);
+        }
+
+        if (!got_byte) {
+            if (gui_is_open()) gui_idle(nullptr);
+            continue;
+        }
+
+        // Check if this is a wake signal (value=1, not an IPC header)
+        // IPC headers start with an opcode (0x01+ for commands, 0x81+ for responses)
+        // but the first byte of the uint32_t opcode on little-endian would be
+        // the low byte. Wake signal byte=1 matches IPC_OP_INIT's low byte.
+        // To disambiguate: check shm FIRST after any pipe activity.
+        // If shm has PROCESS_REQUESTED, handle it. Otherwise, read the
+        // rest of the IPC message.
+
+        // Check shared memory for process requests
+        bool handled_shm = false;
         for (auto &kv : g_instances) {
             auto *inst = kv.second;
             if (!inst->shm.ptr || !inst->active) continue;
             auto *ctrl = shm_control(inst->shm.ptr);
-            uint32_t st = shm_load_acquire(&ctrl->state);
-
-            if (st == SHM_STATE_PROCESS_REQUESTED) {
-                // Process audio via shared memory
+            if (shm_load_acquire(&ctrl->state) == SHM_STATE_PROCESS_REQUESTED) {
                 uint32_t nframes = ctrl->num_frames;
                 if (nframes > inst->max_frames) nframes = inst->max_frames;
 
-                // Apply param changes from shared memory
-                for (uint32_t p = 0; p < ctrl->param_count && p < 64; p++) {
+                for (uint32_t p = 0; p < ctrl->param_count && p < 64; p++)
                     inst->loader->set_param(ctrl->params[p].index,
                                              ctrl->params[p].value);
-                }
 
-                // Send MIDI events from shared memory
-                for (uint32_t m = 0; m < ctrl->midi_count && m < SHM_MAX_MIDI_EVENTS; m++) {
+                for (uint32_t m = 0; m < ctrl->midi_count && m < SHM_MAX_MIDI_EVENTS; m++)
                     inst->loader->send_midi(ctrl->midi_events[m].delta_frames,
                                              ctrl->midi_events[m].data);
-                }
 
-                // Set up channel pointers
                 std::vector<float *> in_ptrs(static_cast<size_t>(inst->num_inputs));
                 std::vector<float *> out_ptrs(static_cast<size_t>(inst->num_outputs));
                 for (int i = 0; i < inst->num_inputs; i++)
@@ -294,36 +318,30 @@ int main(int /*argc*/, char * /*argv*/[]) {
                     inst->num_outputs, nframes);
 
                 shm_store_release(&ctrl->state, SHM_STATE_PROCESS_DONE);
-                did_shm_process = true;
+                handled_shm = true;
             }
         }
 
-        // Determine if any instance has active shared memory processing.
-        // If so, use non-blocking pipe reads to keep the shm poll tight.
-        bool has_active = false;
-        for (auto &kv : g_instances) {
-            if (kv.second->shm.ptr && kv.second->active) {
-                has_active = true;
+        if (handled_shm) continue;
+
+        // Not a wake signal — it's the first byte of an IPC message header.
+        // Read the remaining 7 bytes of the header + payload.
+        uint8_t hdr_buf[sizeof(IpcHeader)];
+        hdr_buf[0] = first_byte;
+        if (!platform_read(g_pipe_in, hdr_buf + 1, sizeof(IpcHeader) - 1)) {
+            fprintf(stderr, "bridge: pipe closed, exiting\n");
+            break;
+        }
+
+        IpcHeader hdr;
+        memcpy(&hdr, hdr_buf, sizeof(hdr));
+        uint32_t opcode = hdr.opcode;
+        std::vector<uint8_t> payload(hdr.payload_size);
+        if (hdr.payload_size > 0) {
+            if (!platform_read(g_pipe_in, payload.data(), hdr.payload_size)) {
+                fprintf(stderr, "bridge: pipe closed during payload, exiting\n");
                 break;
             }
-        }
-
-        // Check for non-RT commands on the pipe
-        // 0ms (non-blocking) when audio is active — don't delay shm polling
-        // 5ms when idle — save CPU when no audio is flowing
-        int read_timeout = has_active ? 0 :
-                           (gui_is_open() ? 1 : 50);
-
-        uint32_t opcode;
-        std::vector<uint8_t> payload;
-
-        if (!ipc_read_msg(g_pipe_in, opcode, payload, read_timeout)) {
-            if (gui_is_open()) gui_idle(nullptr);
-            if (!has_active && !gui_is_open()) {
-                // Nothing active — brief sleep to avoid busy-spinning
-                usleep(1000); // 1ms
-            }
-            continue;
         }
 
         // Extract instance ID from payload (first 4 bytes)

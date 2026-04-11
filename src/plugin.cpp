@@ -280,13 +280,20 @@ static clap_process_status plugin_process(const clap_plugin_t *plugin,
 
     shm_store_release(&ctrl->state, SHM_STATE_PROCESS_REQUESTED);
 
-    // Spin-wait for bridge to complete processing (no syscalls)
-    // Timeout: ~100ms (enough for any reasonable buffer, catch crashes)
+    // Wake the bridge with a single byte on the pipe.
+    // The bridge blocks on this pipe read (zero CPU when idle).
+    // Audio data is already in shared memory — the pipe byte is just
+    // the wake-up signal.
+    uint8_t wake = 1;
+    platform_write(kp->bridge->proc.pipe_to, &wake, 1);
+
+    // Spin-wait for bridge to complete — should be very fast since
+    // the bridge wakes immediately from the pipe signal.
     for (int spin = 0; spin < 10000000; spin++) {
         uint32_t st = shm_load_acquire(&ctrl->state);
         if (st == SHM_STATE_PROCESS_DONE) break;
-        if (spin > 0 && (spin % 1000) == 0) {
-            // Brief yield after ~10μs of spinning to avoid burning CPU
+        // Yield occasionally if bridge is slow (heavy plugin)
+        if (spin > 100 && (spin % 1000) == 0) {
 #ifndef _WIN32
             sched_yield();
 #else
