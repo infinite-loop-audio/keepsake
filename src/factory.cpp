@@ -630,21 +630,12 @@ bool keepsake_factory_init(const char *plugin_path) {
 
             Vst2PluginInfo info;
             info.format = FORMAT_VST2;
-            // Try fast in-process loading first
+            // Fast in-process loading (native arch only)
             if (vst2_load_metadata(dir_entry.path().string(), info)) {
                 all_plugins.push_back(std::move(info));
-            } else if (!s_bridge_x86_64_path.empty() &&
-                       cfg.expose_mode != "all") {
-                // Native loading failed — record as needing cross-arch.
-                // Use the bridge to get metadata (spawns subprocess).
-                Vst2PluginInfo cross;
-                cross.format = FORMAT_VST2;
-                if (scan_plugin_via_bridge(dir_entry.path().string(),
-                        s_bridge_x86_64_path, FORMAT_VST2, cross)) {
-                    cross.needs_cross_arch = true;
-                    all_plugins.push_back(std::move(cross));
-                }
             }
+            // Cross-arch plugins require keepsake-scan to populate the
+            // cache. They're too slow to scan during host init.
         }
     }
     fprintf(stderr, "keepsake: found %zu VST2 plugin(s)\n", all_plugins.size());
