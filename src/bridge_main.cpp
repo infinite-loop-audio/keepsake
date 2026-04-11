@@ -451,7 +451,15 @@ int main(int argc, char *argv[]) {
             if (inst->loader && inst->loader->has_editor()) {
                 EditorHeaderInfo hdr;
                 hdr.format = "VST2";
+#if defined(__x86_64__)
+                hdr.architecture = "x86_64 (Rosetta)";
+#elif defined(__aarch64__)
+                hdr.architecture = "ARM64";
+#elif defined(__i386__)
+                hdr.architecture = "32-bit";
+#else
                 hdr.architecture = "native";
+#endif
                 hdr.isolation = "per-instance";
                 IpcPluginInfo pi2 = {};
                 std::vector<uint8_t> extra2;
