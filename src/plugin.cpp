@@ -56,6 +56,8 @@ static void output_silence(const clap_process_t *process) {
 
 // --- CLAP plugin callbacks ---
 
+static bool do_activate(KeepsakePlugin *kp); // forward declaration
+
 static bool plugin_init(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
 
@@ -123,6 +125,12 @@ static bool plugin_init(const clap_plugin_t *plugin) {
         fprintf(stderr, "keepsake: init OK — in=%d out=%d params=%d editor=%d\n",
                 kp2->num_inputs, kp2->num_outputs, kp2->num_params,
                 kp2->has_editor);
+
+        // Complete deferred activation if the host already called activate
+        if (kp2->needs_activate) {
+            do_activate(kp2);
+            kp2->needs_activate = false;
+        }
         return nullptr;
     }, kp);
     pthread_detach(kp->init_thread);
@@ -145,29 +153,20 @@ static void plugin_destroy(const clap_plugin_t *plugin) {
     delete kp;
 }
 
-static bool plugin_activate(const clap_plugin_t *plugin,
-                              double sample_rate,
-                              uint32_t min_frames,
-                              uint32_t max_frames) {
-    auto *kp = get(plugin);
-    if (!kp->bridge_ok || kp->crashed) return false;
-    (void)min_frames;
+// Actually perform the activation (called when bridge is ready)
+static bool do_activate(KeepsakePlugin *kp) {
+    kp->max_frames = kp->deferred_max_frames;
 
-    kp->max_frames = max_frames;
-
-    // Create shared memory for audio buffers
     char instance_id[32];
     snprintf(instance_id, sizeof(instance_id), "%p", static_cast<void *>(kp));
     std::string shm_name = platform_shm_name(instance_id);
 
-    size_t shm_size = shm_total_size(kp->num_inputs, kp->num_outputs, max_frames);
+    size_t shm_size = shm_total_size(kp->num_inputs, kp->num_outputs,
+                                      kp->max_frames);
 
     if (!platform_shm_create(kp->shm, shm_name, shm_size)) return false;
-
-    // Initialize shared-memory mutex + condition variable
     shm_init_sync(shm_control(kp->shm.ptr));
 
-    // Send SET_SHM: [name_len][name][shm_size]
     uint32_t name_len = static_cast<uint32_t>(shm_name.size());
     uint32_t shm_size32 = static_cast<uint32_t>(shm_size);
     std::vector<uint8_t> shm_payload(4 + name_len + 4);
@@ -182,14 +181,37 @@ static bool plugin_activate(const clap_plugin_t *plugin,
         return false;
     }
 
-    // Send ACTIVATE
-    IpcActivatePayload ap = { sample_rate, max_frames };
+    IpcActivatePayload ap = { kp->deferred_sample_rate, kp->max_frames };
     if (!send_and_wait(kp, IPC_OP_ACTIVATE, &ap, sizeof(ap))) {
         platform_shm_close(kp->shm);
         return false;
     }
 
+    send_and_wait(kp, IPC_OP_START_PROC);
     kp->active = true;
+    kp->processing = true;
+    fprintf(stderr, "keepsake: deferred activation complete\n");
+    return true;
+}
+
+static bool plugin_activate(const clap_plugin_t *plugin,
+                              double sample_rate,
+                              uint32_t min_frames,
+                              uint32_t max_frames) {
+    auto *kp = get(plugin);
+    (void)min_frames;
+
+    // Store params for deferred activation
+    kp->deferred_sample_rate = sample_rate;
+    kp->deferred_max_frames = max_frames;
+    kp->needs_activate = true;
+
+    // If bridge is already ready, activate now
+    if (kp->bridge_ok && !kp->crashed) {
+        return do_activate(kp);
+    }
+
+    // Bridge still loading — activation will happen when it's ready
     return true;
 }
 
@@ -205,7 +227,13 @@ static void plugin_deactivate(const clap_plugin_t *plugin) {
 
 static bool plugin_start_processing(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
-    if (!kp->active || kp->crashed) return false;
+    if (kp->crashed) return false;
+    // If bridge not ready yet, just set the flag — deferred activate
+    // will handle START_PROC when activation completes
+    if (!kp->bridge_ok || !kp->active) {
+        kp->processing = true;
+        return true;
+    }
     if (!send_and_wait(kp, IPC_OP_START_PROC)) return false;
     kp->processing = true;
     return true;
