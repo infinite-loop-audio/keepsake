@@ -20,19 +20,22 @@
 
 #ifndef _WIN32
 #include <unistd.h>
+#include <poll.h>
 #else
 #include <windows.h>
 #include <process.h>
 #define getpid _getpid
 #endif
 
-// Bridge I/O pipes
+// Bridge I/O: command pipe (stdin/stdout) + wake pipe (fd 3)
 #ifdef _WIN32
 static PlatformPipe g_pipe_in  = GetStdHandle(STD_INPUT_HANDLE);
 static PlatformPipe g_pipe_out = GetStdHandle(STD_OUTPUT_HANDLE);
+static PlatformPipe g_wake_fd  = PLATFORM_INVALID_PIPE;
 #else
 static PlatformPipe g_pipe_in  = STDIN_FILENO;
 static PlatformPipe g_pipe_out = STDOUT_FILENO;
+static PlatformPipe g_wake_fd  = 3; // wake pipe from parent, duped to fd 3
 #endif
 
 // --- Per-instance state ---
@@ -250,53 +253,45 @@ int main(int /*argc*/, char * /*argv*/[]) {
     fprintf(stderr, "bridge: started (pid=%d)\n", getpid());
 
     while (true) {
+        // Poll BOTH pipes: command pipe (non-RT) and wake pipe (RT audio).
+        // Wake pipe gets priority — always check it first.
+#ifndef _WIN32
+        struct pollfd pfds[2];
+        pfds[0].fd = g_wake_fd;
+        pfds[0].events = POLLIN;
+        pfds[1].fd = g_pipe_in;
+        pfds[1].events = POLLIN;
 
-        // Read from pipe — this is the wake-up mechanism.
-        // When audio is active, the host sends a 1-byte signal before
-        // each process cycle. We read it, then check shared memory.
-        // When audio is idle, non-RT commands arrive as full messages.
-        //
-        // Use a short timeout when GUI is open for responsiveness.
-        int read_timeout = gui_is_open() ? 16 : -1; // block when no GUI
+        int timeout = gui_is_open() ? 16 : -1;
+        int pr = poll(pfds, 2, timeout);
 
-        // Try to read one byte (could be a wake signal or start of a message)
-        uint8_t first_byte;
-        bool got_byte = false;
-        if (read_timeout >= 0) {
-            if (platform_read_ready(g_pipe_in, read_timeout)) {
-                got_byte = platform_read(g_pipe_in, &first_byte, 1);
-            }
-        } else {
-            got_byte = platform_read(g_pipe_in, &first_byte, 1);
-        }
-
-        if (!got_byte) {
+        if (pr == 0) {
+            // Timeout — service GUI
             if (gui_is_open()) gui_idle(nullptr);
             continue;
         }
+        if (pr < 0) continue;
 
-        // Check if this is a wake signal (value=1, not an IPC header)
-        // IPC headers start with an opcode (0x01+ for commands, 0x81+ for responses)
-        // but the first byte of the uint32_t opcode on little-endian would be
-        // the low byte. Wake signal byte=1 matches IPC_OP_INIT's low byte.
-        // To disambiguate: check shm FIRST after any pipe activity.
-        // If shm has PROCESS_REQUESTED, handle it. Otherwise, read the
-        // rest of the IPC message.
+        // Wake pipe: audio process request
+        if (pfds[0].revents & POLLIN) {
+            // Drain all wake bytes
+            uint8_t drain[64];
+            read(g_wake_fd, drain, sizeof(drain));
 
-        // Check shared memory for process requests
-        bool handled_shm = false;
-        for (auto &kv : g_instances) {
-            auto *inst = kv.second;
-            if (!inst->shm.ptr || !inst->active) continue;
-            auto *ctrl = shm_control(inst->shm.ptr);
-            if (shm_load_acquire(&ctrl->state) == SHM_STATE_PROCESS_REQUESTED) {
+            // Process all shm requests
+            for (auto &kv : g_instances) {
+                auto *inst = kv.second;
+                if (!inst->shm.ptr || !inst->active) continue;
+                auto *ctrl = shm_control(inst->shm.ptr);
+                if (shm_load_acquire(&ctrl->state) != SHM_STATE_PROCESS_REQUESTED)
+                    continue;
+
                 uint32_t nframes = ctrl->num_frames;
                 if (nframes > inst->max_frames) nframes = inst->max_frames;
 
                 for (uint32_t p = 0; p < ctrl->param_count && p < 64; p++)
                     inst->loader->set_param(ctrl->params[p].index,
                                              ctrl->params[p].value);
-
                 for (uint32_t m = 0; m < ctrl->midi_count && m < SHM_MAX_MIDI_EVENTS; m++)
                     inst->loader->send_midi(ctrl->midi_events[m].delta_frames,
                                              ctrl->midi_events[m].data);
@@ -318,30 +313,25 @@ int main(int /*argc*/, char * /*argv*/[]) {
                     inst->num_outputs, nframes);
 
                 shm_store_release(&ctrl->state, SHM_STATE_PROCESS_DONE);
-                handled_shm = true;
             }
         }
 
-        if (handled_shm) continue;
+        // Command pipe: non-RT IPC messages
+        if (!(pfds[1].revents & POLLIN)) continue;
+#else
+        // Windows: simplified path (TODO: proper dual-pipe polling)
+        if (!platform_read_ready(g_pipe_in, gui_is_open() ? 16 : -1)) {
+            if (gui_is_open()) gui_idle(nullptr);
+            continue;
+        }
+#endif
 
-        // Not a wake signal — it's the first byte of an IPC message header.
-        // Read the remaining 7 bytes of the header + payload.
-        uint8_t hdr_buf[sizeof(IpcHeader)];
-        hdr_buf[0] = first_byte;
-        if (!platform_read(g_pipe_in, hdr_buf + 1, sizeof(IpcHeader) - 1)) {
-            fprintf(stderr, "bridge: pipe closed, exiting\n");
+        // Read IPC message from command pipe
+        uint32_t opcode;
+        std::vector<uint8_t> payload;
+        if (!ipc_read_msg(g_pipe_in, opcode, payload)) {
+            fprintf(stderr, "bridge: command pipe closed, exiting\n");
             break;
-        }
-
-        IpcHeader hdr;
-        memcpy(&hdr, hdr_buf, sizeof(hdr));
-        uint32_t opcode = hdr.opcode;
-        std::vector<uint8_t> payload(hdr.payload_size);
-        if (hdr.payload_size > 0) {
-            if (!platform_read(g_pipe_in, payload.data(), hdr.payload_size)) {
-                fprintf(stderr, "bridge: pipe closed during payload, exiting\n");
-                break;
-            }
         }
 
         // Extract instance ID from payload (first 4 bytes)

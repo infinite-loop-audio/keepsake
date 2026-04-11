@@ -38,7 +38,8 @@ struct KeepsakePlugin {
     // Bridge process (from pool)
     BridgeProcess *bridge = nullptr;
     uint32_t instance_id = 0; // assigned by bridge on INIT
-    std::mutex ipc_mutex; // serializes pipe I/O between threads
+    std::mutex ipc_mutex; // serializes command pipe I/O between threads
+    int wake_pipe_w = -1;  // write end of wake pipe (host → bridge, audio signal only)
 
     // Shared memory
     PlatformShm shm;

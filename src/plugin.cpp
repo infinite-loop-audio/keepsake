@@ -280,12 +280,10 @@ static clap_process_status plugin_process(const clap_plugin_t *plugin,
 
     shm_store_release(&ctrl->state, SHM_STATE_PROCESS_REQUESTED);
 
-    // Wake the bridge with a single byte on the pipe.
-    // The bridge blocks on this pipe read (zero CPU when idle).
-    // Audio data is already in shared memory — the pipe byte is just
-    // the wake-up signal.
+    // Wake the bridge via the dedicated wake pipe (separate from command pipe).
+    // This avoids corrupting IPC messages with interleaved wake bytes.
     uint8_t wake = 1;
-    platform_write(kp->bridge->proc.pipe_to, &wake, 1);
+    platform_write(kp->bridge->proc.wake_to, &wake, 1);
 
     // Spin-wait for bridge to complete — should be very fast since
     // the bridge wakes immediately from the pipe signal.

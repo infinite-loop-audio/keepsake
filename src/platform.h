@@ -28,8 +28,10 @@ typedef pid_t PlatformPid;
 
 struct PlatformProcess {
     PlatformPid pid;
-    PlatformPipe pipe_to;    // host writes commands here
-    PlatformPipe pipe_from;  // host reads responses here
+    PlatformPipe pipe_to;    // host writes commands here (non-RT)
+    PlatformPipe pipe_from;  // host reads responses here (non-RT)
+    PlatformPipe wake_to;    // host writes 1-byte wake signal (RT, audio thread)
+    PlatformPipe wake_from;  // bridge reads wake signal
 #ifdef _WIN32
     HANDLE process_handle;
 #endif
@@ -123,8 +125,8 @@ static inline void platform_kill(PlatformProcess &proc) {
 
 static inline bool platform_spawn(const std::string &binary,
                                     PlatformProcess &proc) {
-    int to_child[2], from_child[2];
-    if (pipe(to_child) < 0 || pipe(from_child) < 0) {
+    int to_child[2], from_child[2], wake[2];
+    if (pipe(to_child) < 0 || pipe(from_child) < 0 || pipe(wake) < 0) {
         perror("keepsake: pipe");
         return false;
     }
@@ -134,15 +136,18 @@ static inline bool platform_spawn(const std::string &binary,
         perror("keepsake: fork");
         close(to_child[0]); close(to_child[1]);
         close(from_child[0]); close(from_child[1]);
+        close(wake[0]); close(wake[1]);
         return false;
     }
 
     if (pid == 0) {
-        // Child
+        // Child: stdin=commands, stdout=responses, fd3=wake
         dup2(to_child[0], STDIN_FILENO);
         dup2(from_child[1], STDOUT_FILENO);
+        dup2(wake[0], 3);
         close(to_child[0]); close(to_child[1]);
         close(from_child[0]); close(from_child[1]);
+        close(wake[0]); close(wake[1]);
         execl(binary.c_str(), "keepsake-bridge", nullptr);
         perror("keepsake: execl");
         _exit(1);
@@ -151,10 +156,13 @@ static inline bool platform_spawn(const std::string &binary,
     // Parent
     close(to_child[0]);
     close(from_child[1]);
+    close(wake[0]);
 
     proc.pid = pid;
     proc.pipe_to = to_child[1];
     proc.pipe_from = from_child[0];
+    proc.wake_to = wake[1];
+    proc.wake_from = -1; // bridge side only
     return true;
 }
 
