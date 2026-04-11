@@ -170,11 +170,50 @@ static void handle_init(uint32_t /*caller_id*/, const std::vector<uint8_t> &payl
         return;
     }
 
+    // Load the plugin on a thread with a 5-second timeout.
+    // Some plugins hang during VSTPluginMain or effOpen (license checks, etc.)
+#ifndef _WIN32
+    volatile bool load_done = false;
+    volatile bool load_ok = false;
+
+    pthread_t lt;
+    struct LoadCtx { BridgeLoader *l; std::string p; volatile bool *done; volatile bool *ok; };
+    auto *lctx = new LoadCtx{loader, path, &load_done, &load_ok};
+
+    pthread_create(&lt, nullptr, [](void *arg) -> void * {
+        auto *c = static_cast<LoadCtx *>(arg);
+        *c->ok = c->l->load(c->p);
+        *c->done = true;
+        delete c;
+        return nullptr;
+    }, lctx);
+
+    // Wait up to 5 seconds
+    for (int i = 0; i < 50 && !load_done; i++) {
+        usleep(100000); // 100ms
+    }
+
+    if (!load_done) {
+        fprintf(stderr, "bridge: plugin load timed out (5s): %s\n", path.c_str());
+        pthread_detach(lt); // let it die eventually
+        ipc_write_error(g_pipe_out, "plugin load timed out");
+        // Don't delete loader — thread still using it
+        return;
+    }
+    pthread_join(lt, nullptr);
+
+    if (!load_ok) {
+        ipc_write_error(g_pipe_out, "failed to load plugin");
+        delete loader;
+        return;
+    }
+#else
     if (!loader->load(path)) {
         ipc_write_error(g_pipe_out, "failed to load plugin");
         delete loader;
         return;
     }
+#endif
 
     // Create instance
     auto *inst = new PluginInstance();
