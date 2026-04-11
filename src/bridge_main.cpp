@@ -47,8 +47,11 @@ struct PluginInstance {
     int32_t num_inputs = 0;
     int32_t num_outputs = 0;
     uint32_t max_frames = 0;
-    bool active = false;
+    volatile bool active = false;
     bool processing = false;
+#ifndef _WIN32
+    pthread_t audio_thread = 0;
+#endif
 };
 
 static std::unordered_map<uint32_t, PluginInstance *> g_instances;
@@ -78,6 +81,76 @@ static void destroy_all_instances() {
     for (auto &kv : g_instances) ids.push_back(kv.first);
     for (auto id : ids) destroy_instance(id);
 }
+
+// --- Audio processing thread ---
+// One thread per active instance. Blocks on pthread_cond_wait in shared
+// memory until the host signals PROCESS_REQUESTED.
+
+#ifndef _WIN32
+static void *audio_thread_func(void *arg) {
+    auto *inst = static_cast<PluginInstance *>(arg);
+    auto *ctrl = shm_control(inst->shm.ptr);
+
+    // Pre-allocate channel pointers
+    std::vector<float *> in_ptrs(static_cast<size_t>(inst->num_inputs));
+    std::vector<float *> out_ptrs(static_cast<size_t>(inst->num_outputs));
+
+    fprintf(stderr, "bridge: audio thread started for instance %u\n", inst->id);
+
+    while (inst->active) {
+        pthread_mutex_lock(&ctrl->mutex);
+
+        // Block until host signals PROCESS_REQUESTED
+        while (ctrl->state != SHM_STATE_PROCESS_REQUESTED && inst->active) {
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            ts.tv_nsec += 50000000; // 50ms timeout (check active flag)
+            if (ts.tv_nsec >= 1000000000) {
+                ts.tv_sec++;
+                ts.tv_nsec -= 1000000000;
+            }
+            pthread_cond_timedwait(&ctrl->cond, &ctrl->mutex, &ts);
+        }
+
+        if (!inst->active) {
+            pthread_mutex_unlock(&ctrl->mutex);
+            break;
+        }
+
+        // Process audio
+        uint32_t nframes = ctrl->num_frames;
+        if (nframes > inst->max_frames) nframes = inst->max_frames;
+
+        for (uint32_t p = 0; p < ctrl->param_count && p < 64; p++)
+            inst->loader->set_param(ctrl->params[p].index,
+                                     ctrl->params[p].value);
+        for (uint32_t m = 0; m < ctrl->midi_count && m < SHM_MAX_MIDI_EVENTS; m++)
+            inst->loader->send_midi(ctrl->midi_events[m].delta_frames,
+                                     ctrl->midi_events[m].data);
+
+        for (int i = 0; i < inst->num_inputs; i++)
+            in_ptrs[static_cast<size_t>(i)] =
+                shm_audio_inputs(inst->shm.ptr, i, inst->max_frames);
+        for (int i = 0; i < inst->num_outputs; i++)
+            out_ptrs[static_cast<size_t>(i)] =
+                shm_audio_outputs(inst->shm.ptr, inst->num_inputs,
+                                   i, inst->max_frames);
+
+        inst->loader->process(
+            inst->num_inputs > 0 ? in_ptrs.data() : nullptr,
+            inst->num_inputs,
+            inst->num_outputs > 0 ? out_ptrs.data() : nullptr,
+            inst->num_outputs, nframes);
+
+        ctrl->state = SHM_STATE_PROCESS_DONE;
+        pthread_cond_signal(&ctrl->cond);
+        pthread_mutex_unlock(&ctrl->mutex);
+    }
+
+    fprintf(stderr, "bridge: audio thread stopped for instance %u\n", inst->id);
+    return nullptr;
+}
+#endif
 
 // --- Command handlers (instance-aware) ---
 
@@ -162,6 +235,14 @@ static void handle_activate(PluginInstance *inst, const std::vector<uint8_t> &pa
     inst->max_frames = ap.max_frames;
     inst->loader->activate(ap.sample_rate, ap.max_frames);
     inst->active = true;
+
+    // Start audio processing thread
+#ifndef _WIN32
+    if (inst->shm.ptr) {
+        pthread_create(&inst->audio_thread, nullptr, audio_thread_func, inst);
+    }
+#endif
+
     ipc_write_ok(g_pipe_out);
 }
 
@@ -283,58 +364,14 @@ int main(int argc, char *argv[]) {
                static_cast<uint64_t>(ts.tv_nsec) / 1000;
     };
 
-    // Audio processing is now driven by pthread_cond in shared memory.
-    // The bridge waits on the condition variable (zero CPU, instant wake)
-    // and processes directly when signalled. No pipes or polling needed
-    // for the audio path.
+    // Audio processing runs on a dedicated thread per active instance.
+    // The thread blocks on pthread_cond_wait (zero CPU) and wakes
+    // instantly when the host signals. No polling, no pipes.
     //
-    // This thread handles: pipe commands + GUI. Audio is processed inline
-    // when the shm condition variable fires (checked each iteration).
+    // The main thread handles: pipe commands + GUI only.
 
     while (true) {
-        // Check all active instances for process requests via shm cond
-        for (auto &kv : g_instances) {
-            auto *inst = kv.second;
-            if (!inst->shm.ptr || !inst->active) continue;
-            auto *ctrl = shm_control(inst->shm.ptr);
-
-#ifndef _WIN32
-            pthread_mutex_lock(&ctrl->mutex);
-            if (ctrl->state == SHM_STATE_PROCESS_REQUESTED) {
-                uint32_t nframes = ctrl->num_frames;
-                if (nframes > inst->max_frames) nframes = inst->max_frames;
-
-                for (uint32_t p = 0; p < ctrl->param_count && p < 64; p++)
-                    inst->loader->set_param(ctrl->params[p].index,
-                                             ctrl->params[p].value);
-                for (uint32_t m = 0; m < ctrl->midi_count && m < SHM_MAX_MIDI_EVENTS; m++)
-                    inst->loader->send_midi(ctrl->midi_events[m].delta_frames,
-                                             ctrl->midi_events[m].data);
-
-                proc_in_ptrs.resize(static_cast<size_t>(inst->num_inputs));
-                proc_out_ptrs.resize(static_cast<size_t>(inst->num_outputs));
-                for (int i = 0; i < inst->num_inputs; i++)
-                    proc_in_ptrs[static_cast<size_t>(i)] =
-                        shm_audio_inputs(inst->shm.ptr, i, inst->max_frames);
-                for (int i = 0; i < inst->num_outputs; i++)
-                    proc_out_ptrs[static_cast<size_t>(i)] =
-                        shm_audio_outputs(inst->shm.ptr, inst->num_inputs,
-                                           i, inst->max_frames);
-
-                inst->loader->process(
-                    inst->num_inputs > 0 ? proc_in_ptrs.data() : nullptr,
-                    inst->num_inputs,
-                    inst->num_outputs > 0 ? proc_out_ptrs.data() : nullptr,
-                    inst->num_outputs, nframes);
-
-                ctrl->state = SHM_STATE_PROCESS_DONE;
-                pthread_cond_signal(&ctrl->cond);
-            }
-            pthread_mutex_unlock(&ctrl->mutex);
-#endif
-        }
-
-        // Throttle GUI
+        // GUI throttle
         if (gui_is_open()) {
             uint64_t now = now_us();
             if (now - last_gui_idle_us >= 16000) {
@@ -343,22 +380,13 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        // Check command pipe (non-blocking when audio active, blocking when idle)
-        bool has_active = false;
-        for (auto &kv : g_instances)
-            if (kv.second->shm.ptr && kv.second->active) { has_active = true; break; }
-
-        int pipe_timeout = has_active ? 0 : (gui_is_open() ? 16 : 50);
+        // Command pipe (blocking when idle, short timeout when GUI open)
+        int pipe_timeout = gui_is_open() ? 16 : -1;
 
 #ifndef _WIN32
         struct pollfd pfd = { g_pipe_in, POLLIN, 0 };
         int pr = poll(&pfd, 1, pipe_timeout);
-        if (pr <= 0) {
-            // If idle (no active instances, no GUI), brief sleep
-            if (!has_active && !gui_is_open() && pipe_timeout > 0)
-                usleep(1000);
-            continue;
-        }
+        if (pr <= 0) continue;
         if (!(pfd.revents & POLLIN)) continue;
 #else
         if (!platform_read_ready(g_pipe_in, pipe_timeout)) continue;
@@ -479,8 +507,19 @@ int main(int argc, char *argv[]) {
             break;
         case IPC_OP_DEACTIVATE:
             if (inst->loader && inst->active) {
+                inst->active = false; // signals audio thread to stop
+#ifndef _WIN32
+                if (inst->shm.ptr) {
+                    // Wake the audio thread so it sees active=false
+                    auto *dc = shm_control(inst->shm.ptr);
+                    pthread_mutex_lock(&dc->mutex);
+                    pthread_cond_signal(&dc->cond);
+                    pthread_mutex_unlock(&dc->mutex);
+                    pthread_join(inst->audio_thread, nullptr);
+                    inst->audio_thread = 0;
+                }
+#endif
                 inst->loader->deactivate();
-                inst->active = false;
             }
             ipc_write_ok(g_pipe_out);
             break;
