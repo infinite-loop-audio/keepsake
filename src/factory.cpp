@@ -555,7 +555,7 @@ bool keepsake_factory_init(const char *plugin_path) {
         }
     }
 
-    // Full scan — VST2
+    // Full scan — VST2 (in-process for speed during host scan)
     auto vst2_paths = get_scan_paths();
     for (const auto &p : cfg.extra_vst2_paths) {
         vst2_paths.push_back(p);
@@ -563,43 +563,69 @@ bool keepsake_factory_init(const char *plugin_path) {
 
     fprintf(stderr, "keepsake: scanning %zu VST2 path(s)\n", vst2_paths.size());
     for (const auto &dir : vst2_paths) {
-        scan_vst2_directory(dir, all_plugins);
+        std::error_code ec;
+        if (!fs::is_directory(dir, ec)) continue;
+        for (const auto &dir_entry : fs::directory_iterator(dir, ec)) {
+            if (ec) break;
+            if (!is_vst2_file(dir_entry.path())) continue;
+
+            Vst2PluginInfo info;
+            info.format = FORMAT_VST2;
+            // Use fast in-process loading (may crash on bad plugins,
+            // but doesn't block on subprocess spawning)
+            if (vst2_load_metadata(dir_entry.path().string(), info)) {
+                all_plugins.push_back(std::move(info));
+            }
+            // Cross-arch plugins detected but not scanned during init
+            // — they'll appear after a manual rescan via bridge
+        }
     }
     fprintf(stderr, "keepsake: found %zu VST2 plugin(s)\n", all_plugins.size());
 
-    // Full scan — VST3 (via bridge subprocess)
-    {
-        std::vector<std::string> vst3_paths;
+    // VST3 and AU scanning is deferred — too slow for host init.
+    // These formats are scanned via bridge subprocesses which spawn
+    // one process per plugin. Run a manual rescan (rescan sentinel
+    // or config.toml rescan=true) to discover VST3 and AU plugins.
+    // Once scanned, they're cached and load instantly on subsequent runs.
+    //
+    // TODO: background thread scanning so init returns immediately
+    // while VST3/AU discovery happens in parallel.
+    if (force_rescan) {
+        // Only do the expensive scans when explicitly requested
+        // Full scan — VST3 (via bridge subprocess)
+        {
+            std::vector<std::string> vst3_paths;
 #ifdef __APPLE__
-        const char *home2 = getenv("HOME");
-        if (home2) vst3_paths.push_back(std::string(home2) + "/Library/Audio/Plug-Ins/VST3");
-        vst3_paths.push_back("/Library/Audio/Plug-Ins/VST3");
+            const char *home2 = getenv("HOME");
+            if (home2) vst3_paths.push_back(std::string(home2) + "/Library/Audio/Plug-Ins/VST3");
+            vst3_paths.push_back("/Library/Audio/Plug-Ins/VST3");
 #elif defined(_WIN32)
-        const char *cpf = getenv("COMMONPROGRAMFILES");
-        if (cpf) vst3_paths.push_back(std::string(cpf) + "\\VST3");
+            const char *cpf = getenv("COMMONPROGRAMFILES");
+            if (cpf) vst3_paths.push_back(std::string(cpf) + "\\VST3");
 #else
-        const char *home2 = getenv("HOME");
-        if (home2) vst3_paths.push_back(std::string(home2) + "/.vst3");
-        vst3_paths.push_back("/usr/lib/vst3");
-        vst3_paths.push_back("/usr/local/lib/vst3");
+            const char *home2 = getenv("HOME");
+            if (home2) vst3_paths.push_back(std::string(home2) + "/.vst3");
+            vst3_paths.push_back("/usr/lib/vst3");
+            vst3_paths.push_back("/usr/local/lib/vst3");
 #endif
-        size_t before = all_plugins.size();
-        for (const auto &dir : vst3_paths) {
-            scan_vst3_directory(dir, all_plugins);
+            size_t before = all_plugins.size();
+            for (const auto &dir : vst3_paths) {
+                scan_vst3_directory(dir, all_plugins);
+            }
+            fprintf(stderr, "keepsake: found %zu VST3 plugin(s)\n",
+                    all_plugins.size() - before);
         }
-        fprintf(stderr, "keepsake: found %zu VST3 plugin(s)\n",
-                all_plugins.size() - before);
-    }
 
-    // Full scan — AU v2 (macOS only)
+        // Full scan — AU v2 (macOS only)
 #ifdef __APPLE__
-    {
-        size_t before = all_plugins.size();
-        scan_au_plugins(all_plugins);
-        fprintf(stderr, "keepsake: found %zu AU plugin(s)\n",
-                all_plugins.size() - before);
-    }
+        {
+            size_t before = all_plugins.size();
+            scan_au_plugins(all_plugins);
+            fprintf(stderr, "keepsake: found %zu AU plugin(s)\n",
+                    all_plugins.size() - before);
+        }
 #endif
+    }
 
     fprintf(stderr, "keepsake: total %zu plugin(s) across all formats\n",
             all_plugins.size());
