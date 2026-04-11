@@ -296,19 +296,31 @@ int main(int /*argc*/, char * /*argv*/[]) {
             }
         }
 
-        // If we handled shm process, loop back immediately — don't
-        // block on pipe reads while audio might need processing
-        if (did_shm_process) continue;
+        // Determine if any instance has active shared memory processing.
+        // If so, use non-blocking pipe reads to keep the shm poll tight.
+        bool has_active = false;
+        for (auto &kv : g_instances) {
+            if (kv.second->shm.ptr && kv.second->active) {
+                has_active = true;
+                break;
+            }
+        }
 
-        // Check for non-RT commands on the pipe (short timeout)
-        int read_timeout = gui_is_open() ? 1 : 5; // ms
+        // Check for non-RT commands on the pipe
+        // 0ms (non-blocking) when audio is active — don't delay shm polling
+        // 5ms when idle — save CPU when no audio is flowing
+        int read_timeout = has_active ? 0 :
+                           (gui_is_open() ? 1 : 50);
 
         uint32_t opcode;
         std::vector<uint8_t> payload;
 
         if (!ipc_read_msg(g_pipe_in, opcode, payload, read_timeout)) {
-            // Timeout — service GUI if open
             if (gui_is_open()) gui_idle(nullptr);
+            if (!has_active && !gui_is_open()) {
+                // Nothing active — brief sleep to avoid busy-spinning
+                usleep(1000); // 1ms
+            }
             continue;
         }
 
