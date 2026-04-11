@@ -63,8 +63,10 @@ static bool plugin_init(const clap_plugin_t *plugin) {
     // If the bridge can't load the plugin in 3 seconds, we fail cleanly.
     // The user sees "failed to load" instead of a hang.
     // Second attempt is usually faster (Rosetta caches the translation).
+    fprintf(stderr, "keepsake: acquiring bridge...\n");
     kp->bridge = s_pool->acquire(
         kp->bridge_binary, kp->vst2_path, kp->format, kp->isolation);
+    fprintf(stderr, "keepsake: bridge acquired (%s)\n", kp->bridge ? "OK" : "FAIL");
     if (!kp->bridge) return false;
 
     std::vector<uint8_t> init_payload(4 + kp->vst2_path.size());
@@ -110,12 +112,18 @@ static bool plugin_init(const clap_plugin_t *plugin) {
 static void plugin_destroy(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
     if (kp->bridge_ok && !kp->crashed && kp->bridge) {
-        // Shutdown this instance (not the whole process)
         send_and_wait(kp, IPC_OP_SHUTDOWN);
     }
     if (kp->bridge && s_pool) {
-        s_pool->release(kp->bridge);
+        // Don't block — release on a background thread if bridge is busy
+        auto *bp = kp->bridge;
         kp->bridge = nullptr;
+        pthread_t t;
+        pthread_create(&t, nullptr, [](void *arg) -> void * {
+            s_pool->release(static_cast<BridgeProcess *>(arg));
+            return nullptr;
+        }, bp);
+        pthread_detach(t);
     }
     if (kp->shm.ptr) platform_shm_close(kp->shm);
     delete kp;
