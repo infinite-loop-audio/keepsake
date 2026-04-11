@@ -19,7 +19,7 @@ Started: 2026-04-10
 | `010` | [Configurable Process Isolation](010-configurable-process-isolation.md) | complete |
 | `011` | [Editor Header Bar](011-editor-header-bar.md) | complete |
 | `012` | [Windows and Linux GUI](012-windows-linux-gui.md) | planned |
-| `013` | [Embedded Editors](013-embedded-editors.md) | planned |
+| `013` | [Embedded Editors](013-embedded-editors.md) | complete |
 | `014` | [Scan Robustness](014-scan-robustness.md) | complete |
 | `015` | [Codebase Health](015-codebase-health.md) | planned |
 | `016` | [Soundcheck Integration](016-soundcheck-integration.md) | deferred |
