@@ -349,29 +349,11 @@ uint32_t gui_open_editor_iosurface(BridgeLoader *loader, int width, int height) 
     return surface_id;
 }
 
-// Capture the offscreen window's fully composited content into the IOSurface.
-// Uses CGWindowListCreateImage which captures the window server's composited
-// result — works with OpenGL, Core Animation, and any rendering method.
+// Capture the offscreen view's layer tree into the IOSurface.
+// Uses CALayer renderInContext: which captures the full layer hierarchy
+// including sublayers, without needing the window to be on-screen.
 static void capture_to_iosurface() {
-    if (!g_surface || !g_offscreen_window) return;
-
-    CGWindowID wid = (CGWindowID)[g_offscreen_window windowNumber];
-
-    // CGWindowListCreateImage is marked unavailable in macOS 15 SDK but the
-    // symbol still exists at runtime. Load it dynamically.
-    typedef CGImageRef (*CGWindowListCreateImageFn)(
-        CGRect, uint32_t, uint32_t, uint32_t);
-    static auto fn = reinterpret_cast<CGWindowListCreateImageFn>(
-        dlsym(RTLD_DEFAULT, "CGWindowListCreateImage"));
-    if (!fn) return;
-
-    CGImageRef img = fn(
-        CGRectNull,
-        1,   // kCGWindowListOptionIncludingWindow
-        wid,
-        8 | 16); // kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution
-
-    if (!img) return;
+    if (!g_surface || !g_offscreen_view) return;
 
     size_t width = IOSurfaceGetWidth(g_surface);
     size_t height = IOSurfaceGetHeight(g_surface);
@@ -386,14 +368,21 @@ static void capture_to_iosurface() {
         kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
 
     if (ctx) {
-        // Draw the captured image into the IOSurface
-        CGContextDrawImage(ctx, CGRectMake(0, 0, width, height), img);
+        // Flip for top-left origin
+        CGContextTranslateCTM(ctx, 0, height);
+        CGContextScaleCTM(ctx, 1.0, -1.0);
+
+        // Render the layer tree (captures all sublayers including GPU content)
+        CALayer *layer = [g_offscreen_view layer];
+        if (layer) {
+            [layer renderInContext:ctx];
+        }
+
         CGContextRelease(ctx);
     }
 
     CGColorSpaceRelease(cs);
     IOSurfaceUnlock(g_surface, 0, nullptr);
-    CGImageRelease(img);
 }
 
 void gui_forward_mouse(const IpcMouseEvent &ev) {
