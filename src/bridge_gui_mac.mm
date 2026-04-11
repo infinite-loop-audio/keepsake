@@ -7,6 +7,7 @@
 #import <Cocoa/Cocoa.h>
 #include "bridge_gui.h"
 #include <cstdio>
+#include <dlfcn.h>
 
 // VST2 ERect (not in VeSTige header)
 struct ERect { int16_t top, left, bottom, right; };
@@ -348,10 +349,29 @@ uint32_t gui_open_editor_iosurface(BridgeLoader *loader, int width, int height) 
     return surface_id;
 }
 
-// Capture the offscreen view's content into the IOSurface.
-// Called from gui_idle at ~60fps.
+// Capture the offscreen window's fully composited content into the IOSurface.
+// Uses CGWindowListCreateImage which captures the window server's composited
+// result — works with OpenGL, Core Animation, and any rendering method.
 static void capture_to_iosurface() {
-    if (!g_surface || !g_offscreen_view) return;
+    if (!g_surface || !g_offscreen_window) return;
+
+    CGWindowID wid = (CGWindowID)[g_offscreen_window windowNumber];
+
+    // CGWindowListCreateImage is marked unavailable in macOS 15 SDK but the
+    // symbol still exists at runtime. Load it dynamically.
+    typedef CGImageRef (*CGWindowListCreateImageFn)(
+        CGRect, uint32_t, uint32_t, uint32_t);
+    static auto fn = reinterpret_cast<CGWindowListCreateImageFn>(
+        dlsym(RTLD_DEFAULT, "CGWindowListCreateImage"));
+    if (!fn) return;
+
+    CGImageRef img = fn(
+        CGRectNull,
+        1,   // kCGWindowListOptionIncludingWindow
+        wid,
+        8 | 16); // kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution
+
+    if (!img) return;
 
     size_t width = IOSurfaceGetWidth(g_surface);
     size_t height = IOSurfaceGetHeight(g_surface);
@@ -366,26 +386,14 @@ static void capture_to_iosurface() {
         kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
 
     if (ctx) {
-        // Flip the context (CoreGraphics is bottom-up, views are top-down)
-        CGContextTranslateCTM(ctx, 0, height);
-        CGContextScaleCTM(ctx, 1.0, -1.0);
-
-        // Render the view hierarchy into the IOSurface
-        NSGraphicsContext *nsCtx = [NSGraphicsContext
-            graphicsContextWithCGContext:ctx flipped:YES];
-        [NSGraphicsContext saveGraphicsState];
-        [NSGraphicsContext setCurrentContext:nsCtx];
-
-        // Render the entire view tree
-        [g_offscreen_view displayRectIgnoringOpacity:[g_offscreen_view bounds]
-                                           inContext:nsCtx];
-
-        [NSGraphicsContext restoreGraphicsState];
+        // Draw the captured image into the IOSurface
+        CGContextDrawImage(ctx, CGRectMake(0, 0, width, height), img);
         CGContextRelease(ctx);
     }
 
     CGColorSpaceRelease(cs);
     IOSurfaceUnlock(g_surface, 0, nullptr);
+    CGImageRelease(img);
 }
 
 void gui_forward_mouse(const IpcMouseEvent &ev) {
