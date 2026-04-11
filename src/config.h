@@ -17,7 +17,7 @@ struct IsolationOverride {
 struct KeepsakeConfig {
     std::vector<std::string> extra_vst2_paths;
     bool force_rescan = false;
-    std::string isolation_default = "shared";
+    std::string isolation_default = "per-instance";
     std::vector<IsolationOverride> isolation_overrides;
 };
 

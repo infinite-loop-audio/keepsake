@@ -11,7 +11,9 @@ static bool gui_is_api_supported(const clap_plugin_t *plugin,
             api, is_floating, kp->has_editor);
     if (!kp->has_editor) return false;
 #ifdef __APPLE__
-    if (!is_floating) return false;
+    // Accept both embedded and floating on macOS — we always open
+    // a floating window, but hosts like REAPER only ask for embedded.
+    (void)is_floating;
     return strcmp(api, CLAP_WINDOW_API_COCOA) == 0;
 #elif defined(_WIN32)
     return strcmp(api, CLAP_WINDOW_API_WIN32) == 0;
@@ -24,7 +26,7 @@ static bool gui_get_preferred_api(const clap_plugin_t *, const char **api,
                                     bool *is_floating) {
 #ifdef __APPLE__
     *api = CLAP_WINDOW_API_COCOA;
-    *is_floating = true;
+    *is_floating = false; // REAPER only tries embedded
 #elif defined(_WIN32)
     *api = CLAP_WINDOW_API_WIN32;
     *is_floating = false;
@@ -39,12 +41,12 @@ static bool gui_create(const clap_plugin_t *plugin, const char *api, bool is_flo
     auto *kp = get(plugin);
     fprintf(stderr, "keepsake: gui_create('%s', floating=%d)\n", api, is_floating);
     if (!kp->has_editor || kp->crashed) return false;
+    // On macOS we always use floating windows regardless of what the host asks
 #ifdef __APPLE__
-    if (!is_floating) return false;
+    kp->gui_is_floating = true;
 #else
-    (void)is_floating;
-#endif
     kp->gui_is_floating = is_floating;
+#endif
     return true;
 }
 
@@ -75,21 +77,29 @@ static bool gui_set_size(const clap_plugin_t *, uint32_t, uint32_t) { return fal
 
 static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *window) {
     auto *kp = get(plugin);
+    fprintf(stderr, "keepsake: gui_set_parent() called\n");
     if (kp->crashed || !kp->has_editor || !kp->bridge || !window) return false;
 
+#ifdef __APPLE__
+    // macOS: can't embed across processes. Open a floating window instead.
+    // The host thinks we're embedded, but we open our own window.
+    if (!kp->editor_open) {
+        if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN)) return false;
+        kp->editor_open = true;
+    }
+    return true;
+#else
     uint64_t handle = 0;
 #ifdef _WIN32
     handle = reinterpret_cast<uint64_t>(window->win32);
-#elif defined(__linux__)
-    handle = static_cast<uint64_t>(window->x11);
 #else
-    return false;
+    handle = static_cast<uint64_t>(window->x11);
 #endif
-
     if (!send_and_wait(kp, IPC_OP_EDITOR_SET_PARENT, &handle, sizeof(handle)))
         return false;
     kp->editor_open = true;
     return true;
+#endif
 }
 
 static bool gui_set_transient(const clap_plugin_t *, const clap_window_t *) { return true; }
