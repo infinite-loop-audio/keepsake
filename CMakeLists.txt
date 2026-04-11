@@ -235,6 +235,9 @@ if(APPLE OR UNIX)
     add_executable(host-test tools/host-test.cpp)
     target_link_libraries(host-test PRIVATE clap dl)
 
+    add_executable(host-test-threaded tools/host-test-threaded.cpp)
+    target_link_libraries(host-test-threaded PRIVATE clap dl)
+
     # Test plugin — minimal VST2 for CI
     add_library(test-plugin MODULE tools/test-plugin.cpp)
     target_include_directories(test-plugin PRIVATE

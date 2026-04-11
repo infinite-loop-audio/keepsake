@@ -56,36 +56,41 @@ static void output_silence(const clap_process_t *process) {
 
 // --- CLAP plugin callbacks ---
 
-static bool plugin_init(const clap_plugin_t *plugin) {
-    auto *kp = get(plugin);
+// Background thread: spawns bridge, sends INIT, optionally activates.
+// Uses the command pipe DIRECTLY (no ipc_mutex) since nothing else
+// touches the pipe until bridge_ok is set.
+static void *init_thread_func(void *arg) {
+    auto *kp = static_cast<KeepsakePlugin *>(arg);
 
-    // Acquire bridge process from pool
     kp->bridge = s_pool->acquire(
         kp->bridge_binary, kp->vst2_path, kp->format, kp->isolation);
-    if (!kp->bridge) return false;
+    if (!kp->bridge) {
+        fprintf(stderr, "keepsake: bridge spawn failed\n");
+        return nullptr;
+    }
 
-    // Send INIT with [format][path] — instance_id=0 for new instance
+    // Send INIT directly (no mutex — we own the pipe exclusively)
     std::vector<uint8_t> init_payload(4 + kp->vst2_path.size());
     memcpy(init_payload.data(), &kp->format, 4);
-    memcpy(init_payload.data() + 4, kp->vst2_path.data(), kp->vst2_path.size());
+    memcpy(init_payload.data() + 4, kp->vst2_path.data(),
+           kp->vst2_path.size());
 
-    // INIT with instance_id=0 (bridge assigns a real one)
     if (!ipc_write_instance_msg(kp->bridge->proc.pipe_to, IPC_OP_INIT, 0,
                                  init_payload.data(),
                                  static_cast<uint32_t>(init_payload.size()))) {
         s_pool->release(kp->bridge); kp->bridge = nullptr;
-        return false;
+        return nullptr;
     }
 
     uint32_t resp_op;
     std::vector<uint8_t> ok_data;
-    if (!ipc_read_msg(kp->bridge->proc.pipe_from, resp_op, ok_data, 10000) ||
+    if (!ipc_read_msg(kp->bridge->proc.pipe_from, resp_op, ok_data, 15000) ||
         resp_op != IPC_OP_OK) {
+        fprintf(stderr, "keepsake: INIT failed/timeout\n");
         s_pool->release(kp->bridge); kp->bridge = nullptr;
-        return false;
+        return nullptr;
     }
 
-    // Parse response: [instance_id][IpcPluginInfo][strings...]
     if (ok_data.size() >= 4 + sizeof(IpcPluginInfo)) {
         memcpy(&kp->instance_id, ok_data.data(), 4);
         IpcPluginInfo pi;
@@ -93,21 +98,66 @@ static bool plugin_init(const clap_plugin_t *plugin) {
         kp->num_inputs = pi.num_inputs;
         kp->num_outputs = pi.num_outputs;
         kp->num_params = pi.num_params;
+        kp->has_editor = (pi.flags & 1) != 0;
     }
 
+    fprintf(stderr, "keepsake: init OK — in=%d out=%d params=%d editor=%d\n",
+            kp->num_inputs, kp->num_outputs, kp->num_params, kp->has_editor);
+
+    // If activate was already called, do it now (still on this thread,
+    // still exclusively owning the pipe)
+    if (kp->needs_activate) {
+        kp->max_frames = kp->deferred_frames;
+
+        char iid[32];
+        snprintf(iid, sizeof(iid), "%p", static_cast<void *>(kp));
+        std::string shm_name = platform_shm_name(iid);
+        size_t shm_size = shm_total_size(kp->num_inputs, kp->num_outputs,
+                                          kp->max_frames);
+        if (platform_shm_create(kp->shm, shm_name, shm_size)) {
+            shm_init_sync(shm_control(kp->shm.ptr));
+
+            uint32_t nl = static_cast<uint32_t>(shm_name.size());
+            uint32_t ss = static_cast<uint32_t>(shm_size);
+            std::vector<uint8_t> sp(4 + nl + 4);
+            memcpy(sp.data(), &nl, 4);
+            memcpy(sp.data() + 4, shm_name.data(), nl);
+            memcpy(sp.data() + 4 + nl, &ss, 4);
+
+            // Direct pipe writes (no mutex)
+            ipc_write_instance_msg(kp->bridge->proc.pipe_to,
+                IPC_OP_SET_SHM, kp->instance_id,
+                sp.data(), static_cast<uint32_t>(sp.size()));
+            ipc_read_msg(kp->bridge->proc.pipe_from, resp_op, ok_data, 5000);
+
+            IpcActivatePayload ap = { kp->deferred_sr, kp->max_frames };
+            ipc_write_instance_msg(kp->bridge->proc.pipe_to,
+                IPC_OP_ACTIVATE, kp->instance_id, &ap, sizeof(ap));
+            ipc_read_msg(kp->bridge->proc.pipe_from, resp_op, ok_data, 5000);
+
+            ipc_write_instance_msg(kp->bridge->proc.pipe_to,
+                IPC_OP_START_PROC, kp->instance_id, nullptr, 0);
+            ipc_read_msg(kp->bridge->proc.pipe_from, resp_op, ok_data, 5000);
+
+            kp->active = true;
+            kp->processing = true;
+            fprintf(stderr, "keepsake: deferred activation complete\n");
+        }
+    }
+
+    // NOW set bridge_ok — this is the signal to the audio thread
+    // that everything is ready. Before this, process() outputs silence.
     kp->bridge_ok = true;
+    return nullptr;
+}
 
-    // Read editor flag from plugin info (already in ok_data)
-    if (ok_data.size() >= 4 + sizeof(IpcPluginInfo)) {
-        IpcPluginInfo pi2;
-        memcpy(&pi2, ok_data.data() + 4, sizeof(pi2));
-        kp->has_editor = (pi2.flags & 1) != 0;
-        fprintf(stderr, "keepsake: init OK — in=%d out=%d params=%d editor=%d\n",
-                kp->num_inputs, kp->num_outputs, kp->num_params, kp->has_editor);
-    }
+static bool plugin_init(const clap_plugin_t *plugin) {
+    auto *kp = get(plugin);
 
-    // Parameter and editor rect queries are deferred to first access
-    // to keep init() fast (REAPER times out on slow init).
+    // Launch everything on a background thread — returns immediately
+    pthread_t t;
+    pthread_create(&t, nullptr, init_thread_func, kp);
+    pthread_detach(t);
     return true;
 }
 
@@ -130,47 +180,13 @@ static bool plugin_activate(const clap_plugin_t *plugin,
                               uint32_t min_frames,
                               uint32_t max_frames) {
     auto *kp = get(plugin);
-    if (!kp->bridge_ok || kp->crashed) return false;
     (void)min_frames;
 
-    kp->max_frames = max_frames;
-
-    // Create shared memory for audio buffers
-    char instance_id[32];
-    snprintf(instance_id, sizeof(instance_id), "%p", static_cast<void *>(kp));
-    std::string shm_name = platform_shm_name(instance_id);
-
-    size_t shm_size = shm_total_size(kp->num_inputs, kp->num_outputs, max_frames);
-
-    if (!platform_shm_create(kp->shm, shm_name, shm_size)) return false;
-
-    // Initialize shared-memory mutex + condition variable
-    shm_init_sync(shm_control(kp->shm.ptr));
-
-    // Send SET_SHM: [name_len][name][shm_size]
-    uint32_t name_len = static_cast<uint32_t>(shm_name.size());
-    uint32_t shm_size32 = static_cast<uint32_t>(shm_size);
-    std::vector<uint8_t> shm_payload(4 + name_len + 4);
-    memcpy(shm_payload.data(), &name_len, 4);
-    memcpy(shm_payload.data() + 4, shm_name.data(), name_len);
-    memcpy(shm_payload.data() + 4 + name_len, &shm_size32, 4);
-
-    if (!send_and_wait(kp, IPC_OP_SET_SHM,
-                       shm_payload.data(),
-                       static_cast<uint32_t>(shm_payload.size()))) {
-        platform_shm_close(kp->shm);
-        return false;
-    }
-
-    // Send ACTIVATE
-    IpcActivatePayload ap = { sample_rate, max_frames };
-    if (!send_and_wait(kp, IPC_OP_ACTIVATE, &ap, sizeof(ap))) {
-        platform_shm_close(kp->shm);
-        return false;
-    }
-
-    kp->active = true;
-    return true;
+    // Store for deferred activation (init thread will handle it)
+    kp->deferred_sr = sample_rate;
+    kp->deferred_frames = max_frames;
+    kp->needs_activate = true;
+    return true; // never blocks
 }
 
 static void plugin_deactivate(const clap_plugin_t *plugin) {
@@ -184,9 +200,8 @@ static void plugin_deactivate(const clap_plugin_t *plugin) {
 }
 
 static bool plugin_start_processing(const clap_plugin_t *plugin) {
+    // Init thread handles START_PROC as part of deferred activation
     auto *kp = get(plugin);
-    if (!kp->active || kp->crashed) return false;
-    if (!send_and_wait(kp, IPC_OP_START_PROC)) return false;
     kp->processing = true;
     return true;
 }

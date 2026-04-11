@@ -6,7 +6,7 @@
 
 // Lazy-load parameter info from bridge on first access.
 static void ensure_params_loaded(KeepsakePlugin *kp) {
-    if (kp->params_loaded || kp->crashed || !kp->bridge_ok) return;
+    if (kp->params_loaded || kp->crashed || !kp->bridge_ok || !kp->active) return;
     kp->params_loaded = true;
     kp->params.resize(static_cast<size_t>(kp->num_params));
     for (int32_t i = 0; i < kp->num_params; i++) {
@@ -86,7 +86,7 @@ void keepsake_params_flush(const clap_plugin_t *plugin,
                             const clap_input_events_t *in,
                             const clap_output_events_t *) {
     auto *kp = get(plugin);
-    if (!in || kp->crashed || !kp->bridge) return;
+    if (!in || kp->crashed || !kp->bridge_ok || !kp->active) return;
     std::lock_guard<std::mutex> lock(kp->ipc_mutex);
     uint32_t count = in->size(in);
     for (uint32_t i = 0; i < count; i++) {

@@ -58,10 +58,15 @@ struct KeepsakePlugin {
     void *iosurface_layer = nullptr; // CALayer* for IOSurface refresh
 
     // State
-    bool bridge_ok = false;
-    bool active = false;
+    volatile bool bridge_ok = false;
+    volatile bool active = false;
     bool processing = false;
     bool crashed = false;
+
+    // Deferred activation
+    bool needs_activate = false;
+    double deferred_sr = 44100;
+    uint32_t deferred_frames = 512;
 };
 
 // Create a KeepsakePlugin. Returns a clap_plugin_t pointer (the plugin's
