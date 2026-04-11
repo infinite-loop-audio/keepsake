@@ -201,17 +201,23 @@ static bool plugin_activate(const clap_plugin_t *plugin,
     auto *kp = get(plugin);
     (void)min_frames;
 
-    // Store params for deferred activation
     kp->deferred_sample_rate = sample_rate;
     kp->deferred_max_frames = max_frames;
     kp->needs_activate = true;
 
-    // If bridge is already ready, activate now
+    // If bridge is already ready, activate on a background thread
+    // — NEVER block the host's main thread with IPC
     if (kp->bridge_ok && !kp->crashed) {
-        return do_activate(kp);
+#ifndef _WIN32
+        pthread_t t;
+        pthread_create(&t, nullptr, [](void *arg) -> void * {
+            do_activate(static_cast<KeepsakePlugin *>(arg));
+            return nullptr;
+        }, kp);
+        pthread_detach(t);
+#endif
     }
-
-    // Bridge still loading — activation will happen when it's ready
+    // Otherwise: init thread will call do_activate when bridge is ready
     return true;
 }
 
