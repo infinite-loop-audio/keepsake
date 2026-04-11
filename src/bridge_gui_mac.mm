@@ -81,6 +81,15 @@ static const CGFloat HEADER_HEIGHT = 28.0;
 
 @end
 
+// --- Flipped container view (0,0 at top-left, matching plugin expectations) ---
+
+@interface KeepsakeFlippedView : NSView
+@end
+
+@implementation KeepsakeFlippedView
+- (BOOL)isFlipped { return YES; }
+@end
+
 // --- State ---
 
 static NSWindow *g_window = nil;
@@ -123,11 +132,14 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     [g_window setReleasedWhenClosed:NO];
     [g_window setLevel:NSFloatingWindowLevel];
 
-    NSView *content = [g_window contentView];
+    // Use a flipped content view so layout is top-down
+    KeepsakeFlippedView *content = [[KeepsakeFlippedView alloc]
+        initWithFrame:NSMakeRect(0, 0, w, h + HEADER_HEIGHT)];
+    [g_window setContentView:content];
 
-    // Header bar at the top
+    // Header bar at the top (y=0 in flipped coords)
     g_header = [[KeepsakeHeaderView alloc]
-        initWithFrame:NSMakeRect(0, h, w, HEADER_HEIGHT)];
+        initWithFrame:NSMakeRect(0, 0, w, HEADER_HEIGHT)];
     g_header.pluginName = [NSString stringWithUTF8String:
                            header.plugin_name.c_str()];
     g_header.formatBadge = [NSString stringWithUTF8String:
@@ -136,26 +148,25 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
                           header.architecture.c_str()];
     g_header.isolationBadge = [NSString stringWithUTF8String:
                                header.isolation.c_str()];
-    [g_header setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
     [content addSubview:g_header];
 
-    // Editor container below the header
-    g_editor_container = [[NSView alloc]
-        initWithFrame:NSMakeRect(0, 0, w, h)];
-    [g_editor_container setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+    // Editor container below the header (y=HEADER_HEIGHT in flipped coords)
+    g_editor_container = [[KeepsakeFlippedView alloc]
+        initWithFrame:NSMakeRect(0, HEADER_HEIGHT, w, h)];
     [content addSubview:g_editor_container];
 
     // Open the plugin editor into the container
     loader->open_editor((__bridge void *)g_editor_container);
     g_active_loader = loader;
 
-    // Re-check size after open
+    // Re-check size after open (some plugins report correct size only after effEditOpen)
     int newW = w, newH = h;
     loader->get_editor_rect(newW, newH);
     if (newW != w || newH != h) {
         [g_window setContentSize:NSMakeSize(newW, newH + HEADER_HEIGHT)];
-        [g_editor_container setFrameSize:NSMakeSize(newW, newH)];
-        [g_header setFrame:NSMakeRect(0, newH, newW, HEADER_HEIGHT)];
+        [g_header setFrame:NSMakeRect(0, 0, newW, HEADER_HEIGHT)];
+        [g_editor_container setFrame:NSMakeRect(0, HEADER_HEIGHT, newW, newH)];
+        w = newW; h = newH;
     }
 
     // Track current size for resize detection
@@ -225,18 +236,22 @@ void gui_idle(BridgeLoader *loader) {
             g_current_width = newW;
             g_current_height = newH;
 
+            // Resize window (keep top-left corner anchored)
             NSRect frame = [g_window frame];
-            NSRect content = [g_window contentRectForFrameRect:frame];
-            CGFloat dh = (newH + HEADER_HEIGHT) - content.size.height;
-            CGFloat dw = newW - content.size.width;
+            NSRect contentRect = [g_window contentRectForFrameRect:frame];
+            CGFloat newContentH = newH + HEADER_HEIGHT;
+            CGFloat newContentW = newW;
+            CGFloat dh = newContentH - contentRect.size.height;
 
-            frame.size.width += dw;
+            frame.size.width = newContentW + (frame.size.width - contentRect.size.width);
             frame.size.height += dh;
-            frame.origin.y -= dh; // grow downward
+            frame.origin.y -= dh; // keep top edge stable
 
             [g_window setFrame:frame display:YES animate:NO];
-            [g_editor_container setFrameSize:NSMakeSize(newW, newH)];
-            [g_header setFrame:NSMakeRect(0, newH, newW, HEADER_HEIGHT)];
+
+            // Reposition in flipped coords: header at top, editor below
+            [g_header setFrame:NSMakeRect(0, 0, newW, HEADER_HEIGHT)];
+            [g_editor_container setFrame:NSMakeRect(0, HEADER_HEIGHT, newW, newH)];
 
             fprintf(stderr, "bridge: editor resized to %dx%d\n", newW, newH);
         }
