@@ -316,6 +316,9 @@ int main(int /*argc*/, char * /*argv*/[]) {
             }
         }
 
+        // Service GUI every iteration (not just on timeout)
+        if (gui_is_open()) gui_idle(nullptr);
+
         // Command pipe: non-RT IPC messages
         if (!(pfds[1].revents & POLLIN)) continue;
 #else
