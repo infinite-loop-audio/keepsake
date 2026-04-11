@@ -1,6 +1,6 @@
 # G01.017 — IOSurface Embedded Editors (macOS)
 
-Status: ready
+Status: parked
 Owner: Infinite Loop Audio
 Updated: 2026-04-11
 Auto-continuation: allowed within g01
@@ -54,6 +54,34 @@ REAPER (host process)                    keepsake-bridge (subprocess)
 - When plugin editor resizes, bridge resizes the IOSurface
 - Sends new IOSurfaceID to host (or resizes in-place if possible)
 - Host updates its CALayer
+
+## Status Notes
+
+Initial implementation attempted 2026-04-11. Three capture approaches tried:
+- `displayRectIgnoringOpacity:inContext:` — partial/glitchy, misses GPU content
+- `CALayer renderInContext:` — same issues
+- `CGWindowListCreateImage` — obsoleted in macOS 15 SDK, captured desktop when
+  window positioned offscreen
+
+The IOSurface sharing itself works (surface created, ID passed between
+processes, host CALayer displays it). The unsolved problem is reliably
+capturing the plugin's rendered content INTO the surface. Most VST2 plugins
+use a mix of CoreGraphics, OpenGL, and Core Animation that none of the
+capture APIs handle completely.
+
+Promising avenues to revisit:
+- **In-process GUI loading** (Option A from earlier analysis) — load the
+  plugin binary in-process just for the editor, use out-of-process for audio.
+  Avoids cross-process rendering entirely. Trade-off: GUI crash can affect host.
+- **ScreenCaptureKit** (macOS 13+) — async screen capture API, may handle
+  GPU content better than CGWindowListCreateImage. Needs investigation for
+  per-window capture at 60fps.
+- **CARemoteLayer** — Apple's internal mechanism for AUv3 hosting. Not public
+  API but used by Logic, GarageBand, and others. May be viable with careful use.
+- Wait for Apple to provide a public cross-process view embedding API.
+
+The floating window approach works reliably and is the established pattern
+used by jBridge, Blue Cat's PatchWork, and other professional bridges.
 
 ## Evidence Requirements
 
