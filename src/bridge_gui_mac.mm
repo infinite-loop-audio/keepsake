@@ -265,38 +265,11 @@ void gui_idle(BridgeLoader *loader) {
         }
     }
 
+    // Editor idle tick — the plugin may need periodic updates
     BridgeLoader *active = loader ? loader : g_active_loader;
     if (active) {
         active->editor_idle();
-
-        // Check if the plugin's editor has resized
-        int newW = 0, newH = 0;
-        if (active->get_editor_rect(newW, newH) &&
-            (newW != g_current_width || newH != g_current_height) &&
-            newW > 0 && newH > 0) {
-            g_current_width = newW;
-            g_current_height = newH;
-
-            // Resize window (keep top-left corner anchored)
-            NSRect frame = [g_window frame];
-            NSRect contentRect = [g_window contentRectForFrameRect:frame];
-            CGFloat newContentH = newH + HEADER_HEIGHT;
-            CGFloat newContentW = newW;
-            CGFloat dh = newContentH - contentRect.size.height;
-
-            frame.size.width = newContentW + (frame.size.width - contentRect.size.width);
-            frame.size.height += dh;
-            frame.origin.y -= dh; // keep top edge stable
-
-            [g_window setFrame:frame display:YES animate:NO];
-
-            // Reposition in flipped coords: header at top, editor below
-            [g_header setFrame:NSMakeRect(0, 0, newW, HEADER_HEIGHT)];
-            [g_editor_container setFrame:NSMakeRect(0, HEADER_HEIGHT, newW, newH)];
-            [g_header setNeedsDisplay:YES];
-
-            fprintf(stderr, "bridge: editor resized to %dx%d\n", newW, newH);
-        }
+        // Resize is handled by NSViewFrameDidChangeNotification — no polling needed
     }
 
     if (g_window && ![g_window isVisible]) {
