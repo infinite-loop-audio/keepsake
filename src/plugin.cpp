@@ -290,8 +290,17 @@ static clap_process_status plugin_process(const clap_plugin_t *plugin,
     for (int spin = 0; spin < 10000000; spin++) {
         uint32_t st = shm_load_acquire(&ctrl->state);
         if (st == SHM_STATE_PROCESS_DONE) break;
-        // Yield occasionally if bridge is slow (heavy plugin)
-        if (spin > 100 && (spin % 1000) == 0) {
+
+        // CPU-friendly spin: pause instruction reduces power and
+        // gives the other hyperthread/core a chance
+        if (spin < 1000) {
+#if defined(__aarch64__)
+            __asm__ volatile("isb" ::: "memory"); // ARM: instruction barrier (lighter than yield)
+#elif defined(__x86_64__) || defined(_M_X64)
+            __asm__ volatile("pause" ::: "memory");
+#endif
+        } else if ((spin % 100) == 0) {
+            // After ~10μs of spinning, yield to let bridge run
 #ifndef _WIN32
             sched_yield();
 #else

@@ -252,9 +252,21 @@ int main(int /*argc*/, char * /*argv*/[]) {
 
     fprintf(stderr, "bridge: started (pid=%d)\n", getpid());
 
+    // Pre-allocated channel pointer arrays (avoid malloc in audio path)
+    std::vector<float *> proc_in_ptrs;
+    std::vector<float *> proc_out_ptrs;
+
+    // GUI throttle — 60fps is plenty
+    uint64_t last_gui_idle_us = 0;
+    auto now_us = []() -> uint64_t {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        return static_cast<uint64_t>(ts.tv_sec) * 1000000 +
+               static_cast<uint64_t>(ts.tv_nsec) / 1000;
+    };
+
     while (true) {
         // Poll BOTH pipes: command pipe (non-RT) and wake pipe (RT audio).
-        // Wake pipe gets priority — always check it first.
 #ifndef _WIN32
         struct pollfd pfds[2];
         pfds[0].fd = g_wake_fd;
@@ -266,7 +278,6 @@ int main(int /*argc*/, char * /*argv*/[]) {
         int pr = poll(pfds, 2, timeout);
 
         if (pr == 0) {
-            // Timeout — service GUI
             if (gui_is_open()) gui_idle(nullptr);
             continue;
         }
@@ -296,28 +307,35 @@ int main(int /*argc*/, char * /*argv*/[]) {
                     inst->loader->send_midi(ctrl->midi_events[m].delta_frames,
                                              ctrl->midi_events[m].data);
 
-                std::vector<float *> in_ptrs(static_cast<size_t>(inst->num_inputs));
-                std::vector<float *> out_ptrs(static_cast<size_t>(inst->num_outputs));
+                // Reuse pre-allocated pointer arrays
+                proc_in_ptrs.resize(static_cast<size_t>(inst->num_inputs));
+                proc_out_ptrs.resize(static_cast<size_t>(inst->num_outputs));
                 for (int i = 0; i < inst->num_inputs; i++)
-                    in_ptrs[static_cast<size_t>(i)] =
+                    proc_in_ptrs[static_cast<size_t>(i)] =
                         shm_audio_inputs(inst->shm.ptr, i, inst->max_frames);
                 for (int i = 0; i < inst->num_outputs; i++)
-                    out_ptrs[static_cast<size_t>(i)] =
+                    proc_out_ptrs[static_cast<size_t>(i)] =
                         shm_audio_outputs(inst->shm.ptr, inst->num_inputs,
                                            i, inst->max_frames);
 
                 inst->loader->process(
-                    inst->num_inputs > 0 ? in_ptrs.data() : nullptr,
+                    inst->num_inputs > 0 ? proc_in_ptrs.data() : nullptr,
                     inst->num_inputs,
-                    inst->num_outputs > 0 ? out_ptrs.data() : nullptr,
+                    inst->num_outputs > 0 ? proc_out_ptrs.data() : nullptr,
                     inst->num_outputs, nframes);
 
                 shm_store_release(&ctrl->state, SHM_STATE_PROCESS_DONE);
             }
         }
 
-        // Service GUI every iteration (not just on timeout)
-        if (gui_is_open()) gui_idle(nullptr);
+        // Throttle GUI to ~60fps — don't burn CPU on Cocoa event draining
+        if (gui_is_open()) {
+            uint64_t now = now_us();
+            if (now - last_gui_idle_us >= 16000) { // 16ms = ~60fps
+                gui_idle(nullptr);
+                last_gui_idle_us = now;
+            }
+        }
 
         // Command pipe: non-RT IPC messages
         if (!(pfds[1].revents & POLLIN)) continue;
