@@ -81,7 +81,10 @@ static bool plugin_init(const clap_plugin_t *plugin) {
 
     uint32_t resp_op;
     std::vector<uint8_t> ok_data;
-    if (!ipc_read_msg(kp->bridge->proc.pipe_from, resp_op, ok_data, 3000) ||
+    // Short timeout — the host's main thread must stay responsive.
+    // Fast plugins (native, cached Rosetta) load in <100ms.
+    // Slow plugins fail and can be retried.
+    if (!ipc_read_msg(kp->bridge->proc.pipe_from, resp_op, ok_data, 500) ||
         resp_op != IPC_OP_OK) {
         fprintf(stderr, "keepsake: plugin load timeout/failed (try again)\n");
         s_pool->release(kp->bridge); kp->bridge = nullptr;
