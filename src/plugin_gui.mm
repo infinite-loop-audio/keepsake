@@ -119,9 +119,27 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
                         surfaceLayer.contentsGravity = kCAGravityTopLeft;
                         [parent.layer addSublayer:surfaceLayer];
 
-                        // Store for event forwarding
+                        // Store layer for periodic refresh
+                        kp->iosurface_layer = (__bridge_retained void *)surfaceLayer;
                         kp->editor_width = surf.width;
                         kp->editor_height = surf.height;
+
+                        // Timer to refresh the layer at 60fps
+                        dispatch_source_t timer = dispatch_source_create(
+                            DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+                            dispatch_get_main_queue());
+                        dispatch_source_set_timer(timer,
+                            dispatch_time(DISPATCH_TIME_NOW, 0),
+                            16 * NSEC_PER_MSEC, // 60fps
+                            1 * NSEC_PER_MSEC);
+                        dispatch_source_set_event_handler(timer, ^{
+                            if (kp->iosurface_layer) {
+                                CALayer *l = (__bridge CALayer *)kp->iosurface_layer;
+                                // Force the layer to re-read the IOSurface contents
+                                [l setContents:l.contents];
+                            }
+                        });
+                        dispatch_resume(timer);
 
                         CFRelease(surface);
                         fprintf(stderr, "keepsake: IOSurface composited into host view\n");

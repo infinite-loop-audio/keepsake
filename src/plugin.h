@@ -55,6 +55,7 @@ struct KeepsakePlugin {
     bool gui_is_floating = true;
     int32_t editor_width = 0;
     int32_t editor_height = 0;
+    void *iosurface_layer = nullptr; // CALayer* for IOSurface refresh
 
     // State
     bool bridge_ok = false;

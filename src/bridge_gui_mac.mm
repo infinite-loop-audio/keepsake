@@ -97,6 +97,7 @@ static KeepsakeHeaderView *g_header = nil;
 static NSView *g_editor_container = nil;
 static BridgeLoader *g_active_loader = nil;
 static bool g_editor_open = false;
+static bool g_iosurface_mode = false;
 static int g_current_width = 0;
 static int g_current_height = 0;
 
@@ -252,6 +253,9 @@ bool gui_get_editor_rect(BridgeLoader *loader, int &width, int &height) {
     return loader->get_editor_rect(width, height);
 }
 
+// Forward declarations (IOSurface mode, defined below)
+static void capture_to_iosurface();
+
 void gui_idle(BridgeLoader *loader) {
     if (!g_editor_open) return;
 
@@ -269,7 +273,11 @@ void gui_idle(BridgeLoader *loader) {
     BridgeLoader *active = loader ? loader : g_active_loader;
     if (active) {
         active->editor_idle();
-        // Resize is handled by NSViewFrameDidChangeNotification — no polling needed
+
+        // Capture view content into IOSurface for cross-process display
+        if (gui_is_iosurface_mode()) {
+            capture_to_iosurface();
+        }
     }
 
     if (g_window && ![g_window isVisible]) {
@@ -290,7 +298,6 @@ bool gui_is_open() {
 static IOSurfaceRef g_surface = nullptr;
 static NSView *g_offscreen_view = nil;
 static NSWindow *g_offscreen_window = nil;
-static bool g_iosurface_mode = false;
 
 uint32_t gui_open_editor_iosurface(BridgeLoader *loader, int width, int height) {
     if (!loader || !loader->has_editor()) return 0;
@@ -327,12 +334,6 @@ uint32_t gui_open_editor_iosurface(BridgeLoader *loader, int width, int height) 
         initWithFrame:NSMakeRect(0, 0, width, height)];
     [g_offscreen_view setWantsLayer:YES];
 
-    // Back the view's layer with our IOSurface
-    CALayer *layer = [g_offscreen_view layer];
-    if (layer) {
-        layer.contents = (__bridge id)g_surface;
-    }
-
     [g_offscreen_window setContentView:g_offscreen_view];
     [g_offscreen_window orderBack:nil]; // show but behind everything
 
@@ -345,6 +346,46 @@ uint32_t gui_open_editor_iosurface(BridgeLoader *loader, int width, int height) 
     fprintf(stderr, "bridge: IOSurface editor opened (%dx%d) surfaceID=%u\n",
             width, height, surface_id);
     return surface_id;
+}
+
+// Capture the offscreen view's content into the IOSurface.
+// Called from gui_idle at ~60fps.
+static void capture_to_iosurface() {
+    if (!g_surface || !g_offscreen_view) return;
+
+    size_t width = IOSurfaceGetWidth(g_surface);
+    size_t height = IOSurfaceGetHeight(g_surface);
+    size_t bytesPerRow = IOSurfaceGetBytesPerRow(g_surface);
+
+    IOSurfaceLock(g_surface, 0, nullptr);
+    void *base = IOSurfaceGetBaseAddress(g_surface);
+
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx = CGBitmapContextCreate(
+        base, width, height, 8, bytesPerRow, cs,
+        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
+
+    if (ctx) {
+        // Flip the context (CoreGraphics is bottom-up, views are top-down)
+        CGContextTranslateCTM(ctx, 0, height);
+        CGContextScaleCTM(ctx, 1.0, -1.0);
+
+        // Render the view hierarchy into the IOSurface
+        NSGraphicsContext *nsCtx = [NSGraphicsContext
+            graphicsContextWithCGContext:ctx flipped:YES];
+        [NSGraphicsContext saveGraphicsState];
+        [NSGraphicsContext setCurrentContext:nsCtx];
+
+        // Render the entire view tree
+        [g_offscreen_view displayRectIgnoringOpacity:[g_offscreen_view bounds]
+                                           inContext:nsCtx];
+
+        [NSGraphicsContext restoreGraphicsState];
+        CGContextRelease(ctx);
+    }
+
+    CGColorSpaceRelease(cs);
+    IOSurfaceUnlock(g_surface, 0, nullptr);
 }
 
 void gui_forward_mouse(const IpcMouseEvent &ev) {
