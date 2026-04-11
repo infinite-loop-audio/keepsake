@@ -14,11 +14,21 @@ struct IsolationOverride {
     std::string mode; // "shared", "per-binary", "per-instance"
 };
 
+// Exposure mode: which plugins does Keepsake make visible to the host?
+//   "auto"      — only plugins the host can't load natively (arch mismatch)
+//   "whitelist" — only explicitly listed plugins
+//   "all"       — everything found (development/testing only)
+struct WhitelistEntry {
+    std::string path; // exact path or glob
+};
+
 struct KeepsakeConfig {
     std::vector<std::string> extra_vst2_paths;
     bool force_rescan = false;
     std::string isolation_default = "per-instance";
     std::vector<IsolationOverride> isolation_overrides;
+    std::string expose_mode = "auto"; // "auto", "whitelist", "all"
+    std::vector<WhitelistEntry> whitelist;
 };
 
 // Load config.toml from the platform config directory.

@@ -52,7 +52,10 @@ KeepsakeConfig config_load() {
     bool in_paths_array = false;
     bool in_isolation = false;
     bool in_override = false;
+    bool in_expose = false;
+    bool in_whitelist_entry = false;
     IsolationOverride current_override;
+    WhitelistEntry current_wl;
 
     while (std::getline(f, line)) {
         std::string t = trim(line);
@@ -64,6 +67,20 @@ KeepsakeConfig config_load() {
         }
         if (t == "[isolation]") {
             in_isolation = true; in_scan = false; in_override = false;
+            in_expose = false; in_whitelist_entry = false;
+            continue;
+        }
+        if (t == "[expose]") {
+            in_expose = true; in_scan = false; in_isolation = false;
+            in_override = false; in_whitelist_entry = false;
+            continue;
+        }
+        if (t == "[[expose.plugin]]") {
+            if (in_whitelist_entry && !current_wl.path.empty())
+                cfg.whitelist.push_back(current_wl);
+            current_wl = {};
+            in_whitelist_entry = true; in_expose = true;
+            in_scan = false; in_isolation = false; in_override = false;
             continue;
         }
         if (t == "[[isolation.override]]") {
@@ -146,16 +163,39 @@ KeepsakeConfig config_load() {
                 if (key == "mode") current_override.mode = val;
             }
         }
+        // Expose section
+        if (in_expose && !in_whitelist_entry) {
+            if (t.find("mode") == 0) {
+                size_t eq = t.find('=');
+                if (eq != std::string::npos) {
+                    std::string val = trim(t.substr(eq + 1));
+                    if (val.front() == '"') val = val.substr(1);
+                    if (val.back() == '"') val.pop_back();
+                    cfg.expose_mode = val;
+                }
+            }
+        }
+        if (in_whitelist_entry) {
+            size_t eq = t.find('=');
+            if (eq != std::string::npos) {
+                std::string key = trim(t.substr(0, eq));
+                std::string val = trim(t.substr(eq + 1));
+                if (val.front() == '"') val = val.substr(1);
+                if (val.back() == '"') val.pop_back();
+                if (key == "path") current_wl.path = val;
+            }
+        }
     }
 
-    // Flush last override
-    if (in_override && !current_override.match.empty()) {
+    // Flush last entries
+    if (in_override && !current_override.match.empty())
         cfg.isolation_overrides.push_back(current_override);
-    }
+    if (in_whitelist_entry && !current_wl.path.empty())
+        cfg.whitelist.push_back(current_wl);
 
-    fprintf(stderr, "keepsake: loaded config from '%s' (rescan=%d, %zu extra paths, isolation=%s, %zu overrides)\n",
-            path.c_str(), cfg.force_rescan, cfg.extra_vst2_paths.size(),
-            cfg.isolation_default.c_str(), cfg.isolation_overrides.size());
+    fprintf(stderr, "keepsake: loaded config (expose=%s, %zu whitelist, %zu extra paths, isolation=%s)\n",
+            cfg.expose_mode.c_str(), cfg.whitelist.size(),
+            cfg.extra_vst2_paths.size(), cfg.isolation_default.c_str());
     return cfg;
 }
 

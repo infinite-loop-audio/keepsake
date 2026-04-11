@@ -374,6 +374,64 @@ static std::vector<std::string> get_scan_paths() {
     return paths;
 }
 
+// --- Exposure filtering ---
+// Filter plugins based on the expose mode before building descriptors.
+
+static KeepsakeConfig s_config; // stored for filtering
+
+static bool glob_match_simple(const std::string &pattern, const std::string &text) {
+    if (pattern == text) return true;
+    if (pattern == "*") return true;
+    // Simple suffix match: "*.vst" matches "/path/to/foo.vst"
+    if (pattern.size() > 1 && pattern[0] == '*') {
+        std::string suffix = pattern.substr(1);
+        return text.size() >= suffix.size() &&
+               text.substr(text.size() - suffix.size()) == suffix;
+    }
+    // Simple contains: "*foo*" matches "/path/to/foobar.vst"
+    if (pattern.size() > 2 && pattern[0] == '*' && pattern.back() == '*') {
+        std::string needle = pattern.substr(1, pattern.size() - 2);
+        return text.find(needle) != std::string::npos;
+    }
+    return false;
+}
+
+static void filter_plugins(std::vector<Vst2PluginInfo> &plugins,
+                             const KeepsakeConfig &cfg) {
+    if (cfg.expose_mode == "all") return; // no filtering
+
+    std::vector<Vst2PluginInfo> filtered;
+
+    for (auto &p : plugins) {
+        bool include = false;
+
+        if (cfg.expose_mode == "auto") {
+            // Only expose plugins that need cross-architecture bridging
+            // — i.e., plugins the host can't load natively
+            include = p.needs_cross_arch;
+        } else if (cfg.expose_mode == "whitelist") {
+            // Only expose explicitly listed plugins
+            for (const auto &wl : cfg.whitelist) {
+                if (glob_match_simple(wl.path, p.file_path)) {
+                    include = true;
+                    break;
+                }
+            }
+        }
+
+        if (include) {
+            filtered.push_back(std::move(p));
+        }
+    }
+
+    size_t removed = plugins.size() - filtered.size();
+    plugins = std::move(filtered);
+    if (removed > 0) {
+        fprintf(stderr, "keepsake: filtered to %zu plugins (removed %zu, mode=%s)\n",
+                plugins.size(), removed, cfg.expose_mode.c_str());
+    }
+}
+
 // --- Build descriptors from scan results ---
 
 static void build_descriptors(std::vector<Vst2PluginInfo> &plugins) {
@@ -550,6 +608,7 @@ bool keepsake_factory_init(const char *plugin_path) {
         if (!all_plugins.empty()) {
             fprintf(stderr, "keepsake: using cached scan (%zu plugins)\n",
                     all_plugins.size());
+            filter_plugins(all_plugins, cfg);
             build_descriptors(all_plugins);
             return true;
         }
@@ -630,10 +689,13 @@ bool keepsake_factory_init(const char *plugin_path) {
     fprintf(stderr, "keepsake: total %zu plugin(s) across all formats\n",
             all_plugins.size());
 
-    // Save cache
+    // Save cache (full scan results, before filtering)
     if (use_cache) {
         cache_save(all_plugins);
     }
+
+    // Filter to only expose plugins the host can't load natively
+    filter_plugins(all_plugins, cfg);
 
     build_descriptors(all_plugins);
     return true;
