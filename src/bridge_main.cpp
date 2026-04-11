@@ -283,86 +283,24 @@ int main(int argc, char *argv[]) {
                static_cast<uint64_t>(ts.tv_nsec) / 1000;
     };
 
+    // Audio processing is now driven by pthread_cond in shared memory.
+    // The bridge waits on the condition variable (zero CPU, instant wake)
+    // and processes directly when signalled. No pipes or polling needed
+    // for the audio path.
+    //
+    // This thread handles: pipe commands + GUI. Audio is processed inline
+    // when the shm condition variable fires (checked each iteration).
+
     while (true) {
+        // Check all active instances for process requests via shm cond
+        for (auto &kv : g_instances) {
+            auto *inst = kv.second;
+            if (!inst->shm.ptr || !inst->active) continue;
+            auto *ctrl = shm_control(inst->shm.ptr);
+
 #ifndef _WIN32
-        // Poll available pipes. If wake pipe exists, poll both.
-        // Otherwise, poll command pipe only with short timeout for shm check.
-        int nfds = has_wake_pipe ? 2 : 1;
-        struct pollfd pfds[2];
-        if (has_wake_pipe) {
-            pfds[0].fd = g_wake_fd;
-            pfds[0].events = POLLIN;
-            pfds[1].fd = g_pipe_in;
-            pfds[1].events = POLLIN;
-        } else {
-            pfds[0].fd = g_pipe_in;
-            pfds[0].events = POLLIN;
-        }
-
-        // When no wake pipe, use short timeout to poll shm
-        bool has_active_shm = false;
-        if (!has_wake_pipe) {
-            for (auto &kv : g_instances) {
-                if (kv.second->shm.ptr && kv.second->active) {
-                    has_active_shm = true;
-                    break;
-                }
-            }
-        }
-
-        int timeout = has_active_shm ? 1 :
-                      (gui_is_open() ? 16 : -1);
-        int pr = poll(pfds, nfds, timeout);
-
-        if (pr == 0) {
-            // Timeout — check shm if active, service GUI
-            if (has_active_shm) {
-                for (auto &kv : g_instances) {
-                    auto *inst = kv.second;
-                    if (!inst->shm.ptr || !inst->active) continue;
-                    auto *ctrl = shm_control(inst->shm.ptr);
-                    if (shm_load_acquire(&ctrl->state) == SHM_STATE_PROCESS_REQUESTED) {
-                        uint32_t nframes = ctrl->num_frames;
-                        if (nframes > inst->max_frames) nframes = inst->max_frames;
-                        for (uint32_t p = 0; p < ctrl->param_count && p < 64; p++)
-                            inst->loader->set_param(ctrl->params[p].index, ctrl->params[p].value);
-                        for (uint32_t m = 0; m < ctrl->midi_count && m < SHM_MAX_MIDI_EVENTS; m++)
-                            inst->loader->send_midi(ctrl->midi_events[m].delta_frames, ctrl->midi_events[m].data);
-                        proc_in_ptrs.resize(static_cast<size_t>(inst->num_inputs));
-                        proc_out_ptrs.resize(static_cast<size_t>(inst->num_outputs));
-                        for (int i = 0; i < inst->num_inputs; i++)
-                            proc_in_ptrs[static_cast<size_t>(i)] = shm_audio_inputs(inst->shm.ptr, i, inst->max_frames);
-                        for (int i = 0; i < inst->num_outputs; i++)
-                            proc_out_ptrs[static_cast<size_t>(i)] = shm_audio_outputs(inst->shm.ptr, inst->num_inputs, i, inst->max_frames);
-                        inst->loader->process(
-                            inst->num_inputs > 0 ? proc_in_ptrs.data() : nullptr, inst->num_inputs,
-                            inst->num_outputs > 0 ? proc_out_ptrs.data() : nullptr, inst->num_outputs, nframes);
-                        shm_store_release(&ctrl->state, SHM_STATE_PROCESS_DONE);
-                    }
-                }
-            }
-            if (gui_is_open()) gui_idle(nullptr);
-            continue;
-        }
-        if (pr < 0) continue;
-
-        // Wake pipe: audio process request (only when wake pipe exists)
-        int wake_idx = has_wake_pipe ? 0 : -1;
-        int cmd_idx = has_wake_pipe ? 1 : 0;
-
-        if (wake_idx >= 0 && (pfds[wake_idx].revents & POLLIN)) {
-            // Drain all wake bytes
-            uint8_t drain[64];
-            read(g_wake_fd, drain, sizeof(drain));
-
-            // Process all shm requests
-            for (auto &kv : g_instances) {
-                auto *inst = kv.second;
-                if (!inst->shm.ptr || !inst->active) continue;
-                auto *ctrl = shm_control(inst->shm.ptr);
-                if (shm_load_acquire(&ctrl->state) != SHM_STATE_PROCESS_REQUESTED)
-                    continue;
-
+            pthread_mutex_lock(&ctrl->mutex);
+            if (ctrl->state == SHM_STATE_PROCESS_REQUESTED) {
                 uint32_t nframes = ctrl->num_frames;
                 if (nframes > inst->max_frames) nframes = inst->max_frames;
 
@@ -373,7 +311,6 @@ int main(int argc, char *argv[]) {
                     inst->loader->send_midi(ctrl->midi_events[m].delta_frames,
                                              ctrl->midi_events[m].data);
 
-                // Reuse pre-allocated pointer arrays
                 proc_in_ptrs.resize(static_cast<size_t>(inst->num_inputs));
                 proc_out_ptrs.resize(static_cast<size_t>(inst->num_outputs));
                 for (int i = 0; i < inst->num_inputs; i++)
@@ -390,27 +327,41 @@ int main(int argc, char *argv[]) {
                     inst->num_outputs > 0 ? proc_out_ptrs.data() : nullptr,
                     inst->num_outputs, nframes);
 
-                shm_store_release(&ctrl->state, SHM_STATE_PROCESS_DONE);
+                ctrl->state = SHM_STATE_PROCESS_DONE;
+                pthread_cond_signal(&ctrl->cond);
             }
+            pthread_mutex_unlock(&ctrl->mutex);
+#endif
         }
 
-        // Throttle GUI to ~60fps — don't burn CPU on Cocoa event draining
+        // Throttle GUI
         if (gui_is_open()) {
             uint64_t now = now_us();
-            if (now - last_gui_idle_us >= 16000) { // 16ms = ~60fps
+            if (now - last_gui_idle_us >= 16000) {
                 gui_idle(nullptr);
                 last_gui_idle_us = now;
             }
         }
 
-        // Command pipe: non-RT IPC messages
-        if (!(pfds[cmd_idx].revents & POLLIN)) continue;
-#else
-        // Windows: simplified path (TODO: proper dual-pipe polling)
-        if (!platform_read_ready(g_pipe_in, gui_is_open() ? 16 : -1)) {
-            if (gui_is_open()) gui_idle(nullptr);
+        // Check command pipe (non-blocking when audio active, blocking when idle)
+        bool has_active = false;
+        for (auto &kv : g_instances)
+            if (kv.second->shm.ptr && kv.second->active) { has_active = true; break; }
+
+        int pipe_timeout = has_active ? 0 : (gui_is_open() ? 16 : 50);
+
+#ifndef _WIN32
+        struct pollfd pfd = { g_pipe_in, POLLIN, 0 };
+        int pr = poll(&pfd, 1, pipe_timeout);
+        if (pr <= 0) {
+            // If idle (no active instances, no GUI), brief sleep
+            if (!has_active && !gui_is_open() && pipe_timeout > 0)
+                usleep(1000);
             continue;
         }
+        if (!(pfd.revents & POLLIN)) continue;
+#else
+        if (!platform_read_ready(g_pipe_in, pipe_timeout)) continue;
 #endif
 
         // Read IPC message from command pipe

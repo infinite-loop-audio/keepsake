@@ -12,6 +12,9 @@
 #include <vector>
 
 #include "platform.h"
+#ifndef _WIN32
+#include <pthread.h>
+#endif
 
 // --- Protocol opcodes ---
 
@@ -246,10 +249,32 @@ struct ShmProcessControl {
     uint32_t num_frames;           // frames to process this cycle
     uint32_t midi_count;           // number of MIDI events this cycle
     uint32_t param_count;          // number of param changes this cycle
+#ifndef _WIN32
+    pthread_mutex_t mutex;         // cross-process mutex for sync
+    pthread_cond_t cond;           // cross-process condition variable
+#endif
     ShmMidiEvent midi_events[SHM_MAX_MIDI_EVENTS];
     IpcSetParamPayload params[64]; // batched param changes
     // Audio buffers follow after this struct
 };
+
+// Initialize the mutex/cond in shared memory (called by host after shm create)
+static inline bool shm_init_sync(ShmProcessControl *ctrl) {
+#ifndef _WIN32
+    pthread_mutexattr_t mattr;
+    pthread_mutexattr_init(&mattr);
+    pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
+    pthread_mutex_init(&ctrl->mutex, &mattr);
+    pthread_mutexattr_destroy(&mattr);
+
+    pthread_condattr_t cattr;
+    pthread_condattr_init(&cattr);
+    pthread_condattr_setpshared(&cattr, PTHREAD_PROCESS_SHARED);
+    pthread_cond_init(&ctrl->cond, &cattr);
+    pthread_condattr_destroy(&cattr);
+#endif
+    return true;
+}
 #pragma pack(pop)
 
 // Get pointer to audio input buffers (after the control region)

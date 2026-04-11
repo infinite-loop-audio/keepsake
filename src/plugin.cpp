@@ -144,6 +144,9 @@ static bool plugin_activate(const clap_plugin_t *plugin,
 
     if (!platform_shm_create(kp->shm, shm_name, shm_size)) return false;
 
+    // Initialize shared-memory mutex + condition variable
+    shm_init_sync(shm_control(kp->shm.ptr));
+
     // Send SET_SHM: [name_len][name][shm_size]
     uint32_t name_len = static_cast<uint32_t>(shm_name.size());
     uint32_t shm_size32 = static_cast<uint32_t>(shm_size);
@@ -278,49 +281,36 @@ static clap_process_status plugin_process(const clap_plugin_t *plugin,
     ctrl->midi_count = midi_idx;
     ctrl->param_count = param_idx;
 
-    shm_store_release(&ctrl->state, SHM_STATE_PROCESS_REQUESTED);
-
-    // Wake the bridge via the dedicated wake pipe (separate from command pipe).
-    // This avoids corrupting IPC messages with interleaved wake bytes.
-    uint8_t wake = 1;
-    platform_write(kp->bridge->proc.wake_to, &wake, 1);
-
-    // Spin-wait for bridge to complete — should be very fast since
-    // the bridge wakes immediately from the pipe signal.
-    for (int spin = 0; spin < 10000000; spin++) {
-        uint32_t st = shm_load_acquire(&ctrl->state);
-        if (st == SHM_STATE_PROCESS_DONE) break;
-
-        // CPU-friendly spin: pause instruction reduces power and
-        // gives the other hyperthread/core a chance
-        if (spin < 1000) {
-#if defined(__aarch64__)
-            __asm__ volatile("isb" ::: "memory"); // ARM: instruction barrier (lighter than yield)
-#elif defined(__x86_64__) || defined(_M_X64)
-            __asm__ volatile("pause" ::: "memory");
-#endif
-        } else if ((spin % 100) == 0) {
-            // After ~10μs of spinning, yield to let bridge run
+    // Signal the bridge via shared-memory condition variable.
+    // No pipes, no kernel transitions — pure shared memory sync.
 #ifndef _WIN32
-            sched_yield();
-#else
-            SwitchToThread();
-#endif
-        }
+    pthread_mutex_lock(&ctrl->mutex);
+    ctrl->state = SHM_STATE_PROCESS_REQUESTED;
+    pthread_cond_signal(&ctrl->cond);
+
+    // Wait for bridge to complete processing
+    struct timespec deadline;
+    clock_gettime(CLOCK_REALTIME, &deadline);
+    deadline.tv_nsec += 100000000; // 100ms timeout
+    if (deadline.tv_nsec >= 1000000000) {
+        deadline.tv_sec++;
+        deadline.tv_nsec -= 1000000000;
     }
 
-    if (shm_load_acquire(&ctrl->state) != SHM_STATE_PROCESS_DONE) {
-        // Bridge didn't respond in time — output silence THIS buffer
-        // but don't mark as crashed. The bridge may be busy with a
-        // non-RT operation (e.g., opening the editor window).
-        // Reset state so the bridge doesn't process a stale request.
-        ctrl->state = SHM_STATE_IDLE;
-        output_silence(process);
-        return CLAP_PROCESS_CONTINUE; // keep trying next buffer
+    while (ctrl->state != SHM_STATE_PROCESS_DONE) {
+        int r = pthread_cond_timedwait(&ctrl->cond, &ctrl->mutex, &deadline);
+        if (r != 0) break; // timeout or error
     }
 
-    // Reset state for next cycle
+    bool done = (ctrl->state == SHM_STATE_PROCESS_DONE);
     ctrl->state = SHM_STATE_IDLE;
+    pthread_mutex_unlock(&ctrl->mutex);
+
+    if (!done) {
+        output_silence(process);
+        return CLAP_PROCESS_CONTINUE;
+    }
+#endif
 
     // Copy output audio from shared memory
     for (int ch = 0; ch < kp->num_outputs; ch++) {
