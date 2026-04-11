@@ -88,6 +88,8 @@ static KeepsakeHeaderView *g_header = nil;
 static NSView *g_editor_container = nil;
 static BridgeLoader *g_active_loader = nil;
 static bool g_editor_open = false;
+static int g_current_width = 0;
+static int g_current_height = 0;
 
 // --- Public API ---
 
@@ -156,6 +158,11 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
         [g_header setFrame:NSMakeRect(0, newH, newW, HEADER_HEIGHT)];
     }
 
+    // Track current size for resize detection
+    if (newW != w || newH != h) { w = newW; h = newH; }
+    g_current_width = w;
+    g_current_height = h;
+
     [g_window makeKeyAndOrderFront:nil];
     [NSApp activateIgnoringOtherApps:YES];
 
@@ -206,8 +213,34 @@ void gui_idle(BridgeLoader *loader) {
         }
     }
 
-    if (loader) loader->editor_idle();
-    else if (g_active_loader) g_active_loader->editor_idle();
+    BridgeLoader *active = loader ? loader : g_active_loader;
+    if (active) {
+        active->editor_idle();
+
+        // Check if the plugin's editor has resized
+        int newW = 0, newH = 0;
+        if (active->get_editor_rect(newW, newH) &&
+            (newW != g_current_width || newH != g_current_height) &&
+            newW > 0 && newH > 0) {
+            g_current_width = newW;
+            g_current_height = newH;
+
+            NSRect frame = [g_window frame];
+            NSRect content = [g_window contentRectForFrameRect:frame];
+            CGFloat dh = (newH + HEADER_HEIGHT) - content.size.height;
+            CGFloat dw = newW - content.size.width;
+
+            frame.size.width += dw;
+            frame.size.height += dh;
+            frame.origin.y -= dh; // grow downward
+
+            [g_window setFrame:frame display:YES animate:NO];
+            [g_editor_container setFrameSize:NSMakeSize(newW, newH)];
+            [g_header setFrame:NSMakeRect(0, newH, newW, HEADER_HEIGHT)];
+
+            fprintf(stderr, "bridge: editor resized to %dx%d\n", newW, newH);
+        }
+    }
 
     if (g_window && ![g_window isVisible]) {
         gui_close_editor(loader);
