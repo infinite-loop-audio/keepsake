@@ -137,7 +137,14 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
         initWithFrame:NSMakeRect(0, 0, w, h + HEADER_HEIGHT)];
     [g_window setContentView:content];
 
-    // Header bar at the top (y=0 in flipped coords)
+    // Editor container below the header — added FIRST so header draws on top
+    g_editor_container = [[KeepsakeFlippedView alloc]
+        initWithFrame:NSMakeRect(0, HEADER_HEIGHT, w, h)];
+    [g_editor_container setWantsLayer:YES];
+    g_editor_container.layer.masksToBounds = YES; // clip plugin content
+    [content addSubview:g_editor_container];
+
+    // Header bar at the top — added LAST so it draws above the editor
     g_header = [[KeepsakeHeaderView alloc]
         initWithFrame:NSMakeRect(0, 0, w, HEADER_HEIGHT)];
     g_header.pluginName = [NSString stringWithUTF8String:
@@ -148,12 +155,8 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
                           header.architecture.c_str()];
     g_header.isolationBadge = [NSString stringWithUTF8String:
                                header.isolation.c_str()];
+    [g_header setWantsLayer:YES]; // ensure it composites above editor
     [content addSubview:g_header];
-
-    // Editor container below the header (y=HEADER_HEIGHT in flipped coords)
-    g_editor_container = [[KeepsakeFlippedView alloc]
-        initWithFrame:NSMakeRect(0, HEADER_HEIGHT, w, h)];
-    [content addSubview:g_editor_container];
 
     // Open the plugin editor into the container
     loader->open_editor((__bridge void *)g_editor_container);
