@@ -13,9 +13,18 @@ struct ERect { int16_t top, left, bottom, right; };
 
 static const CGFloat HEADER_HEIGHT = 28.0;
 
+// --- Flipped container view (0,0 at top-left) ---
+
+@interface KeepsakeFlippedView : NSView
+@end
+
+@implementation KeepsakeFlippedView
+- (BOOL)isFlipped { return YES; }
+@end
+
 // --- Header bar view ---
 
-@interface KeepsakeHeaderView : NSView
+@interface KeepsakeHeaderView : KeepsakeFlippedView
 @property (nonatomic, strong) NSString *pluginName;
 @property (nonatomic, strong) NSString *formatBadge;
 @property (nonatomic, strong) NSString *archBadge;
@@ -42,9 +51,9 @@ static const CGFloat HEADER_HEIGHT = 28.0;
         NSForegroundColorAttributeName: [NSColor colorWithWhite:0.7 alpha:1.0]
     };
 
-    // Plugin name (left aligned)
+    // Plugin name (left aligned) — flipped coords, y grows downward
     CGFloat x = 10;
-    CGFloat textY = 7;
+    CGFloat textY = 6;
     if (self.pluginName) {
         [self.pluginName drawAtPoint:NSMakePoint(x, textY)
                       withAttributes:nameAttrs];
@@ -60,13 +69,13 @@ static const CGFloat HEADER_HEIGHT = 28.0;
         CGFloat bw = sz.width + 8;
         CGFloat bh = 16;
         CGFloat bx = rx - bw;
-        CGFloat by = (HEADER_HEIGHT - bh) / 2;
+        CGFloat by = (HEADER_HEIGHT - bh) / 2; // centered vertically
 
         NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:
             NSMakeRect(bx, by, bw, bh) xRadius:3 yRadius:3];
         [bg setFill];
         [path fill];
-        [text drawAtPoint:NSMakePoint(bx + 4, by + 1.5)
+        [text drawAtPoint:NSMakePoint(bx + 4, by + 2)
            withAttributes:badgeAttrs];
         rx = bx - 6;
     };
@@ -79,15 +88,6 @@ static const CGFloat HEADER_HEIGHT = 28.0;
               [NSColor colorWithRed:0.45 green:0.3 blue:0.2 alpha:1.0]);
 }
 
-@end
-
-// --- Flipped container view (0,0 at top-left, matching plugin expectations) ---
-
-@interface KeepsakeFlippedView : NSView
-@end
-
-@implementation KeepsakeFlippedView
-- (BOOL)isFlipped { return YES; }
 @end
 
 // --- State ---
@@ -159,6 +159,42 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     loader->open_editor((__bridge void *)g_editor_container);
     g_active_loader = loader;
 
+    // Watch for subview frame changes (instant resize tracking)
+    [g_editor_container setPostsFrameChangedNotifications:YES];
+    for (NSView *subview in [g_editor_container subviews]) {
+        [subview setPostsFrameChangedNotifications:YES];
+    }
+    [[NSNotificationCenter defaultCenter]
+        addObserverForName:NSViewFrameDidChangeNotification
+        object:nil
+        queue:nil
+        usingBlock:^(NSNotification *note) {
+            NSView *v = [note object];
+            // Only react to subviews of our editor container
+            if (!g_editor_open || !g_editor_container) return;
+            if ([v superview] != g_editor_container && v != g_editor_container) return;
+
+            NSSize sz = [v frame].size;
+            int nw = static_cast<int>(sz.width);
+            int nh = static_cast<int>(sz.height);
+            if (nw > 0 && nh > 0 && (nw != g_current_width || nh != g_current_height)) {
+                g_current_width = nw;
+                g_current_height = nh;
+
+                NSRect frame = [g_window frame];
+                NSRect cr = [g_window contentRectForFrameRect:frame];
+                CGFloat dh = (nh + HEADER_HEIGHT) - cr.size.height;
+                frame.size.width = nw + (frame.size.width - cr.size.width);
+                frame.size.height += dh;
+                frame.origin.y -= dh;
+
+                [g_window setFrame:frame display:YES animate:NO];
+                [g_header setFrame:NSMakeRect(0, 0, nw, HEADER_HEIGHT)];
+                [g_editor_container setFrame:NSMakeRect(0, HEADER_HEIGHT, nw, nh)];
+                [g_header setNeedsDisplay:YES];
+            }
+        }];
+
     // Re-check size after open (some plugins report correct size only after effEditOpen)
     int newW = w, newH = h;
     loader->get_editor_rect(newW, newH);
@@ -195,6 +231,8 @@ void gui_close_editor(BridgeLoader *loader) {
     if (loader) loader->close_editor();
     else if (g_active_loader) g_active_loader->close_editor();
 
+    [[NSNotificationCenter defaultCenter] removeObserver:nil
+        name:NSViewFrameDidChangeNotification object:nil];
     if (g_window) {
         [g_window orderOut:nil];
         g_window = nil;
@@ -252,6 +290,7 @@ void gui_idle(BridgeLoader *loader) {
             // Reposition in flipped coords: header at top, editor below
             [g_header setFrame:NSMakeRect(0, 0, newW, HEADER_HEIGHT)];
             [g_editor_container setFrame:NSMakeRect(0, HEADER_HEIGHT, newW, newH)];
+            [g_header setNeedsDisplay:YES];
 
             fprintf(stderr, "bridge: editor resized to %dx%d\n", newW, newH);
         }
