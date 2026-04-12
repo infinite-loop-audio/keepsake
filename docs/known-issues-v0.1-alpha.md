@@ -69,5 +69,5 @@ Do not publish around unresolved ambiguity.
 
 ## Next Task
 
-Use g02.001 to reconcile front-door docs against this file, then use g02.003
-to replace generic caveats with validation-backed release notes.
+Use this file as a hard gate during g02.004 publication prep: narrow release
+claims if any line here cannot yet be backed by the validation matrix.

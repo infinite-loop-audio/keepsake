@@ -9,6 +9,8 @@ published artifacts actually claim.
   install surface for the first public alpha
 - [`v0.1-alpha-validation-matrix.md`](v0.1-alpha-validation-matrix.md) —
   release-window support matrix and evidence posture
+- [`v0.1-alpha-publish-checklist.md`](v0.1-alpha-publish-checklist.md) —
+  step-by-step publication gate for the first alpha
 
 ## Rule
 
