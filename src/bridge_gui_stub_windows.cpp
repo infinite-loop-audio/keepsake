@@ -3,6 +3,7 @@
 //
 
 #include "bridge_gui.h"
+#include "debug_log.h"
 
 #ifdef _WIN32
 
@@ -122,7 +123,7 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
         g_editor_hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
 
     if (!loader->open_editor(static_cast<void *>(editor_panel))) {
-        fprintf(stderr, "bridge: floating editor open failed\n");
+        keepsake_debug_log("bridge: floating editor open failed\n");
         DestroyWindow(editor_panel);
         DestroyWindow(g_header_hwnd);
         DestroyWindow(g_editor_hwnd);
@@ -156,10 +157,10 @@ bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
 
     if (!g_editor_hwnd) return false;
 
-    fprintf(stderr, "bridge: editor embed parent=%p child=%p\n",
-            static_cast<void *>(parent), static_cast<void *>(g_editor_hwnd));
+    keepsake_debug_log("bridge: editor embed parent=%p child=%p\n",
+                       static_cast<void *>(parent), static_cast<void *>(g_editor_hwnd));
     if (!loader->open_editor(static_cast<void *>(g_editor_hwnd))) {
-        fprintf(stderr, "bridge: embedded editor open failed\n");
+        keepsake_debug_log("bridge: embedded editor open failed\n");
         DestroyWindow(g_editor_hwnd);
         g_editor_hwnd = nullptr;
         return false;
@@ -169,8 +170,8 @@ bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
     g_editor_open = true;
 
     g_idle_timer = SetTimer(g_editor_hwnd, 1, 16, nullptr);
-    fprintf(stderr, "bridge: editor embedded in host window %p\n",
-            static_cast<void *>(parent));
+    keepsake_debug_log("bridge: editor embedded in host window %p\n",
+                       static_cast<void *>(parent));
     return true;
 }
 
