@@ -10,3 +10,5 @@ std::string vst2_filename_stem(const std::string &path);
 bool vst2_bridge_info_is_sane(const Vst2PluginInfo &info);
 bool vst2_parse_init_response(const std::vector<uint8_t> &payload,
                               Vst2PluginInfo &info);
+bool vst2_resolve_load_path(const std::string &path, std::string &load_path);
+bool vst2_try_load_library(const std::string &path, std::string &load_path, void *&lib);

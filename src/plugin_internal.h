@@ -90,5 +90,11 @@ void queue_async_activation(KeepsakePlugin *kp,
                             bool want_start_processing);
 void clear_async_queue(KeepsakePlugin *kp, bool clear_activate);
 
+// CLAP callback helpers split across plugin implementation files.
+clap_process_status plugin_process(const clap_plugin_t *plugin,
+                                   const clap_process_t *process);
+const void *plugin_get_extension(const clap_plugin_t *plugin, const char *id);
+void plugin_on_main_thread(const clap_plugin_t *plugin);
+
 // Shared bridge pool accessor for plugin implementation files.
 BridgePool *keepsake_plugin_pool();

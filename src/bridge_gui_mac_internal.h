@@ -20,6 +20,10 @@ extern bool g_iosurface_mode;
 extern int g_current_width;
 extern int g_current_height;
 
+NSView *gui_mac_make_content_view(int w, int h);
+NSView *gui_mac_make_editor_container(int w, int h);
+NSView *gui_mac_make_header_view(int w, const EditorHeaderInfo &header);
+
 static inline void gui_pump_pending_events(NSDate *until_date) {
     @autoreleasepool {
         NSEvent *event;

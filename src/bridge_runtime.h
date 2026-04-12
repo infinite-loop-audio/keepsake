@@ -33,6 +33,9 @@ PluginInstance *get_instance(uint32_t id);
 void destroy_instance(uint32_t id);
 void destroy_all_instances();
 
+void bridge_audio_start(PluginInstance *inst);
+void bridge_audio_stop(PluginInstance *inst);
+
 void handle_init(uint32_t caller_id, const std::vector<uint8_t> &payload);
 void handle_set_shm(PluginInstance *inst, const std::vector<uint8_t> &payload);
 void handle_activate(PluginInstance *inst, const std::vector<uint8_t> &payload);

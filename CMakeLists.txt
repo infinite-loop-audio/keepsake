@@ -45,14 +45,18 @@ add_library(keepsake MODULE
     src/main.cpp
     src/factory.cpp
     src/factory_helpers.cpp
+    src/factory_scan.cpp
     src/vst2_loader.cpp
+    src/vst2_loader_platform.cpp
     src/vst2_loader_bridge.cpp
     src/plugin.cpp
     src/plugin_callbacks.cpp
+    src/plugin_processing.cpp
     src/plugin_async.cpp
     src/plugin_params.cpp
     src/plugin_state.cpp
     src/config.cpp
+    src/config_cache.cpp
     src/bridge_pool.cpp
 )
 
@@ -124,19 +128,28 @@ if(APPLE)
     set(BRIDGE_GUI_SRC
         src/bridge_gui_mac.mm
         src/bridge_gui_mac_window.mm
+        src/bridge_gui_mac_window_views.mm
         src/bridge_gui_mac_iosurface.mm)
     set(BRIDGE_AU_SRC  src/bridge_loader_au.mm)
 else()
     # Windows and Linux GUI with embedded editor support
-    set(BRIDGE_GUI_SRC src/bridge_gui_stub.cpp)
+    set(BRIDGE_GUI_SRC
+        src/bridge_gui_stub.cpp
+        src/bridge_gui_stub_windows.cpp
+        src/bridge_gui_stub_linux.cpp)
     set(BRIDGE_AU_SRC)
 endif()
 
 add_executable(keepsake-bridge
     src/bridge_main.cpp
     src/bridge_runtime.cpp
+    src/bridge_runtime_init.cpp
+    src/bridge_runtime_audio.cpp
     src/bridge_loader_vst2.cpp
+    src/bridge_loader_vst2_platform.cpp
     src/bridge_loader_vst3.cpp
+    src/bridge_loader_vst3_module.cpp
+    src/bridge_loader_vst3_lifecycle.cpp
     src/bridge_loader_factory.cpp
     ${BRIDGE_AU_SRC}
     ${BRIDGE_GUI_SRC}
@@ -184,11 +197,19 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
     add_executable(keepsake-bridge-x86_64
         src/bridge_main.cpp
         src/bridge_runtime.cpp
+        src/bridge_runtime_init.cpp
+        src/bridge_runtime_audio.cpp
         src/bridge_loader_vst2.cpp
+        src/bridge_loader_vst2_platform.cpp
         src/bridge_loader_vst3.cpp
+        src/bridge_loader_vst3_module.cpp
+        src/bridge_loader_vst3_lifecycle.cpp
         src/bridge_loader_factory.cpp
         src/bridge_loader_au.mm
         src/bridge_gui_mac.mm
+        src/bridge_gui_mac_window.mm
+        src/bridge_gui_mac_window_views.mm
+        src/bridge_gui_mac_iosurface.mm
     )
 
     target_include_directories(keepsake-bridge-x86_64 PRIVATE
@@ -232,7 +253,11 @@ if(APPLE OR UNIX)
     target_link_libraries(bridge-test PRIVATE clap)
 
     add_executable(keepsake-scan tools/keepsake-scan.cpp
-        src/vst2_loader.cpp src/config.cpp)
+        src/vst2_loader.cpp
+        src/vst2_loader_platform.cpp
+        src/vst2_loader_bridge.cpp
+        src/config.cpp
+        src/config_cache.cpp)
     target_include_directories(keepsake-scan PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/vendor
         ${CMAKE_CURRENT_SOURCE_DIR}/src

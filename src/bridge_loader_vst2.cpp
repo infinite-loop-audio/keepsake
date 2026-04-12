@@ -6,106 +6,19 @@
 #include <vestige/vestige.h>
 #include <cstdio>
 #include <cstring>
-#include <atomic>
-
-#ifndef _WIN32
-#include <dlfcn.h>
-#else
-#include <windows.h>
-#endif
-
-#ifdef __APPLE__
-#include <CoreFoundation/CoreFoundation.h>
-#endif
 
 // --- VeSTige loader ---
 
 typedef AEffect *(__cdecl *VstEntry)(audioMasterCallback);
 
-static double s_sample_rate = 44100.0;
-static uint32_t s_max_frames = 512;
-static std::atomic<uint32_t> s_editor_open_edit_depth{0};
-
-static intptr_t __cdecl vst2_host_callback(
-    AEffect *, int32_t opcode, int32_t index, intptr_t value, void *ptr, float opt) {
-    switch (opcode) {
-    case audioMasterAutomate:
-        return 1;
-    case audioMasterVersion:    return 2400;
-    case audioMasterCurrentId:  return 0;
-    case audioMasterIdle:       return 1;
-    case audioMasterWantMidi:   return 1;
-    case audioMasterGetTime:    return 0;
-    case audioMasterProcessEvents: return 1;
-    case audioMasterGetSampleRate: return static_cast<intptr_t>(s_sample_rate);
-    case audioMasterGetBlockSize:  return static_cast<intptr_t>(s_max_frames);
-    case audioMasterGetInputLatency: return 0;
-    case audioMasterGetOutputLatency: return 0;
-    case audioMasterGetCurrentProcessLevel: return 0;
-    case audioMasterGetAutomationState:
-        return kVstAutomationReading |
-               (s_editor_open_edit_depth.load() > 0 ? kVstAutomationWriting : 0);
-    case audioMasterGetVendorString:
-        if (ptr) {
-            strncpy(static_cast<char *>(ptr), "Infinite Loop Audio", 64);
-            static_cast<char *>(ptr)[63] = '\0';
-            return 1;
-        }
-        return 0;
-    case audioMasterGetProductString:
-        if (ptr) {
-            strncpy(static_cast<char *>(ptr), "Keepsake", 64);
-            static_cast<char *>(ptr)[63] = '\0';
-            return 1;
-        }
-        return 0;
-    case audioMasterGetVendorVersion: return 1;
-    case audioMasterCanDo:
-        if (!ptr) return 0;
-        if (strcmp(static_cast<const char *>(ptr), "sendVstEvents") == 0) return 1;
-        if (strcmp(static_cast<const char *>(ptr), "sendVstMidiEvent") == 0) return 1;
-        if (strcmp(static_cast<const char *>(ptr), "receiveVstEvents") == 0) return 1;
-        if (strcmp(static_cast<const char *>(ptr), "receiveVstMidiEvent") == 0) return 1;
-        if (strcmp(static_cast<const char *>(ptr), "sizeWindow") == 0) return 1;
-        if (strcmp(static_cast<const char *>(ptr), "supportShell") == 0) return 1;
-        return 0;
-    case audioMasterGetLanguage: return kVstLangEnglish;
-    case audioMasterSizeWindow: return 1;
-    case audioMasterUpdateDisplay: return 1;
-    case audioMasterBeginEdit:
-        s_editor_open_edit_depth.fetch_add(1);
-        return 1;
-    case audioMasterEndEdit: {
-        uint32_t depth = s_editor_open_edit_depth.load();
-        if (depth > 0) s_editor_open_edit_depth.fetch_sub(1);
-        return 1;
-    }
-    case audioMasterIOChanged:  return 1;
-    default: return 0;
-    }
-}
-
-#ifdef __APPLE__
-static std::string resolve_vst_bundle(const std::string &path) {
-    if (path.size() < 4 || path.substr(path.size() - 4) != ".vst")
-        return path;
-    CFURLRef url = CFURLCreateFromFileSystemRepresentation(
-        kCFAllocatorDefault, reinterpret_cast<const UInt8 *>(path.c_str()),
-        static_cast<CFIndex>(path.size()), true);
-    if (!url) return path;
-    CFBundleRef bundle = CFBundleCreate(kCFAllocatorDefault, url);
-    CFRelease(url);
-    if (!bundle) return path;
-    CFURLRef exec = CFBundleCopyExecutableURL(bundle);
-    CFRelease(bundle);
-    if (!exec) return path;
-    char buf[4096];
-    Boolean ok = CFURLGetFileSystemRepresentation(
-        exec, true, reinterpret_cast<UInt8 *>(buf), sizeof(buf));
-    CFRelease(exec);
-    return ok ? std::string(buf) : path;
-}
-#endif
+extern double s_sample_rate;
+extern uint32_t s_max_frames;
+extern std::atomic<uint32_t> s_editor_open_edit_depth;
+intptr_t __cdecl vst2_host_callback(
+    AEffect *, int32_t opcode, int32_t index, intptr_t value, void *ptr, float opt);
+void *vst2_open_library(const std::string &path, std::string &load_path);
+void *vst2_lookup_entry(void *lib);
+void vst2_close_library(void *lib);
 
 class Vst2Loader : public BridgeLoader {
     AEffect *effect = nullptr;
@@ -120,28 +33,13 @@ class Vst2Loader : public BridgeLoader {
 public:
     bool load(const std::string &path) override {
         std::string load_path = path;
-#ifdef __APPLE__
-        load_path = resolve_vst_bundle(path);
-#endif
-#ifndef _WIN32
-        lib = dlopen(load_path.c_str(), RTLD_LAZY | RTLD_LOCAL);
-#else
-        lib = (void *)LoadLibraryA(load_path.c_str());
-#endif
+        lib = vst2_open_library(path, load_path);
         if (!lib) {
             fprintf(stderr, "bridge/vst2: failed to load '%s'\n", load_path.c_str());
             return false;
         }
 
-#ifndef _WIN32
-        auto entry = reinterpret_cast<VstEntry>(dlsym(lib, "VSTPluginMain"));
-        if (!entry) entry = reinterpret_cast<VstEntry>(dlsym(lib, "main"));
-#else
-        auto entry = reinterpret_cast<VstEntry>(
-            GetProcAddress((HMODULE)lib, "VSTPluginMain"));
-        if (!entry) entry = reinterpret_cast<VstEntry>(
-            GetProcAddress((HMODULE)lib, "main"));
-#endif
+        auto entry = reinterpret_cast<VstEntry>(vst2_lookup_entry(lib));
         if (!entry) return false;
 
         effect = entry(vst2_host_callback);
@@ -305,9 +203,7 @@ public:
             effect->dispatcher(effect, effClose, 0, 0, nullptr, 0);
             effect = nullptr;
         }
-#ifndef _WIN32
-        if (lib) { dlclose(lib); lib = nullptr; }
-#endif
+        if (lib) { vst2_close_library(lib); lib = nullptr; }
     }
 
     AEffect *get_effect() { return effect; }
