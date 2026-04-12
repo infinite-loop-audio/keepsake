@@ -11,7 +11,8 @@ it; either validate the lane or keep the caveat.
 ## Support Posture
 
 - Primary validated lane today: macOS + REAPER + VST2
-- Experimental / lightly proven: Windows, Linux, VST3, AU v2, 32-bit
+- Experimental but now real-host-proven: Windows, Linux
+- Experimental / lightly proven: VST3, AU v2, 32-bit
 
 Experimental here means implementation exists and may work, but the alpha
 should not imply equal confidence without fresh release-window evidence.
@@ -39,13 +40,19 @@ should not imply equal confidence without fresh release-window evidence.
 ### Platform coverage
 
 - macOS has the strongest real-host evidence.
-- Windows and Linux have green CI builds, but CI success alone is not yet the
-  same as full alpha support proof for real-host GUI and runtime behavior.
+- Windows and Linux now both have exploratory real-host VM evidence in REAPER,
+  but neither has enough release-window proof yet to stand beside the primary
+  macOS lane.
 - Linux now has exploratory Ubuntu ARM64 VM host evidence with native ARM64
   REAPER and the repo `test-plugin.so`, including scan/add/UI/transport
   success. The remaining caveat is that this is still ARM64 VM evidence, not a
   direct `linux-x64` host-validation pass against the current public artifact
   target.
+- Windows now has exploratory Windows 11 ARM64 VM host evidence with x64
+  REAPER and the repo `test-plugin.dll`, including scan/add/UI success. The
+  remaining caveats are that this is still ARM64 VM evidence, transport was not
+  exercised yet, and the lane has not been proven with a non-repo legacy
+  plugin.
 
 ### GUI/editor behavior
 
