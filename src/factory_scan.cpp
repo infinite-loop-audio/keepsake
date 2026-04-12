@@ -28,6 +28,19 @@ void scan_vst2_entry(const std::string &entry_path,
     std::error_code ec;
     fs::path entry(entry_path);
 
+#ifdef _WIN32
+    if (targeted_vst2_override) {
+        fprintf(stderr,
+                "keepsake: scan_vst2_entry path='%s' exists=%d regular=%d dir=%d ext='%s'\n",
+                entry_path.c_str(),
+                fs::exists(entry, ec) ? 1 : 0,
+                fs::is_regular_file(entry, ec) ? 1 : 0,
+                fs::is_directory(entry, ec) ? 1 : 0,
+                entry.extension().string().c_str());
+        ec.clear();
+    }
+#endif
+
     auto try_scan_plugin = [&](const fs::path &plugin_path) {
         Vst2PluginInfo info;
         info.format = FORMAT_VST2;
