@@ -65,6 +65,7 @@ int main(int argc, char *argv[]) {
     const char *pf = getenv("PROGRAMFILES");
     if (pf) vst2_paths.push_back(std::string(pf) + "\\VSTPlugins");
 #else
+    const char *home = getenv("HOME");
     if (home) vst2_paths.push_back(std::string(home) + "/.vst");
     vst2_paths.push_back("/usr/lib/vst");
 #endif
