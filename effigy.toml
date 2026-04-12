@@ -47,6 +47,7 @@ allowlist_file = "docs/policy/vision-next-task-verbs.txt"
 ]
 qa = [{ task = "qa:docs" }, { task = "qa:northstar" }]
 health = [{ task = "qa" }]
+"release:candidate:alpha" = "./tools/release-candidate.sh --version v0.1-alpha"
 
 # Release posture — Keepsake ships binary artifacts. Version is tracked via
 # the project's C/C++ build system; update version-file when a build manifest

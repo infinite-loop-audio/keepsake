@@ -14,6 +14,14 @@ published artifacts actually claim.
 - [`../logs/templates/release-checkpoint-template.md`](../logs/templates/release-checkpoint-template.md) —
   one dated closeout log template for the actual release cut
 
+## Release Ops
+
+- package the current alpha candidate with:
+  - `effigy release:candidate:alpha`
+- emit artifacts under:
+  - `dist/v0.1-alpha/`
+- leave one dated release checkpoint log when the tag is cut
+
 ## Rule
 
 Do not publish from chat memory alone. Releases should be backed by:
