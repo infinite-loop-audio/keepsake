@@ -99,6 +99,7 @@ static NSWindow *g_window = nil;
 static NSWindow *g_parentless_plugin_window = nil;
 static KeepsakeHeaderView *g_header = nil;
 static NSView *g_editor_container = nil;
+static id g_frame_change_observer = nil;
 static BridgeLoader *g_active_loader = nil;
 static bool g_editor_open = false;
 static bool g_iosurface_mode = false;
@@ -303,11 +304,12 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     for (NSView *subview in [g_editor_container subviews]) {
         [subview setPostsFrameChangedNotifications:YES];
     }
-    [[NSNotificationCenter defaultCenter]
-        addObserverForName:NSViewFrameDidChangeNotification
-        object:nil
-        queue:nil
-        usingBlock:^(NSNotification *note) {
+    g_frame_change_observer =
+        [[NSNotificationCenter defaultCenter]
+            addObserverForName:NSViewFrameDidChangeNotification
+            object:nil
+            queue:nil
+            usingBlock:^(NSNotification *note) {
             NSView *v = [note object];
             // Only react to subviews of our editor container
             if (!g_editor_open || !g_editor_container) return;
@@ -383,8 +385,10 @@ void gui_close_editor(BridgeLoader *loader) {
     if (loader) loader->close_editor();
     else if (g_active_loader) g_active_loader->close_editor();
 
-    [[NSNotificationCenter defaultCenter] removeObserver:nil
-        name:NSViewFrameDidChangeNotification object:nil];
+    if (g_frame_change_observer) {
+        [[NSNotificationCenter defaultCenter] removeObserver:g_frame_change_observer];
+        g_frame_change_observer = nil;
+    }
     if (g_parentless_plugin_window) {
         [g_parentless_plugin_window orderOut:nil];
         g_parentless_plugin_window = nil;
@@ -460,7 +464,6 @@ uint32_t gui_open_editor_iosurface(BridgeLoader *loader, int width, int height) 
         (id)kIOSurfaceBytesPerElement: @4,
         (id)kIOSurfaceBytesPerRow: @(width * 4),
         (id)kIOSurfacePixelFormat: @((uint32_t)'BGRA'),
-        (id)kIOSurfaceIsGlobal: @YES,  // accessible from other processes
     };
 
     g_surface = IOSurfaceCreate((__bridge CFDictionaryRef)props);
@@ -513,9 +516,11 @@ static void capture_to_iosurface() {
     void *base = IOSurfaceGetBaseAddress(g_surface);
 
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGBitmapInfo bitmap_info = static_cast<CGBitmapInfo>(
+        static_cast<uint32_t>(kCGImageAlphaPremultipliedFirst) |
+        static_cast<uint32_t>(kCGBitmapByteOrder32Little));
     CGContextRef ctx = CGBitmapContextCreate(
-        base, width, height, 8, bytesPerRow, cs,
-        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
+        base, width, height, 8, bytesPerRow, cs, bitmap_info);
 
     if (ctx) {
         // Flip for top-left origin
