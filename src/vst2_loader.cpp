@@ -317,6 +317,14 @@ static std::string filename_stem(const std::string &path) {
     return path.substr(start);
 }
 
+static bool bridge_info_is_sane(const Vst2PluginInfo &info) {
+    if (info.num_inputs < 0 || info.num_inputs > 64) return false;
+    if (info.num_outputs < 0 || info.num_outputs > 64) return false;
+    if (info.num_params < 0 || info.num_params > 100000) return false;
+    if (info.category < 0 || info.category > 32) return false;
+    return true;
+}
+
 // --- Public API ---
 
 bool vst2_load_metadata(const std::string &path, Vst2PluginInfo &info) {
@@ -489,10 +497,11 @@ bool vst2_load_metadata_via_bridge(const std::string &path,
         return false;
     }
 
-    // Parse plugin info from OK payload
-    if (payload.size() >= sizeof(IpcPluginInfo)) {
+    // Parse plugin info from OK payload: [instance_id][IpcPluginInfo][strings]
+    if (payload.size() >= 4 + sizeof(IpcPluginInfo)) {
+        size_t off = 4;
         IpcPluginInfo pi;
-        memcpy(&pi, payload.data(), sizeof(pi));
+        memcpy(&pi, payload.data() + off, sizeof(pi));
         info.unique_id = pi.unique_id;
         info.num_inputs = pi.num_inputs;
         info.num_outputs = pi.num_outputs;
@@ -502,7 +511,7 @@ bool vst2_load_metadata_via_bridge(const std::string &path,
         info.vendor_version = pi.vendor_version;
 
         // Parse null-terminated strings after the fixed fields
-        size_t off = sizeof(IpcPluginInfo);
+        off += sizeof(IpcPluginInfo);
         auto read_str = [&]() -> std::string {
             if (off >= payload.size()) return {};
             const char *s = reinterpret_cast<const char *>(payload.data() + off);
@@ -514,6 +523,17 @@ bool vst2_load_metadata_via_bridge(const std::string &path,
         info.name = read_str();
         info.vendor = read_str();
         info.product = read_str();
+    }
+
+    if (!bridge_info_is_sane(info)) {
+        fprintf(stderr,
+                "keepsake: rejecting corrupt bridge scan metadata for '%s' (category=%d in=%d out=%d params=%d)\n",
+                path.c_str(), info.category, info.num_inputs,
+                info.num_outputs, info.num_params);
+        ipc_write_msg(proc.pipe_to, IPC_OP_SHUTDOWN);
+        ipc_read_msg(proc.pipe_from, op, payload, 5000);
+        platform_kill(proc);
+        return false;
     }
 
     info.file_path = path;
@@ -590,9 +610,10 @@ bool scan_plugin_via_bridge(const std::string &path,
 
     uint32_t op;
     std::vector<uint8_t> payload;
-    // 30-second timeout for slow plugins (license checks, network, etc.)
-    // 5-second timeout: if the plugin can't load in 5s, skip it
-    if (!ipc_read_msg(proc.pipe_from, op, payload, 5000)) {
+    // Cold cross-arch plugin discovery can take several seconds.
+    // Give bridge-based metadata scans enough time to return once,
+    // rather than timing out and making the host blacklist the CLAP.
+    if (!ipc_read_msg(proc.pipe_from, op, payload, 15000)) {
         fprintf(stderr, "keepsake: scan timeout for '%s'\n", path.c_str());
         platform_kill(proc);
         return false;
@@ -609,6 +630,15 @@ bool scan_plugin_via_bridge(const std::string &path,
     if (op != IPC_OP_OK || !parse_init_response(payload, info)) {
         fprintf(stderr, "keepsake: scan failed for '%s' (op=0x%02X)\n",
                 path.c_str(), op);
+        platform_kill(proc);
+        return false;
+    }
+
+    if (!bridge_info_is_sane(info)) {
+        fprintf(stderr,
+                "keepsake: rejecting corrupt scan metadata for '%s' (category=%d in=%d out=%d params=%d)\n",
+                path.c_str(), info.category, info.num_inputs,
+                info.num_outputs, info.num_params);
         platform_kill(proc);
         return false;
     }

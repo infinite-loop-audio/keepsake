@@ -64,6 +64,7 @@ BridgeProcess *BridgePool::acquire(const std::string &bridge_binary,
                                      const std::string &plugin_path,
                                      uint32_t format,
                                      IsolationMode mode) {
+    std::lock_guard<std::mutex> lock(pool_mutex);
     std::string key = make_key(bridge_binary, plugin_path, format, mode);
 
     // Reuse existing process if available
@@ -94,6 +95,7 @@ BridgeProcess *BridgePool::acquire(const std::string &bridge_binary,
 
 void BridgePool::release(BridgeProcess *bp) {
     if (!bp) return;
+    std::lock_guard<std::mutex> lock(pool_mutex);
     bp->ref_count--;
 
     if (bp->ref_count <= 0) {
@@ -115,7 +117,33 @@ void BridgePool::release(BridgeProcess *bp) {
     }
 }
 
+void BridgePool::abandon(BridgeProcess *bp) {
+    if (!bp) return;
+    std::lock_guard<std::mutex> lock(pool_mutex);
+    bp->ref_count--;
+
+    if (bp->ref_count <= 0) {
+        if (bp->alive) {
+            platform_force_kill(bp->proc);
+            bp->alive = false;
+        }
+
+        pool.erase(bp->key);
+        delete bp;
+    }
+}
+
+void BridgePool::terminate(BridgeProcess *bp) {
+    if (!bp) return;
+    std::lock_guard<std::mutex> lock(pool_mutex);
+    if (bp->alive) {
+        platform_force_kill(bp->proc);
+        bp->alive = false;
+    }
+}
+
 void BridgePool::shutdown_all() {
+    std::lock_guard<std::mutex> lock(pool_mutex);
     for (auto &kv : pool) {
         auto *bp = kv.second;
         if (bp->alive) {

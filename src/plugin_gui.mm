@@ -13,6 +13,7 @@
 static bool gui_is_api_supported(const clap_plugin_t *plugin,
                                    const char *api, bool is_floating) {
     auto *kp = get(plugin);
+    if (!kp->bridge_ok && !kp->crashed) wait_async_init(kp, 1500);
     fprintf(stderr, "keepsake: gui_is_api_supported('%s', floating=%d) has_editor=%d\n",
             api, is_floating, kp->has_editor);
     if (!kp->has_editor) return false;
@@ -45,6 +46,7 @@ static bool gui_get_preferred_api(const clap_plugin_t *, const char **api,
 
 static bool gui_create(const clap_plugin_t *plugin, const char *api, bool is_floating) {
     auto *kp = get(plugin);
+    if (!kp->bridge_ok && !kp->crashed) wait_async_init(kp, 1500);
     fprintf(stderr, "keepsake: gui_create('%s', floating=%d)\n", api, is_floating);
     if (!kp->has_editor || kp->crashed) return false;
     // On macOS we always use floating windows regardless of what the host asks
@@ -83,6 +85,7 @@ static bool gui_set_size(const clap_plugin_t *, uint32_t, uint32_t) { return fal
 
 static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *window) {
     auto *kp = get(plugin);
+    if (!kp->bridge_ok && !kp->crashed) wait_async_init(kp, 1500);
     fprintf(stderr, "keepsake: gui_set_parent() called\n");
     if (kp->crashed || !kp->has_editor || !kp->bridge || !window) return false;
 
@@ -112,6 +115,7 @@ static void gui_suggest_title(const clap_plugin_t *, const char *) {}
 
 static bool gui_show(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
+    if (!kp->bridge_ok && !kp->crashed) wait_async_init(kp, 1500);
     fprintf(stderr, "keepsake: gui_show() floating=%d editor_open=%d\n",
             kp->gui_is_floating, kp->editor_open);
     if (kp->crashed || !kp->has_editor) return false;

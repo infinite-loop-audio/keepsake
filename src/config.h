@@ -23,6 +23,7 @@ struct WhitelistEntry {
 };
 
 struct KeepsakeConfig {
+    bool replace_default_vst2_paths = false;
     std::vector<std::string> extra_vst2_paths;
     bool force_rescan = false;
     std::string isolation_default = "per-instance";

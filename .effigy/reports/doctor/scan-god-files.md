@@ -1,14 +1,18 @@
 # Doctor Scan Details: scan.god-files
 
 - Severity: `error`
-- Findings: `5`
-- Warning findings: `3`
-- Error findings: `2`
+- Findings: `9`
+- Warning findings: `5`
+- Error findings: `4`
 
 ## Findings
 
-- `error` `579 code lines (714 total) [high] src/plugin.cpp`
-- `error` `472 code lines (606 total) [high] src/factory.cpp`
-- `warning` `338 code lines (446 total) [warning] src/vst2_loader.cpp`
-- `warning` `325 code lines (404 total) [warning] src/platform.h`
-- `warning` `253 code lines (315 total) [warning] src/bridge_main.cpp`
+- `error` `585 code lines (750 total) [high] src/factory.cpp`
+- `error` `579 code lines (692 total) [high] src/plugin.cpp`
+- `error` `503 code lines (658 total) [high] src/vst2_loader.cpp`
+- `error` `464 code lines (585 total) [high] src/bridge_main.cpp`
+- `warning` `382 code lines (482 total) [warning] src/bridge_loader_vst3.cpp`
+- `warning` `377 code lines (461 total) [warning] src/platform.h`
+- `warning` `345 code lines (462 total) [warning] src/bridge_gui_mac.mm`
+- `warning` `308 code lines (362 total) [warning] src/config.cpp`
+- `warning` `280 code lines (372 total) [warning] src/bridge_gui_stub.cpp`

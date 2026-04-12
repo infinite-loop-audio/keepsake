@@ -43,6 +43,7 @@ static constexpr uint32_t IPC_OP_EDITOR_KEY          = 0x15; // payload: IpcKeyE
 static constexpr uint32_t IPC_OP_OK           = 0x81;
 static constexpr uint32_t IPC_OP_ERROR        = 0x82;
 static constexpr uint32_t IPC_OP_PROCESS_DONE = 0x84;
+static constexpr uint32_t IPC_MAX_PAYLOAD_BYTES = 64u * 1024u * 1024u;
 
 // --- Message header ---
 // All IPC structs are packed to ensure identical layout across 32-bit
@@ -124,6 +125,11 @@ static inline bool ipc_read_msg(PlatformPipe fd, uint32_t &opcode,
     }
     IpcHeader hdr;
     if (!platform_read(fd, &hdr, sizeof(hdr))) return false;
+    if (hdr.payload_size > IPC_MAX_PAYLOAD_BYTES) {
+        fprintf(stderr, "keepsake: IPC payload too large: %u bytes\n",
+                hdr.payload_size);
+        return false;
+    }
     opcode = hdr.opcode;
     payload.resize(hdr.payload_size);
     if (hdr.payload_size > 0) {

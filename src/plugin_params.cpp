@@ -6,7 +6,11 @@
 
 // Lazy-load parameter info from bridge on first access.
 static void ensure_params_loaded(KeepsakePlugin *kp) {
-    if (kp->params_loaded || kp->crashed || !kp->bridge_ok || !kp->active) return;
+    if (!kp->bridge_ok && !kp->crashed) {
+        wait_async_init(kp, 1500);
+    }
+    sync_async_init(kp);
+    if (kp->params_loaded || kp->crashed || !kp->bridge_ok) return;
     kp->params_loaded = true;
     kp->params.resize(static_cast<size_t>(kp->num_params));
     for (int32_t i = 0; i < kp->num_params; i++) {
@@ -28,13 +32,22 @@ static void ensure_params_loaded(KeepsakePlugin *kp) {
 
 uint32_t keepsake_params_count(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
+    if (!kp->bridge_ok && !kp->crashed) {
+        wait_async_init(kp, 1500);
+    }
+    sync_async_init(kp);
     ensure_params_loaded(kp);
-    return static_cast<uint32_t>(kp->params.size());
+    if (!kp->params.empty()) return static_cast<uint32_t>(kp->params.size());
+    return kp->num_params > 0 ? static_cast<uint32_t>(kp->num_params) : 0u;
 }
 
 bool keepsake_params_get_info(const clap_plugin_t *plugin, uint32_t index,
                                clap_param_info_t *info) {
     auto *kp = get(plugin);
+    if (!kp->bridge_ok && !kp->crashed) {
+        wait_async_init(kp, 1500);
+    }
+    ensure_params_loaded(kp);
     if (index >= kp->params.size()) return false;
     const auto &cp = kp->params[index];
 

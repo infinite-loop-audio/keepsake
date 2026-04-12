@@ -8,9 +8,12 @@
 #include "platform.h"
 #include "bridge_pool.h"
 #include <clap/clap.h>
+#include <memory>
 #include <string>
 #include <vector>
 #include <mutex>
+
+struct AsyncBridgeInitState;
 
 struct CachedParamInfo {
     uint32_t index;
@@ -63,10 +66,7 @@ struct KeepsakePlugin {
     bool processing = false;
     bool crashed = false;
 
-    // Deferred activation
-    bool needs_activate = false;
-    double deferred_sr = 44100;
-    uint32_t deferred_frames = 512;
+    std::shared_ptr<AsyncBridgeInitState> async_init;
 };
 
 // Create a KeepsakePlugin. Returns a clap_plugin_t pointer (the plugin's
@@ -78,6 +78,8 @@ const clap_plugin_t *keepsake_plugin_create(
     const std::string &bridge_binary,
     int32_t num_inputs,
     int32_t num_outputs,
+    int32_t num_params,
+    bool has_editor,
     uint32_t format,
     BridgePool *pool,
     IsolationMode isolation);

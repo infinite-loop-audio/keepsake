@@ -34,7 +34,7 @@ static PlatformPipe g_pipe_out = GetStdHandle(STD_OUTPUT_HANDLE);
 static PlatformPipe g_wake_fd  = PLATFORM_INVALID_PIPE;
 #else
 static PlatformPipe g_pipe_in  = STDIN_FILENO;
-static PlatformPipe g_pipe_out = STDOUT_FILENO;
+static PlatformPipe g_pipe_out = PLATFORM_BRIDGE_IPC_OUT_FD;
 static PlatformPipe g_wake_fd  = 3; // wake pipe from parent, duped to fd 3
 #endif
 

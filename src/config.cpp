@@ -4,6 +4,7 @@
 //
 
 #include "config.h"
+#include "ipc.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -102,6 +103,10 @@ KeepsakeConfig config_load() {
         }
 
         if (in_scan) {
+            if (t.find("replace_default_vst2_paths") == 0) {
+                cfg.replace_default_vst2_paths =
+                    (t.find("true") != std::string::npos);
+            }
             // rescan = true/false
             if (t.find("rescan") == 0) {
                 cfg.force_rescan = (t.find("true") != std::string::npos);
@@ -193,9 +198,11 @@ KeepsakeConfig config_load() {
     if (in_whitelist_entry && !current_wl.path.empty())
         cfg.whitelist.push_back(current_wl);
 
-    fprintf(stderr, "keepsake: loaded config (expose=%s, %zu whitelist, %zu extra paths, isolation=%s)\n",
+    fprintf(stderr, "keepsake: loaded config (expose=%s, %zu whitelist, %zu extra paths, replace-default-vst2-paths=%s, isolation=%s)\n",
             cfg.expose_mode.c_str(), cfg.whitelist.size(),
-            cfg.extra_vst2_paths.size(), cfg.isolation_default.c_str());
+            cfg.extra_vst2_paths.size(),
+            cfg.replace_default_vst2_paths ? "true" : "false",
+            cfg.isolation_default.c_str());
     return cfg;
 }
 
@@ -233,6 +240,15 @@ static std::string unescape(const std::string &s) {
     return r;
 }
 
+static bool cache_entry_is_sane(const Vst2PluginInfo &p) {
+    if (p.num_inputs < 0 || p.num_inputs > 64) return false;
+    if (p.num_outputs < 0 || p.num_outputs > 64) return false;
+    if (p.num_params < 0 || p.num_params > 100000) return false;
+    if (p.category < 0 || p.category > 32) return false;
+    if (p.format > FORMAT_AU) return false;
+    return true;
+}
+
 void cache_save(const std::vector<Vst2PluginInfo> &plugins) {
     std::string dir = config_dir();
     std::error_code ec;
@@ -251,6 +267,8 @@ void cache_save(const std::vector<Vst2PluginInfo> &plugins) {
           << "\t" << p.flags
           << "\t" << p.num_inputs
           << "\t" << p.num_outputs
+          << "\t" << p.num_params
+          << "\t" << p.format
           << "\t" << (p.needs_cross_arch ? 1 : 0)
           << "\t" << file_mtime(p.file_path)
           << "\n";
@@ -266,6 +284,7 @@ std::vector<Vst2PluginInfo> cache_load() {
     if (!f.is_open()) return result;
 
     std::string line;
+    bool found_invalid = false;
     while (std::getline(f, line)) {
         if (line.empty()) continue;
 
@@ -279,7 +298,7 @@ std::vector<Vst2PluginInfo> cache_load() {
 
         if (fields.size() < 11) continue;
 
-        Vst2PluginInfo p;
+        Vst2PluginInfo p{};
         p.file_path = unescape(fields[0]);
         p.unique_id = static_cast<int32_t>(std::stol(fields[1]));
         p.name = unescape(fields[2]);
@@ -289,14 +308,38 @@ std::vector<Vst2PluginInfo> cache_load() {
         p.flags = static_cast<int32_t>(std::stol(fields[6]));
         p.num_inputs = static_cast<int32_t>(std::stol(fields[7]));
         p.num_outputs = static_cast<int32_t>(std::stol(fields[8]));
-        p.needs_cross_arch = (fields[9] == "1");
-        int64_t cached_mtime = std::stoll(fields[10]);
+        size_t needs_cross_arch_idx = 9;
+        size_t mtime_idx = 10;
+        if (fields.size() >= 13) {
+            p.num_params = static_cast<int32_t>(std::stol(fields[9]));
+            p.format = static_cast<uint32_t>(std::stoul(fields[10]));
+            needs_cross_arch_idx = 11;
+            mtime_idx = 12;
+        } else {
+            p.format = FORMAT_VST2;
+        }
+        p.needs_cross_arch = (fields[needs_cross_arch_idx] == "1");
+        int64_t cached_mtime = std::stoll(fields[mtime_idx]);
 
         // Validate: file still exists and hasn't changed
         if (!fs::exists(p.file_path)) continue;
         if (file_mtime(p.file_path) != cached_mtime) continue;
+        if (!cache_entry_is_sane(p)) {
+            fprintf(stderr,
+                    "keepsake: ignoring corrupted cache entry '%s' (category=%d in=%d out=%d params=%d)\n",
+                    p.file_path.c_str(), p.category, p.num_inputs,
+                    p.num_outputs, p.num_params);
+            found_invalid = true;
+            continue;
+        }
 
         result.push_back(std::move(p));
+    }
+
+    if (found_invalid) {
+        fprintf(stderr, "keepsake: cache contained invalid metadata, forcing rescan\n");
+        result.clear();
+        return result;
     }
 
     fprintf(stderr, "keepsake: loaded cache (%zu valid plugins) from '%s'\n",

@@ -188,6 +188,9 @@ public:
             effect->dispatcher(effect, effGetParamLabel, static_cast<int>(index),
                                 0, resp.label, 0);
         }
+        if (resp.name[0] == '\0') {
+            snprintf(resp.name, sizeof(resp.name), "Param %u", index + 1);
+        }
         return true;
     }
 

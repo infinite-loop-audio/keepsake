@@ -5,10 +5,16 @@
 
 #include <clap/clap.h>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <filesystem>
 #include <sys/time.h>
 #include <unistd.h>
+
+#include "host_test_support.h"
+
+namespace fs = std::filesystem;
 
 static double now_ms() {
     struct timeval tv;
@@ -18,9 +24,25 @@ static double now_ms() {
 
 static clap_host_t g_host = {};
 
-int main(int argc, char *argv[]) {
+static bool configure_scan_override(const char *plugin_path) {
+    if (!plugin_path || !plugin_path[0]) return true;
+
+    char tmpl[] = "/tmp/keepsake-host-test-XXXXXX";
+    char *dir = mkdtemp(tmpl);
+    if (!dir) return false;
+
+    fs::path src(plugin_path);
+    fs::path dst = fs::path(dir) / src.filename();
+    std::error_code ec;
+    fs::create_directory_symlink(src, dst, ec);
+    if (ec) return false;
+
+    return setenv("KEEPSAKE_VST2_PATH", dir, 1) == 0;
+}
+
+static int run_worker(int argc, char *argv[]) {
     if (argc < 3) {
-        fprintf(stderr, "usage: %s <clap-bundle> <plugin-id>\n", argv[0]);
+        fprintf(stderr, "usage: %s <clap-bundle> <plugin-id> [--max-memory-mb N] [--vst-path PATH]\n", argv[0]);
         return 1;
     }
 
@@ -28,6 +50,20 @@ int main(int argc, char *argv[]) {
 
     const char *clap_path = argv[1];
     const char *plugin_id = argv[2];
+    int max_memory_mb = 2048;
+    const char *vst_path = nullptr;
+
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--max-memory-mb") == 0 && i + 1 < argc)
+            max_memory_mb = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--vst-path") == 0 && i + 1 < argc)
+            vst_path = argv[++i];
+    }
+
+    if (!configure_scan_override(vst_path)) {
+        fprintf(stderr, "warning: failed to configure scan override for '%s'\n",
+                vst_path ? vst_path : "");
+    }
 
     // Load the CLAP bundle
 #ifdef __APPLE__
@@ -105,18 +141,34 @@ int main(int argc, char *argv[]) {
     ok = plugin->init(plugin);
     printf("[plugin.init]      %6.1f ms — %s\n", now_ms() - t,
            ok ? "OK" : "FAIL");
+    if (!ok) {
+        plugin->destroy(plugin);
+        entry->deinit();
+        return 1;
+    }
 
     // Activate
     t = now_ms();
     ok = plugin->activate(plugin, 44100.0, 32, 512);
     printf("[plugin.activate]  %6.1f ms — %s\n", now_ms() - t,
            ok ? "OK" : "FAIL");
+    if (!ok) {
+        plugin->destroy(plugin);
+        entry->deinit();
+        return 1;
+    }
 
     // Start processing
     t = now_ms();
     ok = plugin->start_processing(plugin);
     printf("[start_processing] %6.1f ms — %s\n", now_ms() - t,
            ok ? "OK" : "FAIL");
+    if (!ok) {
+        plugin->deactivate(plugin);
+        plugin->destroy(plugin);
+        entry->deinit();
+        return 1;
+    }
 
     // Wait for bridge to be ready, then process a few buffers
     printf("\n[processing] waiting for bridge...\n");
@@ -169,4 +221,21 @@ int main(int argc, char *argv[]) {
 
     printf("\n=== Done ===\n");
     return 0;
+}
+
+int main(int argc, char *argv[]) {
+    int max_memory_mb = 2048;
+
+    if (argc < 3) {
+        fprintf(stderr, "usage: %s <clap-bundle> <plugin-id> [--max-memory-mb N] [--vst-path PATH]\n", argv[0]);
+        return 1;
+    }
+
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--max-memory-mb") == 0 && i + 1 < argc)
+            max_memory_mb = atoi(argv[++i]);
+    }
+
+    return host_test_support::run_supervised(argc, argv, max_memory_mb,
+                                             run_worker);
 }

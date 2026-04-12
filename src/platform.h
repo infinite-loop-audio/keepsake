@@ -26,6 +26,10 @@ typedef pid_t PlatformPid;
 #define PLATFORM_INVALID_PIPE (-1)
 #endif
 
+#ifndef _WIN32
+static constexpr int PLATFORM_BRIDGE_IPC_OUT_FD = 4;
+#endif
+
 struct PlatformProcess {
     PlatformPid pid;
     PlatformPipe pipe_to;    // host writes commands here (non-RT)
@@ -118,6 +122,21 @@ static inline void platform_kill(PlatformProcess &proc) {
     }
 }
 
+static inline void platform_force_kill(PlatformProcess &proc) {
+    if (proc.pipe_to != PLATFORM_INVALID_PIPE) {
+        CloseHandle(proc.pipe_to); proc.pipe_to = PLATFORM_INVALID_PIPE;
+    }
+    if (proc.pipe_from != PLATFORM_INVALID_PIPE) {
+        CloseHandle(proc.pipe_from); proc.pipe_from = PLATFORM_INVALID_PIPE;
+    }
+    if (proc.process_handle != INVALID_HANDLE_VALUE) {
+        TerminateProcess(proc.process_handle, 1);
+        WaitForSingleObject(proc.process_handle, 1000);
+        CloseHandle(proc.process_handle);
+        proc.process_handle = INVALID_HANDLE_VALUE;
+    }
+}
+
 #else // POSIX (macOS + Linux)
 
 #include <signal.h>
@@ -138,7 +157,9 @@ static inline bool platform_spawn(const std::string &binary,
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
     posix_spawn_file_actions_adddup2(&actions, to_child[0], STDIN_FILENO);
-    posix_spawn_file_actions_adddup2(&actions, from_child[1], STDOUT_FILENO);
+    posix_spawn_file_actions_adddup2(&actions, from_child[1],
+                                     PLATFORM_BRIDGE_IPC_OUT_FD);
+    posix_spawn_file_actions_adddup2(&actions, STDERR_FILENO, STDOUT_FILENO);
     posix_spawn_file_actions_addclose(&actions, to_child[1]);
     posix_spawn_file_actions_addclose(&actions, from_child[0]);
     posix_spawn_file_actions_addclose(&actions, wake[1]);
@@ -193,6 +214,26 @@ static inline void platform_kill(PlatformProcess &proc) {
                 waitpid(proc.pid, &status, 0);
             }
         }
+        proc.pid = -1;
+    }
+}
+
+static inline void platform_force_kill(PlatformProcess &proc) {
+    if (proc.pipe_to != PLATFORM_INVALID_PIPE) {
+        close(proc.pipe_to); proc.pipe_to = PLATFORM_INVALID_PIPE;
+    }
+    if (proc.pipe_from != PLATFORM_INVALID_PIPE) {
+        close(proc.pipe_from); proc.pipe_from = PLATFORM_INVALID_PIPE;
+    }
+    if (proc.wake_to != PLATFORM_INVALID_PIPE) {
+        close(proc.wake_to); proc.wake_to = PLATFORM_INVALID_PIPE;
+    }
+    if (proc.wake_from != PLATFORM_INVALID_PIPE) {
+        close(proc.wake_from); proc.wake_from = PLATFORM_INVALID_PIPE;
+    }
+    if (proc.pid > 0) {
+        kill(proc.pid, SIGKILL);
+        waitpid(proc.pid, nullptr, 0);
         proc.pid = -1;
     }
 }

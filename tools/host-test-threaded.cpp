@@ -8,12 +8,17 @@
 
 #include <clap/clap.h>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
-#include <pthread.h>
+#include <filesystem>
 #include <sys/time.h>
 #include <unistd.h>
 #include <atomic>
+
+#include "host_test_support.h"
+
+namespace fs = std::filesystem;
 
 static double now_ms() {
     struct timeval tv;
@@ -22,39 +27,71 @@ static double now_ms() {
 }
 
 static int g_max_block_ms = 200;
+static int g_max_entry_block_ms = 5000;
+static int g_max_memory_mb = 2048;
 static std::atomic<bool> g_failed{false};
 
 // Call a function and fail if it takes too long
-#define TIMED_CALL(name, expr) do { \
+#define TIMED_CALL_LIMIT(name, limit_ms, expr) do { \
     double _t = now_ms(); \
     expr; \
     double _elapsed = now_ms() - _t; \
     printf("  %-25s %6.1f ms %s\n", name, _elapsed, \
-           _elapsed > g_max_block_ms ? "*** BLOCKED ***" : "OK"); \
-    if (_elapsed > g_max_block_ms) { \
+           _elapsed > (limit_ms) ? "*** BLOCKED ***" : "OK"); \
+    if (_elapsed > (limit_ms)) { \
         fprintf(stderr, "FAIL: %s blocked for %.0fms (max %dms)\n", \
-                name, _elapsed, g_max_block_ms); \
+                name, _elapsed, (limit_ms)); \
         g_failed = true; \
     } \
 } while(0)
 
+#define TIMED_CALL(name, expr) TIMED_CALL_LIMIT(name, g_max_block_ms, expr)
+
 static clap_host_t g_host = {};
 
-int main(int argc, char *argv[]) {
+static bool configure_scan_override(const char *plugin_path) {
+    if (!plugin_path || !plugin_path[0]) return true;
+
+    char tmpl[] = "/tmp/keepsake-host-test-XXXXXX";
+    char *dir = mkdtemp(tmpl);
+    if (!dir) return false;
+
+    fs::path src(plugin_path);
+    fs::path dst = fs::path(dir) / src.filename();
+    std::error_code ec;
+    fs::create_directory_symlink(src, dst, ec);
+    if (ec) return false;
+
+    return setenv("KEEPSAKE_VST2_PATH", dir, 1) == 0;
+}
+
+static int run_worker(int argc, char *argv[]) {
     setvbuf(stdout, nullptr, _IONBF, 0);
 
     if (argc < 3) {
-        fprintf(stderr, "usage: %s <clap-bundle> <plugin-id> [--timeout-ms N]\n",
+        fprintf(stderr, "usage: %s <clap-bundle> <plugin-id> [--timeout-ms N] [--entry-timeout-ms N] [--max-memory-mb N]\n",
                 argv[0]);
         return 1;
     }
 
     const char *clap_path = argv[1];
     const char *plugin_id = argv[2];
+    const char *vst_path = nullptr;
 
     for (int i = 3; i < argc; i++) {
         if (strcmp(argv[i], "--timeout-ms") == 0 && i + 1 < argc)
             g_max_block_ms = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--entry-timeout-ms") == 0 && i + 1 < argc)
+            g_max_entry_block_ms = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--max-memory-mb") == 0 && i + 1 < argc)
+            g_max_memory_mb = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--vst-path") == 0 && i + 1 < argc)
+            vst_path = argv[++i];
+    }
+
+    if (!configure_scan_override(vst_path)) {
+        fprintf(stderr, "warning: failed to configure scan override for '%s'\n",
+                vst_path ? vst_path : "");
     }
 
     // Load CLAP
@@ -76,7 +113,8 @@ int main(int argc, char *argv[]) {
 
     // Init
     bool init_ok = false;
-    TIMED_CALL("entry.init", init_ok = entry->init(clap_path));
+    TIMED_CALL_LIMIT("entry.init", g_max_entry_block_ms,
+                     init_ok = entry->init(clap_path));
     if (!init_ok) { fprintf(stderr, "init failed\n"); return 1; }
 
     auto *factory = reinterpret_cast<const clap_plugin_factory_t *>(
@@ -133,37 +171,41 @@ int main(int argc, char *argv[]) {
     // Activate
     printf("\n[Main thread — activation]\n");
     TIMED_CALL("activate", ok = plugin->activate(plugin, 44100, 32, 512));
+    if (!ok) { fprintf(stderr, "activate returned false\n"); goto cleanup; }
     TIMED_CALL("start_processing", ok = plugin->start_processing(plugin));
+    if (ok) {
+        // Process on "audio thread"
+        printf("\n[Audio thread — processing]\n");
+        float out_l[512] = {}, out_r[512] = {};
+        float *out_ptrs[2] = { out_l, out_r };
+        clap_audio_buffer_t out_buf = {};
+        out_buf.data32 = out_ptrs; out_buf.channel_count = 2;
+        clap_process_t proc = {};
+        proc.frames_count = 512;
+        proc.audio_outputs = &out_buf; proc.audio_outputs_count = 1;
 
-    // Process on "audio thread"
-    printf("\n[Audio thread — processing]\n");
-    float out_l[512] = {}, out_r[512] = {};
-    float *out_ptrs[2] = { out_l, out_r };
-    clap_audio_buffer_t out_buf = {};
-    out_buf.data32 = out_ptrs; out_buf.channel_count = 2;
-    clap_process_t proc = {};
-    proc.frames_count = 512;
-    proc.audio_outputs = &out_buf; proc.audio_outputs_count = 1;
+        for (int i = 0; i < 100; i++) {
+            memset(out_l, 0, sizeof(out_l)); memset(out_r, 0, sizeof(out_r));
+            auto status = plugin->process(plugin, &proc);
+            float peak = 0;
+            for (int s = 0; s < 512; s++) {
+                float v = out_l[s] > 0 ? out_l[s] : -out_l[s];
+                if (v > peak) peak = v;
+            }
+            if (i < 3 || peak > 0.001f) {
+                printf("  [%3d] status=%d peak=%.6f%s\n", i, status, peak,
+                       peak > 0.001f ? " AUDIO!" : "");
+            }
+            if (peak > 0.001f) break;
+            usleep(11600);
+        }
 
-    for (int i = 0; i < 100; i++) {
-        memset(out_l, 0, sizeof(out_l)); memset(out_r, 0, sizeof(out_r));
-        auto status = plugin->process(plugin, &proc);
-        float peak = 0;
-        for (int s = 0; s < 512; s++) {
-            float v = out_l[s] > 0 ? out_l[s] : -out_l[s];
-            if (v > peak) peak = v;
-        }
-        if (i < 3 || peak > 0.001f) {
-            printf("  [%3d] status=%d peak=%.6f%s\n", i, status, peak,
-                   peak > 0.001f ? " AUDIO!" : "");
-        }
-        if (peak > 0.001f) break;
-        usleep(11600);
+        printf("\n[Main thread — cleanup]\n");
+        TIMED_CALL("stop_processing", plugin->stop_processing(plugin));
+    } else {
+        fprintf(stderr, "start_processing returned false\n");
     }
 
-    // Cleanup
-    printf("\n[Main thread — cleanup]\n");
-    TIMED_CALL("stop_processing", plugin->stop_processing(plugin));
     TIMED_CALL("deactivate", plugin->deactivate(plugin));
     }
 
@@ -175,4 +217,29 @@ done:
 
     printf("\n=== %s ===\n", g_failed ? "FAILED — main thread blocked" : "PASSED");
     return g_failed ? 1 : 0;
+}
+
+int main(int argc, char *argv[]) {
+    setvbuf(stdout, nullptr, _IONBF, 0);
+
+    if (argc < 3) {
+        fprintf(stderr, "usage: %s <clap-bundle> <plugin-id> [--timeout-ms N] [--entry-timeout-ms N] [--max-memory-mb N]\n",
+                argv[0]);
+        return 1;
+    }
+
+    g_max_block_ms = 200;
+    g_max_entry_block_ms = 5000;
+    g_max_memory_mb = 2048;
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--timeout-ms") == 0 && i + 1 < argc)
+            g_max_block_ms = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--entry-timeout-ms") == 0 && i + 1 < argc)
+            g_max_entry_block_ms = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--max-memory-mb") == 0 && i + 1 < argc)
+            g_max_memory_mb = atoi(argv[++i]);
+    }
+
+    return host_test_support::run_supervised(argc, argv, g_max_memory_mb,
+                                             run_worker);
 }

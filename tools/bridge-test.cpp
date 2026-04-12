@@ -163,9 +163,15 @@ int main(int argc, char *argv[]) {
     pid_t pid = fork();
     if (pid == 0) {
         dup2(to_bridge[0], STDIN_FILENO);
-        dup2(from_bridge[1], STDOUT_FILENO);
-        close(to_bridge[0]); close(to_bridge[1]);
-        close(from_bridge[0]); close(from_bridge[1]);
+        dup2(from_bridge[1], PLATFORM_BRIDGE_IPC_OUT_FD);
+        dup2(STDERR_FILENO, STDOUT_FILENO);
+        if (to_bridge[0] != STDIN_FILENO) close(to_bridge[0]);
+        close(to_bridge[1]);
+        close(from_bridge[0]);
+        if (from_bridge[1] != PLATFORM_BRIDGE_IPC_OUT_FD &&
+            from_bridge[1] != STDOUT_FILENO) {
+            close(from_bridge[1]);
+        }
         execl(bridge_bin, "keepsake-bridge", nullptr);
         perror("execl"); _exit(1);
     }

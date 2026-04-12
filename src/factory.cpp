@@ -31,6 +31,8 @@ struct PluginEntry {
     std::string plugin_path;
     int32_t num_inputs = 0;
     int32_t num_outputs = 0;
+    int32_t num_params = 0;
+    bool has_editor = false;
     uint32_t format = 0; // PluginFormat
     bool needs_x86_64_bridge = false;
     bool needs_32bit_bridge = false;
@@ -215,6 +217,44 @@ static void scan_vst2_directory(const std::string &dir_path,
                 results.push_back(std::move(cross_info));
             }
         }
+    }
+}
+
+static void scan_vst2_entry(const std::string &entry_path,
+                            std::vector<Vst2PluginInfo> &results,
+                            bool targeted_vst2_override) {
+    std::error_code ec;
+    fs::path entry(entry_path);
+
+    auto try_scan_plugin = [&](const fs::path &plugin_path) {
+        Vst2PluginInfo info;
+        info.format = FORMAT_VST2;
+        if (vst2_load_metadata(plugin_path.string(), info)) {
+            results.push_back(std::move(info));
+            return;
+        }
+        if (targeted_vst2_override && !s_bridge_x86_64_path.empty()) {
+            Vst2PluginInfo cross_info;
+            cross_info.format = FORMAT_VST2;
+            if (vst2_load_metadata_via_bridge(plugin_path.string(),
+                                              s_bridge_x86_64_path,
+                                              cross_info)) {
+                cross_info.needs_cross_arch = true;
+                results.push_back(std::move(cross_info));
+            }
+        }
+    };
+
+    if (is_vst2_file(entry)) {
+        try_scan_plugin(entry);
+        return;
+    }
+
+    if (!fs::is_directory(entry, ec)) return;
+    for (const auto &dir_entry : fs::directory_iterator(entry, ec)) {
+        if (ec) break;
+        if (!is_vst2_file(dir_entry.path())) continue;
+        try_scan_plugin(dir_entry.path());
     }
 }
 
@@ -458,6 +498,8 @@ static void build_descriptors(std::vector<Vst2PluginInfo> &plugins) {
         entry.plugin_path = p.file_path;
         entry.num_inputs = p.num_inputs;
         entry.num_outputs = p.num_outputs;
+        entry.num_params = p.num_params;
+        entry.has_editor = (p.flags & effFlagsHasEditor) != 0;
         entry.format = p.format;
         entry.needs_x86_64_bridge = p.needs_cross_arch;
 
@@ -531,7 +573,7 @@ static const clap_plugin_t *factory_create_plugin(
             auto isolation = s_pool.resolve_mode(e.id, e.name);
             return keepsake_plugin_create(
                 host, &e.descriptor, e.plugin_path, *bridge,
-                e.num_inputs, e.num_outputs, e.format,
+                e.num_inputs, e.num_outputs, e.num_params, e.has_editor, e.format,
                 &s_pool, isolation);
         }
     }
@@ -577,7 +619,8 @@ bool keepsake_factory_init(const char *plugin_path) {
     KeepsakeConfig cfg;
     bool use_cache = true;
     const char *env = getenv("KEEPSAKE_VST2_PATH");
-    if (env && env[0] != '\0') {
+    bool targeted_vst2_override = (env && env[0] != '\0');
+    if (targeted_vst2_override) {
         use_cache = false; // env override bypasses cache
     } else {
         cfg = config_load();
@@ -615,28 +658,21 @@ bool keepsake_factory_init(const char *plugin_path) {
     }
 
     // Full scan — VST2 (in-process for speed during host scan)
-    auto vst2_paths = get_scan_paths();
-    for (const auto &p : cfg.extra_vst2_paths) {
-        vst2_paths.push_back(p);
+    auto vst2_paths = cfg.replace_default_vst2_paths
+                    ? std::vector<std::string>{}
+                    : get_scan_paths();
+    for (const auto &path : cfg.extra_vst2_paths) {
+        vst2_paths.push_back(path);
     }
 
-    fprintf(stderr, "keepsake: scanning %zu VST2 path(s)\n", vst2_paths.size());
-    for (const auto &dir : vst2_paths) {
-        std::error_code ec;
-        if (!fs::is_directory(dir, ec)) continue;
-        for (const auto &dir_entry : fs::directory_iterator(dir, ec)) {
-            if (ec) break;
-            if (!is_vst2_file(dir_entry.path())) continue;
+    bool allow_cross_arch_vst2_scan =
+        targeted_vst2_override || cfg.replace_default_vst2_paths;
 
-            Vst2PluginInfo info;
-            info.format = FORMAT_VST2;
-            // Fast in-process loading (native arch only)
-            if (vst2_load_metadata(dir_entry.path().string(), info)) {
-                all_plugins.push_back(std::move(info));
-            }
-            // Cross-arch plugins require keepsake-scan to populate the
-            // cache. They're too slow to scan during host init.
-        }
+    fprintf(stderr, "keepsake: scanning %zu VST2 path(s)\n", vst2_paths.size());
+    for (const auto &path : vst2_paths) {
+        scan_vst2_entry(path, all_plugins, allow_cross_arch_vst2_scan);
+        // Cross-arch plugins require keepsake-scan to populate the
+        // cache. They're too slow to scan during host init.
     }
     fprintf(stderr, "keepsake: found %zu VST2 plugin(s)\n", all_plugins.size());
 

@@ -39,6 +39,15 @@ public:
     // SHARED, the process is killed.
     void release(BridgeProcess *bp);
 
+    // Drop a bridge reference without waiting for IPC shutdown.
+    // Used when the bridge is unresponsive or the IPC stream is no longer
+    // trustworthy.
+    void abandon(BridgeProcess *bp);
+
+    // Terminate a bridge process without releasing ownership.
+    // Used to unblock background workers before they release their ref.
+    void terminate(BridgeProcess *bp);
+
     // Shut down all bridge processes.
     void shutdown_all();
 
@@ -59,6 +68,7 @@ public:
     }
 
 private:
+    std::mutex pool_mutex;
     std::unordered_map<std::string, BridgeProcess *> pool;
     std::vector<Override> overrides;
     IsolationMode default_mode = IsolationMode::PER_INSTANCE;
