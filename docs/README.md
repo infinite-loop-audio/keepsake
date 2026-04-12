@@ -7,6 +7,7 @@
 - [`contracts/README.md`](contracts/README.md)
 - [`roadmaps/README.md`](roadmaps/README.md)
 - [`logs/README.md`](logs/README.md)
+- [`releases/README.md`](releases/README.md)
 - [`known-issues-v0.1-alpha.md`](known-issues-v0.1-alpha.md)
 
 Stricter delivery layer (installed):

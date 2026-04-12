@@ -64,7 +64,8 @@ No public binary release is published yet. The `v0.1-alpha` release stream is
 tracked in [`docs/roadmaps/g02/README.md`](docs/roadmaps/g02/README.md).
 
 Until the first alpha artifacts are cut, use local builds or maintainers'
-dev bundles.
+dev bundles. The draft release/install surface lives in
+[`docs/releases/v0.1-alpha.md`](docs/releases/v0.1-alpha.md).
 
 Once built or downloaded, place `keepsake.clap` in your system CLAP plugin folder:
 
@@ -123,6 +124,19 @@ first alpha release. Today, the practical entry points are:
 - `cmake --preset default`
 - `cmake --build build`
 - `effigy qa`
+
+Typical local flow:
+
+```sh
+cmake --preset default
+cmake --build build
+effigy qa
+```
+
+Primary local outputs:
+
+- macOS: `build/keepsake.clap`
+- helper binaries inside the bundle under `Contents/Helpers/`
 
 The project is C/C++, depends on
 [VeSTige](https://github.com/LMMS/lmms/blob/master/plugins/vst_base/vestige/aeffect.h),
