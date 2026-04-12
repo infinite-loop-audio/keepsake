@@ -70,19 +70,19 @@ jobs:
         include:
           - name: macos-arm64
             os: macos-14
-            artifact_name: keepsake-macos-arm64-${{ env.RELEASE_VERSION }}.zip
+            artifact_stem: macos-arm64
             package_kind: zip
             clap_glob: build-release/keepsake.clap
             bridge_glob: build-release/keepsake-bridge
           - name: linux-x64
             os: ubuntu-latest
-            artifact_name: keepsake-linux-x64-${{ env.RELEASE_VERSION }}.tar.gz
+            artifact_stem: linux-x64
             package_kind: tar.gz
             clap_glob: build-release/keepsake.clap
             bridge_glob: build-release/keepsake-bridge
           - name: windows-x64
             os: windows-latest
-            artifact_name: keepsake-windows-x64-${{ env.RELEASE_VERSION }}.zip
+            artifact_stem: windows-x64
             package_kind: zip
             clap_glob: build-release/**/keepsake.clap
             bridge_glob: build-release/**/keepsake-bridge.exe
@@ -105,7 +105,7 @@ jobs:
         env:
           CLAP_GLOB: ${{ matrix.clap_glob }}
           BRIDGE_GLOB: ${{ matrix.bridge_glob }}
-          ARTIFACT_NAME: ${{ matrix.artifact_name }}
+          ARTIFACT_STEM: ${{ matrix.artifact_stem }}
           PACKAGE_KIND: ${{ matrix.package_kind }}
         run: |
           set -euo pipefail
@@ -123,7 +123,12 @@ jobs:
           fi
           dist_dir="$RUNNER_TEMP/release-dist"
           stage_dir="$dist_dir/stage"
-          artifact_path="$dist_dir/$ARTIFACT_NAME"
+          artifact_ext=".zip"
+          if [ "$PACKAGE_KIND" = "tar.gz" ]; then
+            artifact_ext=".tar.gz"
+          fi
+          artifact_name="keepsake-${ARTIFACT_STEM}-${RELEASE_VERSION}${artifact_ext}"
+          artifact_path="$dist_dir/$artifact_name"
           checksum_path="$dist_dir/SHA256SUMS.txt"
 
           rm -rf "$dist_dir"
