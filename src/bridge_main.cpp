@@ -508,9 +508,6 @@ int main(int argc, char *argv[]) {
         case IPC_OP_GET_CHUNK:  handle_get_chunk(inst); break;
         case IPC_OP_SET_CHUNK:  handle_set_chunk(inst, payload); break;
         case IPC_OP_EDITOR_OPEN:
-            fprintf(stderr, "bridge: IPC_OP_EDITOR_OPEN instance=%u has_loader=%d has_editor=%d\n",
-                    instance_id, inst->loader ? 1 : 0,
-                    (inst->loader && inst->loader->has_editor()) ? 1 : 0);
             if (inst->loader && inst->loader->has_editor()) {
                 EditorHeaderInfo hdr;
                 hdr.format = "VST2";
@@ -533,11 +530,7 @@ int main(int argc, char *argv[]) {
                 else
                     hdr.plugin_name = "Plugin";
 
-                fprintf(stderr, "bridge: opening editor for '%s'\n",
-                        hdr.plugin_name.c_str());
                 if (gui_open_editor(inst->loader, hdr)) {
-                    fprintf(stderr, "bridge: editor open OK instance=%u\n",
-                            instance_id);
                     ipc_write_ok(g_pipe_out);
                 } else {
                     fprintf(stderr, "bridge: editor open FAILED instance=%u\n",

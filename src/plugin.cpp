@@ -151,9 +151,6 @@ void sync_async_init(KeepsakePlugin *kp) {
     kp->num_params = state->num_params;
     kp->has_editor = state->has_editor;
     kp->bridge_ok = true;
-
-    fprintf(stderr, "keepsake: async init OK — in=%d out=%d params=%d editor=%d\n",
-            kp->num_inputs, kp->num_outputs, kp->num_params, kp->has_editor);
 }
 
 bool wait_async_init(KeepsakePlugin *kp, int timeout_ms) {
@@ -362,7 +359,6 @@ static void output_silence(const clap_process_t *process) {
 
 static bool plugin_init(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
-    fprintf(stderr, "keepsake: starting async bridge init...\n");
     launch_async_init(kp);
     return true;
 }

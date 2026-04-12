@@ -152,8 +152,6 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     if (!loader || !loader->has_editor()) return false;
     if (g_editor_open) return true;
 
-    fprintf(stderr, "bridge: gui_open_editor('%s') begin\n",
-            header.plugin_name.c_str());
     const bool use_parentless_open =
         header.plugin_name == "Ample Percussion Cloudrum";
 
@@ -162,7 +160,6 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     // plugin for its preferred size once the editor is live.
     int w = DEFAULT_EDITOR_WIDTH;
     int h = DEFAULT_EDITOR_HEIGHT;
-    fprintf(stderr, "bridge: initial editor size fallback=%dx%d\n", w, h);
 
     if (!use_parentless_open) {
         // Create window (editor height + header height)
@@ -231,8 +228,6 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     void *editor_parent = use_parentless_open
         ? nullptr
         : (__bridge void *)g_editor_container;
-    fprintf(stderr, "bridge: calling loader->open_editor() parent=%p strategy=%s\n",
-            editor_parent, use_parentless_open ? "parentless" : "embedded");
 
     if (use_parentless_open) {
         NSArray<NSWindow *> *windows_before = [[NSApp windows] copy];
@@ -254,15 +249,10 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
         }
 
         if (g_parentless_plugin_window) {
-            fprintf(stderr, "bridge: APC parentless window=%p\n",
-                    (__bridge void *)g_parentless_plugin_window);
             style_parentless_plugin_window(g_parentless_plugin_window, header);
-        } else {
-            fprintf(stderr, "bridge: APC parentless window not found\n");
         }
 
         g_active_loader = loader;
-        fprintf(stderr, "bridge: APC parentless editor open succeeded\n");
         g_editor_open = true;
         return true;
     }
@@ -347,8 +337,6 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     // Re-check size after open (some plugins report correct size only after effEditOpen)
     int newW = w, newH = h;
     bool have_rect_after_open = loader->get_editor_rect(newW, newH);
-    fprintf(stderr, "bridge: post-open editor rect ok=%d size=%dx%d\n",
-            have_rect_after_open ? 1 : 0, newW, newH);
     if (newW != w || newH != h) {
         [g_window setContentSize:NSMakeSize(newW, newH + HEADER_HEIGHT)];
         [g_header setFrame:NSMakeRect(0, 0, newW, HEADER_HEIGHT)];
@@ -378,11 +366,7 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
         usleep(16000);
     }
 
-    fprintf(stderr, "bridge: editor container subviews=%lu\n",
-            static_cast<unsigned long>([[g_editor_container subviews] count]));
-
     g_editor_open = true;
-    fprintf(stderr, "bridge: editor opened (%dx%d) with header bar\n", w, h);
     return true;
 }
 
@@ -413,7 +397,6 @@ void gui_close_editor(BridgeLoader *loader) {
     g_editor_container = nil;
     g_active_loader = nil;
     g_editor_open = false;
-    fprintf(stderr, "bridge: editor closed\n");
 }
 
 bool gui_get_editor_rect(BridgeLoader *loader, int &width, int &height) {
