@@ -4,6 +4,7 @@
 
 #include "bridge_loader.h"
 #include <vestige/vestige.h>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 
