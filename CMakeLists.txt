@@ -85,7 +85,7 @@ set_target_properties(keepsake PROPERTIES
 # --- Platform-specific configuration ---
 
 if(APPLE)
-    target_sources(keepsake PRIVATE src/plugin_gui.mm)
+    target_sources(keepsake PRIVATE src/plugin_gui.cpp)
     set_target_properties(keepsake PROPERTIES
         BUNDLE TRUE
         BUNDLE_EXTENSION clap
@@ -112,7 +112,7 @@ if(APPLE)
     endif()
 
 elseif(WIN32)
-    target_sources(keepsake PRIVATE src/plugin_gui_stub.cpp)
+    target_sources(keepsake PRIVATE src/plugin_gui.cpp)
     set_target_properties(keepsake PROPERTIES
         SUFFIX ".clap"
         OUTPUT_NAME "keepsake"
@@ -120,7 +120,7 @@ elseif(WIN32)
 
 else()
     # Linux
-    target_sources(keepsake PRIVATE src/plugin_gui_stub.cpp)
+    target_sources(keepsake PRIVATE src/plugin_gui.cpp)
     set_target_properties(keepsake PROPERTIES
         SUFFIX ".clap"
         OUTPUT_NAME "keepsake"

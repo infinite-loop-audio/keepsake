@@ -26,7 +26,8 @@ static inline bool platform_spawn(const std::string &binary,
 
     STARTUPINFOA si = {};
     si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
+    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
     si.hStdInput = child_stdin_rd;
     si.hStdOutput = child_stdout_wr;
     si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
@@ -36,7 +37,7 @@ static inline bool platform_spawn(const std::string &binary,
     snprintf(cmd, sizeof(cmd), "\"%s\"", binary.c_str());
 
     if (!CreateProcessA(nullptr, cmd, nullptr, nullptr, TRUE,
-                        0, nullptr, nullptr, &si, &pi)) {
+                        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
         CloseHandle(child_stdin_rd);
         CloseHandle(child_stdin_wr);
         CloseHandle(child_stdout_rd);
