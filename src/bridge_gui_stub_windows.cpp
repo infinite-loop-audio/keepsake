@@ -121,7 +121,15 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
         0, WIN_HEADER_HEIGHT, w, h,
         g_editor_hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
 
-    loader->open_editor(static_cast<void *>(editor_panel));
+    if (!loader->open_editor(static_cast<void *>(editor_panel))) {
+        fprintf(stderr, "bridge: floating editor open failed\n");
+        DestroyWindow(editor_panel);
+        DestroyWindow(g_header_hwnd);
+        DestroyWindow(g_editor_hwnd);
+        g_header_hwnd = nullptr;
+        g_editor_hwnd = nullptr;
+        return false;
+    }
     g_active_loader = loader;
     g_editor_open = true;
 
@@ -148,7 +156,14 @@ bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
 
     if (!g_editor_hwnd) return false;
 
-    loader->open_editor(static_cast<void *>(g_editor_hwnd));
+    fprintf(stderr, "bridge: editor embed parent=%p child=%p\n",
+            static_cast<void *>(parent), static_cast<void *>(g_editor_hwnd));
+    if (!loader->open_editor(static_cast<void *>(g_editor_hwnd))) {
+        fprintf(stderr, "bridge: embedded editor open failed\n");
+        DestroyWindow(g_editor_hwnd);
+        g_editor_hwnd = nullptr;
+        return false;
+    }
     g_active_loader = loader;
     g_parent_hwnd = parent;
     g_editor_open = true;

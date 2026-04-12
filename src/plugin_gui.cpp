@@ -47,6 +47,8 @@ static bool gui_create(const clap_plugin_t *plugin, const char *, bool is_floati
 #else
     kp->gui_is_floating = is_floating;
 #endif
+    fprintf(stderr, "keepsake: gui_create floating=%d has_editor=%d\n",
+            kp->gui_is_floating ? 1 : 0, kp->has_editor ? 1 : 0);
     return true;
 }
 
@@ -97,6 +99,8 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
 #else
     handle = static_cast<uint64_t>(window->x11);
 #endif
+    fprintf(stderr, "keepsake: gui_set_parent handle=%p\n",
+            reinterpret_cast<void *>(static_cast<uintptr_t>(handle)));
     if (!send_and_wait(kp, IPC_OP_EDITOR_SET_PARENT, &handle, sizeof(handle),
                        nullptr, GUI_OPEN_TIMEOUT_MS)) {
         fprintf(stderr, "keepsake: gui_set_parent() editor parent failed\n");
@@ -114,6 +118,8 @@ static bool gui_show(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
     if (!kp->bridge_ok && !kp->crashed) wait_async_init(kp, 1500);
     if (kp->crashed || !kp->has_editor) return false;
+    fprintf(stderr, "keepsake: gui_show floating=%d open=%d\n",
+            kp->gui_is_floating ? 1 : 0, kp->editor_open ? 1 : 0);
     if (kp->gui_is_floating && !kp->editor_open) {
         if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN, nullptr, 0, nullptr,
                            GUI_OPEN_TIMEOUT_MS)) {

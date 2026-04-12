@@ -213,6 +213,9 @@ int main(int argc, char *argv[]) {
             if (inst->loader && payload.size() >= 8) {
                 uint64_t handle;
                 memcpy(&handle, payload.data(), 8);
+                fprintf(stderr, "bridge: EDITOR_SET_PARENT handle=%p instance=%u\n",
+                        reinterpret_cast<void *>(static_cast<uintptr_t>(handle)),
+                        instance_id);
                 if (gui_open_editor_embedded(inst->loader, handle))
                     ipc_write_ok(g_pipe_out);
                 else
