@@ -33,11 +33,18 @@ FetchContent_MakeAvailable(vst3_pluginterfaces)
 
 # Create a symlink so #include "pluginterfaces/..." works
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/_deps/vst3-include")
-file(CREATE_LINK
-    "${vst3_pluginterfaces_SOURCE_DIR}"
-    "${CMAKE_BINARY_DIR}/_deps/vst3-include/pluginterfaces"
-    SYMBOLIC
-)
+if(WIN32)
+    file(COPY
+        "${vst3_pluginterfaces_SOURCE_DIR}/"
+        DESTINATION "${CMAKE_BINARY_DIR}/_deps/vst3-include/pluginterfaces"
+    )
+else()
+    file(CREATE_LINK
+        "${vst3_pluginterfaces_SOURCE_DIR}"
+        "${CMAKE_BINARY_DIR}/_deps/vst3-include/pluginterfaces"
+        SYMBOLIC
+    )
+endif()
 
 # --- Main plugin target ---
 
