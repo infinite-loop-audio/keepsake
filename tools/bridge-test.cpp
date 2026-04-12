@@ -14,7 +14,6 @@
 #ifndef _WIN32
 #include <signal.h>
 #include <sys/wait.h>
-#include <unistd.h>
 #endif
 
 static uint32_t detect_format(const char *path) {
@@ -57,15 +56,20 @@ static bool init_instance(int wr, int rd, const char *path, TestInstance &inst) 
     memcpy(init_data.data() + 4, path, path_len);
 
     // INIT with instance_id=0 (bridge assigns a real one)
-    ipc_write_instance_msg(wr, IPC_OP_INIT, 0, init_data.data(),
-                            static_cast<uint32_t>(init_data.size()));
+    if (!ipc_write_instance_msg(wr, IPC_OP_INIT, 0, init_data.data(),
+                                 static_cast<uint32_t>(init_data.size()))) {
+        fprintf(stderr, "INIT write failed\n");
+        return false;
+    }
 
-    uint32_t op;
+    uint32_t op = 0;
     std::vector<uint8_t> payload;
     if (!ipc_read_msg(rd, op, payload, 10000) || op != IPC_OP_OK) {
         if (op == IPC_OP_ERROR) {
             std::string msg(payload.begin(), payload.end());
             fprintf(stderr, "INIT error: %s\n", msg.c_str());
+        } else {
+            fprintf(stderr, "INIT read failed or unexpected opcode: 0x%x\n", op);
         }
         return false;
     }
@@ -157,39 +161,38 @@ int main(int argc, char *argv[]) {
     const char *path1 = argv[2];
     const char *path2 = (argc > 3) ? argv[3] : nullptr;
 
-    // Spawn bridge
-    int to_bridge[2], from_bridge[2];
-    pipe(to_bridge); pipe(from_bridge);
-    pid_t pid = fork();
-    if (pid == 0) {
-        dup2(to_bridge[0], STDIN_FILENO);
-        dup2(from_bridge[1], PLATFORM_BRIDGE_IPC_OUT_FD);
-        dup2(STDERR_FILENO, STDOUT_FILENO);
-        if (to_bridge[0] != STDIN_FILENO) close(to_bridge[0]);
-        close(to_bridge[1]);
-        close(from_bridge[0]);
-        if (from_bridge[1] != PLATFORM_BRIDGE_IPC_OUT_FD &&
-            from_bridge[1] != STDOUT_FILENO) {
-            close(from_bridge[1]);
-        }
-        execl(bridge_bin, "keepsake-bridge", nullptr);
-        perror("execl"); _exit(1);
+    PlatformProcess proc = {};
+    proc.pid = -1;
+    proc.pipe_to = PLATFORM_INVALID_PIPE;
+    proc.pipe_from = PLATFORM_INVALID_PIPE;
+    proc.wake_to = PLATFORM_INVALID_PIPE;
+    proc.wake_from = PLATFORM_INVALID_PIPE;
+#ifdef _WIN32
+    proc.process_handle = INVALID_HANDLE_VALUE;
+#endif
+    if (!platform_spawn(bridge_bin, proc)) {
+        fprintf(stderr, "failed to spawn bridge: %s\n", bridge_bin);
+        return 1;
     }
-    close(to_bridge[0]); close(from_bridge[1]);
-    int wr = to_bridge[1], rd = from_bridge[0];
 
-    printf("=== Multi-instance bridge test (pid=%d) ===\n\n", pid);
+    int wr = proc.pipe_to;
+    int rd = proc.pipe_from;
+
+    printf("=== Multi-instance bridge test (pid=%d) ===\n\n",
+           static_cast<int>(proc.pid));
 
     // --- Instance 1 ---
     printf("[1] Loading: %s\n", path1);
     TestInstance inst1;
     if (!init_instance(wr, rd, path1, inst1)) {
         fprintf(stderr, "Instance 1 INIT failed\n");
-        kill(pid, SIGKILL); waitpid(pid, nullptr, 0); return 1;
+        platform_force_kill(proc);
+        return 1;
     }
     if (!setup_instance(wr, rd, inst1)) {
         fprintf(stderr, "Instance 1 setup failed\n");
-        kill(pid, SIGKILL); waitpid(pid, nullptr, 0); return 1;
+        platform_force_kill(proc);
+        return 1;
     }
 
     float peak1 = process_instance(wr, rd, inst1);
@@ -231,11 +234,9 @@ int main(int argc, char *argv[]) {
     ipc_read_msg(rd, op, payload, 5000);
     printf("\n[BRIDGE SHUTDOWN] %s\n", op == IPC_OP_OK ? "OK" : "FAILED");
 
-    int status;
-    waitpid(pid, &status, 0);
-    printf("Bridge exited with status %d\n", WEXITSTATUS(status));
+    platform_kill(proc);
+    printf("Bridge exited\n");
 
-    close(wr); close(rd);
     printf("\n=== Test complete ===\n");
     return 0;
 }

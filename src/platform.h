@@ -20,6 +20,7 @@ typedef HANDLE PlatformPipe;
 typedef DWORD  PlatformPid;
 #define PLATFORM_INVALID_PIPE INVALID_HANDLE_VALUE
 #else
+#include <fcntl.h>
 #include <poll.h>
 #include <unistd.h>
 typedef int   PlatformPipe;
@@ -146,11 +147,37 @@ static inline void platform_force_kill(PlatformProcess &proc) {
 
 extern char **environ;
 
+static inline bool platform_move_fd(PlatformPipe &fd, int min_fd) {
+    if (fd < min_fd) {
+        int moved = fcntl(fd, F_DUPFD, min_fd);
+        if (moved < 0) return false;
+        close(fd);
+        fd = moved;
+    }
+    return true;
+}
+
 static inline bool platform_spawn(const std::string &binary,
                                     PlatformProcess &proc) {
     int to_child[2], from_child[2], wake[2];
     if (pipe(to_child) < 0 || pipe(from_child) < 0 || pipe(wake) < 0) {
         perror("keepsake: pipe");
+        return false;
+    }
+
+    // Keep raw pipe fds away from stdio and fd 4. posix_spawn file actions
+    // apply dup2/close to numeric descriptors, so low-fd collisions can
+    // accidentally close the bridge IPC target after dup2.
+    if (!platform_move_fd(to_child[0], 10) ||
+        !platform_move_fd(to_child[1], 10) ||
+        !platform_move_fd(from_child[0], 10) ||
+        !platform_move_fd(from_child[1], 10) ||
+        !platform_move_fd(wake[0], 10) ||
+        !platform_move_fd(wake[1], 10)) {
+        perror("keepsake: fcntl");
+        close(to_child[0]); close(to_child[1]);
+        close(from_child[0]); close(from_child[1]);
+        close(wake[0]); close(wake[1]);
         return false;
     }
 

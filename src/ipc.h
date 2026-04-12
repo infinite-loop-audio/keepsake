@@ -303,11 +303,21 @@ static inline ShmProcessControl *shm_control(void *shm_ptr) {
 
 // Atomic helpers for cross-process shared memory
 static inline void shm_store_release(volatile uint32_t *ptr, uint32_t val) {
+#ifdef _WIN32
+    InterlockedExchange(reinterpret_cast<volatile LONG *>(ptr),
+                        static_cast<LONG>(val));
+#else
     __atomic_store_n(ptr, val, __ATOMIC_RELEASE);
+#endif
 }
 
 static inline uint32_t shm_load_acquire(volatile uint32_t *ptr) {
+#ifdef _WIN32
+    return static_cast<uint32_t>(
+        InterlockedCompareExchange(reinterpret_cast<volatile LONG *>(ptr), 0, 0));
+#else
     return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
+#endif
 }
 
 // Total shared memory size needed
