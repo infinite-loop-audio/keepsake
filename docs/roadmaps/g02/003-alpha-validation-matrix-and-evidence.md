@@ -70,6 +70,18 @@ If g02.001 claims Windows, Linux, VST3, AU, or 32-bit support for alpha,
 capture evidence for them here. If the evidence is weak or incomplete, narrow
 the claim set instead of inventing confidence.
 
+Best near-term secondary lane if an Ubuntu VM is available:
+
+- Ubuntu x86_64
+- REAPER
+- repo `test-plugin.so`
+- install `keepsake.clap`
+- verify discovery, instantiate, params, GUI open/close, short transport
+
+This is the preferred first Linux host-validation lane because it avoids
+blocking on a third-party Linux VST2 hunt while still exercising a real host
+and real bridge path.
+
 Acceptance:
 - no published support claim is left without current evidence
 

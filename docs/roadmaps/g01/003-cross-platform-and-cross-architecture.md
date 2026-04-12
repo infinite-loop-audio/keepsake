@@ -24,6 +24,9 @@ This milestone does **not** include:
 - 32-bit bridge binaries (Windows x86, Linux x86) — deferred; the
   architecture is ready but building and testing 32-bit requires multilib
   toolchains
+- Linux arm64 host → x86_64 plugin bridging via userspace translation
+  (`FEX`/similar) — deferred to a later milestone; treat as experimental
+  future work, not Rosetta-equivalent release scope
 - GUI forwarding
 - Scan caching or config.toml
 - Plugin state save/restore
