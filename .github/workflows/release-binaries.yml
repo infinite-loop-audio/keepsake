@@ -1,0 +1,240 @@
+name: Release Binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release label, e.g. v0.1-alpha
+        required: true
+        default: v0.1-alpha
+        type: string
+      publish_release:
+        description: Create or update a GitHub release with the built artifacts
+        required: true
+        default: false
+        type: boolean
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
+
+jobs:
+  gates:
+    name: Release gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libx11-dev
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j4
+
+      - name: Smoke — bridge with test plugin
+        run: build/bridge-test build/keepsake-bridge build/test-plugin.so
+
+      - name: Smoke — clap-scan with test plugin
+        run: |
+          mkdir -p /tmp/ktest
+          cp build/test-plugin.so /tmp/ktest/
+          KEEPSAKE_VST2_PATH=/tmp/ktest \
+            build/clap-scan build/keepsake.clap 2>&1 | tee /tmp/scan-output.txt
+          grep "Keepsake Test Plugin" /tmp/scan-output.txt
+
+      - name: Verify release docs exist
+        run: |
+          test -f docs/releases/${RELEASE_VERSION}.md
+          test -f docs/releases/${RELEASE_VERSION}-publish-checklist.md || true
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: gates
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: macos-arm64
+            os: macos-14
+            artifact_name: keepsake-macos-arm64-${{ env.RELEASE_VERSION }}.zip
+            package_kind: zip
+            clap_glob: build-release/keepsake.clap
+            bridge_glob: build-release/keepsake-bridge
+          - name: linux-x64
+            os: ubuntu-latest
+            artifact_name: keepsake-linux-x64-${{ env.RELEASE_VERSION }}.tar.gz
+            package_kind: tar.gz
+            clap_glob: build-release/keepsake.clap
+            bridge_glob: build-release/keepsake-bridge
+          - name: windows-x64
+            os: windows-latest
+            artifact_name: keepsake-windows-x64-${{ env.RELEASE_VERSION }}.zip
+            package_kind: zip
+            clap_glob: build-release/**/keepsake.clap
+            bridge_glob: build-release/**/keepsake-bridge.exe
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libx11-dev
+
+      - name: Configure
+        run: cmake --preset release
+
+      - name: Build
+        run: cmake --build build-release --config Release -j4
+
+      - name: Package artifact
+        shell: bash
+        env:
+          CLAP_GLOB: ${{ matrix.clap_glob }}
+          BRIDGE_GLOB: ${{ matrix.bridge_glob }}
+          ARTIFACT_NAME: ${{ matrix.artifact_name }}
+          PACKAGE_KIND: ${{ matrix.package_kind }}
+        run: |
+          set -euo pipefail
+
+          clap_path="$(python3 -c 'import glob, sys; matches = glob.glob(sys.argv[1], recursive=True); print(matches[0] if matches else "")' "$CLAP_GLOB")"
+          bridge_path="$(python3 -c 'import glob, sys; matches = glob.glob(sys.argv[1], recursive=True); print(matches[0] if matches else "")' "$BRIDGE_GLOB")"
+
+          if [ -z "$clap_path" ]; then
+            echo "missing keepsake.clap output" >&2
+            exit 1
+          fi
+          if [ -z "$bridge_path" ]; then
+            echo "missing keepsake-bridge output" >&2
+            exit 1
+          fi
+          dist_dir="$RUNNER_TEMP/release-dist"
+          stage_dir="$dist_dir/stage"
+          artifact_path="$dist_dir/$ARTIFACT_NAME"
+          checksum_path="$dist_dir/SHA256SUMS.txt"
+
+          rm -rf "$dist_dir"
+          mkdir -p "$stage_dir"
+
+          if [ -d "$clap_path" ]; then
+            cp -R "$clap_path" "$stage_dir/"
+          else
+            cp "$clap_path" "$stage_dir/"
+          fi
+
+          if [ "$RUNNER_OS" != "macOS" ]; then
+            cp "$bridge_path" "$stage_dir/"
+          fi
+
+          if [ "$PACKAGE_KIND" = "zip" ]; then
+            if [ "$RUNNER_OS" = "macOS" ]; then
+              (
+                cd "$stage_dir"
+                ditto -c -k --sequesterRsrc --keepParent "keepsake.clap" "$artifact_path"
+              )
+            else
+              (
+                cd "$stage_dir"
+                powershell.exe -NoLogo -NoProfile -Command \
+                  "Compress-Archive -Path * -DestinationPath '$artifact_path' -Force"
+              )
+            fi
+          else
+            tar -C "$stage_dir" -czf "$artifact_path" .
+          fi
+
+          if command -v shasum >/dev/null 2>&1; then
+            (
+              cd "$dist_dir"
+              shasum -a 256 "$(basename "$artifact_path")" >"$checksum_path"
+            )
+          else
+            (
+              cd "$dist_dir"
+              sha256sum "$(basename "$artifact_path")" >"$checksum_path"
+            )
+          fi
+
+          echo "artifact_path=$artifact_path" >> "$GITHUB_ENV"
+          echo "checksum_path=$checksum_path" >> "$GITHUB_ENV"
+
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            ${{ env.artifact_path }}
+            ${{ env.checksum_path }}
+          retention-days: 7
+
+  release:
+    name: Create GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.inputs.publish_release == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Prepare release notes
+        id: notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes_file="docs/releases/${RELEASE_VERSION}.md"
+          if [ -f "$notes_file" ]; then
+            cp "$notes_file" release-notes.md
+            echo "notes_file=release-notes.md" >> "$GITHUB_OUTPUT"
+          else
+            echo "notes_file=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="Keepsake ${RELEASE_VERSION}"
+          prerelease_args=()
+          if [[ "$RELEASE_VERSION" == *alpha* || "$RELEASE_VERSION" == *beta* || "$RELEASE_VERSION" == *rc* ]]; then
+            prerelease_args+=(--prerelease)
+          fi
+
+          assets=(release-artifacts/*)
+          if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_VERSION" "${assets[@]}" --clobber
+          else
+            if [ -n "${{ steps.notes.outputs.notes_file }}" ]; then
+              gh release create "$RELEASE_VERSION" \
+                --title "$title" \
+                "${prerelease_args[@]}" \
+                --notes-file "${{ steps.notes.outputs.notes_file }}" \
+                "${assets[@]}"
+            else
+              gh release create "$RELEASE_VERSION" \
+                --title "$title" \
+                "${prerelease_args[@]}" \
+                --generate-notes \
+                "${assets[@]}"
+            fi
+          fi

@@ -16,10 +16,13 @@ published artifacts actually claim.
 
 ## Release Ops
 
-- package the current alpha candidate with:
+- dry-run package the current alpha candidate locally with:
   - `effigy release:candidate:alpha`
-- emit artifacts under:
+- local dry-run output path:
   - `dist/v0.1-alpha/`
+- build publishable release artifacts in GitHub Actions with:
+  - `.github/workflows/release-binaries.yml`
+- treat CI-built artifacts as the release source of truth
 - leave one dated release checkpoint log when the tag is cut
 
 ## Rule

@@ -60,7 +60,7 @@ stage_dir="$output_dir/stage"
 
 case "$(uname -s)" in
   Darwin)
-    platform="macos-universal"
+    platform="macos-arm64"
     archive_name="keepsake-${platform}-${version_label}.zip"
     ;;
   Linux)
