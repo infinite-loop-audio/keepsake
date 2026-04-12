@@ -7,7 +7,11 @@
 
 #include <cstdio>
 #include <cstring>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
 #include <clap/clap.h>
 
 int main(int argc, char *argv[]) {
@@ -18,25 +22,40 @@ int main(int argc, char *argv[]) {
 
     const char *clap_path = argv[1];
 
-    // Try loading: on macOS it's a bundle, on Linux it's the .clap directly
+    // Try loading: on macOS it's a bundle, elsewhere it's the binary itself.
     void *lib = nullptr;
 #ifdef __APPLE__
     char lib_path[4096];
     snprintf(lib_path, sizeof(lib_path), "%s/Contents/MacOS/keepsake", clap_path);
     lib = dlopen(lib_path, RTLD_LAZY | RTLD_LOCAL);
+#elif defined(_WIN32)
+    lib = reinterpret_cast<void *>(LoadLibraryA(clap_path));
 #else
     lib = dlopen(clap_path, RTLD_LAZY | RTLD_LOCAL);
 #endif
     if (!lib) {
+#ifdef _WIN32
+        fprintf(stderr, "failed to load '%s' (GetLastError=%lu)\n",
+                clap_path, static_cast<unsigned long>(GetLastError()));
+#else
         fprintf(stderr, "failed to load '%s': %s\n", clap_path, dlerror());
+#endif
         return 1;
     }
 
     auto *entry = reinterpret_cast<const clap_plugin_entry_t *>(
+#ifdef _WIN32
+        GetProcAddress(static_cast<HMODULE>(lib), "clap_entry"));
+#else
         dlsym(lib, "clap_entry"));
+#endif
     if (!entry) {
         fprintf(stderr, "no clap_entry symbol found\n");
+#ifdef _WIN32
+        FreeLibrary(static_cast<HMODULE>(lib));
+#else
         dlclose(lib);
+#endif
         return 1;
     }
 
@@ -47,7 +66,11 @@ int main(int argc, char *argv[]) {
 
     if (!entry->init(clap_path)) {
         fprintf(stderr, "clap_entry.init() failed\n");
+#ifdef _WIN32
+        FreeLibrary(static_cast<HMODULE>(lib));
+#else
         dlclose(lib);
+#endif
         return 1;
     }
 
@@ -56,7 +79,11 @@ int main(int argc, char *argv[]) {
     if (!factory) {
         fprintf(stderr, "no plugin factory\n");
         entry->deinit();
+#ifdef _WIN32
+        FreeLibrary(static_cast<HMODULE>(lib));
+#else
         dlclose(lib);
+#endif
         return 1;
     }
 
@@ -84,6 +111,10 @@ int main(int argc, char *argv[]) {
     }
 
     entry->deinit();
+#ifdef _WIN32
+    FreeLibrary(static_cast<HMODULE>(lib));
+#else
     dlclose(lib);
+#endif
     return 0;
 }

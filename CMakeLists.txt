@@ -248,11 +248,29 @@ endif()
 
 # --- Development tools (not part of the plugin) ---
 
-if(APPLE OR UNIX)
-    add_executable(clap-scan tools/clap-scan.cpp)
-    target_link_libraries(clap-scan PRIVATE clap)
+add_executable(clap-scan tools/clap-scan.cpp)
+target_link_libraries(clap-scan PRIVATE clap)
+if(NOT WIN32)
     target_link_libraries(clap-scan PRIVATE dl)
+endif()
 
+add_library(test-plugin MODULE tools/test-plugin.cpp)
+target_include_directories(test-plugin PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor
+)
+set_target_properties(test-plugin PROPERTIES PREFIX "")
+if(APPLE)
+    set_target_properties(test-plugin PROPERTIES
+        SUFFIX ".dylib"
+        BUNDLE FALSE
+    )
+elseif(WIN32)
+    set_target_properties(test-plugin PROPERTIES SUFFIX ".dll")
+else()
+    set_target_properties(test-plugin PROPERTIES SUFFIX ".so")
+endif()
+
+if(APPLE OR UNIX)
     add_executable(bridge-test tools/bridge-test.cpp)
     target_include_directories(bridge-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -280,17 +298,4 @@ if(APPLE OR UNIX)
 
     add_executable(host-test-threaded tools/host-test-threaded.cpp)
     target_link_libraries(host-test-threaded PRIVATE clap dl)
-
-    # Test plugin — minimal VST2 for CI
-    add_library(test-plugin MODULE tools/test-plugin.cpp)
-    target_include_directories(test-plugin PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/vendor
-    )
-    set_target_properties(test-plugin PROPERTIES PREFIX "" SUFFIX ".so")
-    if(APPLE)
-        set_target_properties(test-plugin PROPERTIES
-            SUFFIX ".dylib"
-            BUNDLE FALSE
-        )
-    endif()
 endif()
