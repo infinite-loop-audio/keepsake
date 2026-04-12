@@ -46,7 +46,18 @@ bool send_and_wait(KeepsakePlugin *kp, uint32_t opcode,
                 ipc_opcode_name(opcode), timeout_ms,
                 static_cast<int>(kp->bridge->proc.pid), alive ? 1 : 0,
                 kp->instance_id);
-        kp->crashed = true;
+        switch (opcode) {
+        case IPC_OP_EDITOR_OPEN:
+        case IPC_OP_EDITOR_CLOSE:
+        case IPC_OP_EDITOR_GET_RECT:
+        case IPC_OP_EDITOR_SET_PARENT:
+        case IPC_OP_EDITOR_MOUSE:
+        case IPC_OP_EDITOR_KEY:
+            break;
+        default:
+            kp->crashed = true;
+            break;
+        }
     }
     return ok;
 }

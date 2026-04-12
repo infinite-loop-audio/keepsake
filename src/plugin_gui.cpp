@@ -5,7 +5,11 @@
 #include "plugin_internal.h"
 #include "debug_log.h"
 
+#ifdef _WIN32
+static const int GUI_OPEN_TIMEOUT_MS = 15000;
+#else
 static const int GUI_OPEN_TIMEOUT_MS = 5000;
+#endif
 
 static bool gui_is_api_supported(const clap_plugin_t *plugin,
                                  const char *api, bool is_floating) {
