@@ -7,6 +7,8 @@ published artifacts actually claim.
 
 - [`v0.1-alpha.md`](v0.1-alpha.md) — draft release notes, artifact plan, and
   install surface for the first public alpha
+- [`v0.1-alpha-validation-matrix.md`](v0.1-alpha-validation-matrix.md) —
+  release-window support matrix and evidence posture
 
 ## Rule
 
