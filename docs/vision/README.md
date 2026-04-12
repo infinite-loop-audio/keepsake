@@ -12,6 +12,10 @@ support required.
 The guiding principle: these plugins are not legacy baggage to be tolerated.
 They are tools with genuine value that deserve to keep working.
 
+The current release posture is conservative: the vision remains cross-platform
+and multi-format, but the first public alpha should claim only what the repo
+can prove in a fresh release window.
+
 ## Vision Artifacts
 
 - [001-keepsake-vision.md](./001-keepsake-vision.md)
@@ -31,5 +35,5 @@ They are tools with genuine value that deserve to keep working.
 
 ## Next Task
 
-Land g01.001 — the CLAP factory and VeSTige loader proof-of-concept. VST2 is
-the first format to prove the architecture end-to-end.
+Execute g02.001 — define the `v0.1-alpha` support envelope and reconcile the
+front-door docs so the repo's public claims match the proof on hand.

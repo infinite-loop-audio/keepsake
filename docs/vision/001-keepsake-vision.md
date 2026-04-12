@@ -2,7 +2,7 @@
 
 Status: active
 Owner: Infinite Loop Audio
-Updated: 2026-04-10
+Updated: 2026-04-12
 Vision refs: this document is the primary vision artifact
 
 ## Long-Term Outcome
@@ -118,6 +118,15 @@ key for Signal and other hosts.
 - No Steinberg VST2 SDK present or referenced. VeSTige only for VST2.
 - Published under LGPL v2.1 with full source.
 
+## Release Posture
+
+The long-term vision is broader than the first public alpha.
+
+For `v0.1-alpha`, Keepsake should claim only what it can prove in a fresh
+release window. The strongest current evidence lane is macOS + REAPER + VST2.
+Other platforms, formats, and 32-bit paths may remain experimental until the
+release matrix says otherwise.
+
 ## Risks and Constraints
 
 | Risk | Mitigation |
@@ -131,6 +140,5 @@ key for Signal and other hosts.
 
 ## Next Task
 
-Land g01.001 — the first roadmap milestone (CLAP factory and VeSTige loader
-PoC) is ready. VST2 is the first format to prove the architecture; VST3 and
-AU v2 loaders follow once the factory and subprocess model are working.
+Update g02.001 — reconcile all public release claims and known-issues posture
+against this vision before packaging or publication work continues.

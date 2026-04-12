@@ -31,5 +31,6 @@ Logs capture dated evidence and assessments.
 
 ## Next Task
 
-Continue from the thread-002 handoff: g01.009 (32-bit bridge), VST3 SDK
-integration, or CI setup.
+Add g02 release-window evidence as meaningful batch logs: alpha scope/docs
+closeout, packaging/versioning work, validation matrix runs, and final release
+publication proof.

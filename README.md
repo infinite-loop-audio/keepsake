@@ -6,6 +6,26 @@ Keepsake bridges the gap between legacy plugin formats — VST2, VST3, AU v2, in
 
 ---
 
+## Current Status
+
+Keepsake is in an active alpha-release hardening phase.
+
+The strongest current evidence lane is:
+
+- macOS
+- REAPER
+- VST2 bridging
+- real-plugin validation with APC and Serum
+
+Current alpha posture:
+
+- **Primary validated lane:** macOS + REAPER + VST2
+- **Experimental / lightly proven:** Windows, Linux, VST3, AU v2, 32-bit
+
+Experimental here means code exists, CI may pass, and individual paths may
+work, but the support claim is not yet broad enough to present as settled user
+expectation without more release-window validation.
+
 ## The problem it solves
 
 Legacy plugins are getting left behind. VST2 is dead as a living standard — Steinberg discontinued the SDK in 2018 and closed all new license agreements. 32-bit plugins are orphaned as hosts and operating systems drop 32-bit support. Crash-prone plugins can take down an entire session.
@@ -40,9 +60,11 @@ Each plugin runs in an isolated subprocess, so a crash in a legacy plugin produc
 
 ## Installation
 
-> Keepsake is in early development. Binary releases will be available here once the project reaches a stable state.
+No public binary release is published yet. The `v0.1-alpha` release stream is
+tracked in [`docs/roadmaps/g02/README.md`](docs/roadmaps/g02/README.md).
 
-Until then, see [Building from source](#building-from-source) below.
+Until the first alpha artifacts are cut, use local builds or maintainers'
+dev bundles.
 
 Once built or downloaded, place `keepsake.clap` in your system CLAP plugin folder:
 
@@ -52,7 +74,9 @@ Once built or downloaded, place `keepsake.clap` in your system CLAP plugin folde
 | Windows | `%COMMONPROGRAMFILES%\CLAP\` or `%LOCALAPPDATA%\Programs\Common\CLAP\` |
 | Linux | `~/.clap/` or `/usr/lib/clap/` |
 
-Rescan plugins in your host. Your VST2 plugins will appear.
+Rescan plugins in your host. On the strongest current evidence lane
+(macOS + REAPER + VST2), bridged plugins appear as CLAP entries with their own
+names and vendors.
 
 ---
 
@@ -66,7 +90,12 @@ On first load, Keepsake scans the standard plugin locations for each format on y
 | Windows | `%APPDATA%\Keepsake\config.toml` |
 | Linux | `~/.config/keepsake/config.toml` |
 
-> Configuration file format will be documented here once stable.
+The alpha known limitations and support caveats live in
+[`docs/known-issues-v0.1-alpha.md`](docs/known-issues-v0.1-alpha.md).
+
+The exact `config.toml` schema and install-grade configuration docs are part of
+the active alpha release stream and will be finalized before `v0.1-alpha`
+publishes.
 
 ---
 
@@ -88,7 +117,19 @@ If you are a developer of another CLAP host and want to offer tighter Keepsake i
 
 ## Building from source
 
-> Build instructions will be added as the project takes shape. The project is C/C++, depends on [VeSTige](https://github.com/LMMS/lmms/blob/master/plugins/vst_base/vestige/aeffect.h), the [CLAP SDK](https://github.com/free-audio/clap), and optionally the [VST3 SDK](https://github.com/steinbergmedia/vst3sdk), and targets macOS, Windows, and Linux.
+Build-from-source docs still need a proper maintainer-quality pass before the
+first alpha release. Today, the practical entry points are:
+
+- `cmake --preset default`
+- `cmake --build build`
+- `effigy qa`
+
+The project is C/C++, depends on
+[VeSTige](https://github.com/LMMS/lmms/blob/master/plugins/vst_base/vestige/aeffect.h),
+the [CLAP SDK](https://github.com/free-audio/clap), and the VST3 pluginterface
+headers for VST3 hosting. macOS, Windows, and Linux all have build paths in
+tree, but the current alpha support posture is narrower than the full code
+surface.
 
 ---
 

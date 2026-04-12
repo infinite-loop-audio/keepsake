@@ -1,8 +1,8 @@
 # System Architecture
 
-Status: draft
+Status: active
 Owner: Infinite Loop Audio
-Updated: 2026-04-10
+Updated: 2026-04-12
 Vision refs: docs/vision/001-keepsake-vision.md
 
 ## Overview
@@ -15,6 +15,10 @@ Plugins are loaded via format-specific loaders (VeSTige for VST2, VST3 SDK for
 VST3, AudioToolbox for AU v2) running in isolated subprocesses. The subprocess
 model provides both crash isolation and bitness bridging — 32-bit plugins run
 in a 32-bit helper process while the host stays 64-bit.
+
+The architecture is now ahead of the first public release posture. For
+`v0.1-alpha`, support claims should be based on fresh validation, not on the
+mere existence of code paths.
 
 ## Component Layout
 
@@ -40,7 +44,7 @@ keepsake.clap
        Default (shared): one bridge process hosts many plugin instances.
        Crash isolation: crashed process → silence + error for all hosted
          instances. Per-instance mode isolates crash-prone plugins.
-       Bitness bridging: 32-bit helper binary for 32-bit plugins.
+       Bitness bridging: helper binaries selected by plugin architecture.
        IPC bridge between CLAP main process and loader subprocess(es).
 
 keepsake-bridge-64 (helper binary, 64-bit)
@@ -58,9 +62,9 @@ keepsake-bridge-32 (helper binary, 32-bit — where platform supports it)
 | VST3 ABI | VST3 SDK (GPLv3 or proprietary) | Runs in subprocess; license boundary at process/IPC edge |
 | AU v2 ABI | AudioToolbox (macOS system framework) | macOS only. No special licensing. |
 | CLAP plugin interface | CLAP SDK (MIT) | Outer format. No VST3 licence conflicts. |
-| IPC / subprocess model | TBD | Study Carla for reference. Must support both 64→64 and 64→32 bridging. |
-| Bridge helper binaries | `keepsake-bridge-64`, `keepsake-bridge-32` | Separate executables; 32-bit binary only built where platform supports it |
-| Scan path config | config.toml per platform | Format to be documented once stable |
+| IPC / subprocess model | Pipe protocol + shared memory | Governed by `docs/contracts/004-ipc-bridge-protocol.md`; current implementation also multiplexes instances inside shared bridges |
+| Bridge helper binaries | `keepsake-bridge`, `keepsake-bridge-x86_64`, future `keepsake-bridge-32` | Native helper plus cross-arch helper where needed; 32-bit still needs release-grade proof before claiming support |
+| Scan path config | config + cache files per platform | Runtime exists; user-facing schema/docs still need alpha release hardening |
 
 ## Platform Notes
 
@@ -80,6 +84,6 @@ keepsake-bridge-32 (helper binary, 32-bit — where platform supports it)
 
 ## Next Task
 
-Execute g01.001 (VST2 first), then expand this document once the factory,
-loader, and IPC mechanism are proven. VST3 and AU v2 loaders will be added as
-subsequent milestones once the subprocess bridge architecture is working.
+Use g02.001 to align this architecture doc with the alpha support envelope so
+the public release posture distinguishes implemented structure from validated
+support claims.

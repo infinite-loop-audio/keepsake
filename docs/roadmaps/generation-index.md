@@ -1,17 +1,18 @@
 # Roadmap Generation Index
 
 Status: active
-Updated: 2026-04-10
+Updated: 2026-04-12
 
 ## Active generation
 
-- `g01`
+- `g02`
 
 ## Generation log
 
 | Generation | Started | Reason | Notes |
 |---|---|---|---|
 | `g01` | 2026-04-10 | Initial roadmap sequence | Baseline generation for the initial build, CLAP factory, VeSTige loader, and proof-of-concept work |
+| `g02` | 2026-04-12 | Alpha release stream | g01 proved the bridge architecture and CI lane. g02 is the release-hardening generation: narrow claims to proven scope, close docs drift, define artifacts, collect evidence, and publish `v0.1-alpha`. |
 
 ## Rollover policy
 
@@ -26,5 +27,6 @@ itself needs a reset.
 
 ## Next task
 
-When opening `g02`, add a generation log row and record the manual rollover
-trigger that justified a real sequencing reset.
+Execute g02.001 — define the `v0.1-alpha` support envelope, reconcile repo
+claims with verified behavior, and turn release scope into explicit roadmap and
+known-issues inputs.

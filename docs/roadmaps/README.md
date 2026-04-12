@@ -5,8 +5,8 @@ contracts.
 
 ## Active Generation
 
-- `g01` — Initial build, CLAP factory, VeSTige loader, and first working
-  proof-of-concept
+- `g02` — `v0.1-alpha` release stream: support envelope, packaging, validation,
+  and publication
 
 ## Generation Index
 
@@ -15,17 +15,21 @@ contracts.
 ## Layout
 
 - `g01/` — first generation milestones
+- `g02/` — alpha release generation
 - `generation-index.md` — active generation and rollover history
 - `backlog/` — deferred items with promotion criteria
 - `templates/roadmap-milestone-template.md` — milestone starter contract
 
 ## Status
 
-**g01 sequencing intent met.** All four milestones complete:
-- g01.001: CLAP factory + VeSTige loader
-- g01.002: Audio bridge + subprocess isolation
-- g01.003: Cross-platform + cross-architecture
-- g01.004: Scan cache + configuration
+**g01 sequencing intent met.** The core bridge, GUI, scan robustness, CI, and
+codebase-health lanes are complete enough to justify a release-focused
+generation rollover.
+
+**g02 is now active.** This generation does not assume broad support claims by
+default. It converts the current working state into an honest alpha release by
+defining supported scope, closing docs drift, packaging artifacts, collecting
+evidence, and publishing from explicit known-issues posture.
 
 ## Batch and Logging Rule
 
@@ -36,5 +40,5 @@ contracts.
 
 ## Next Task
 
-Ship g01.005 (MIDI/params/state) — makes bridged plugins actually usable
-for music production.
+Ship g02.001 — lock the `v0.1-alpha` scope and claims before packaging or
+publication work proceeds.

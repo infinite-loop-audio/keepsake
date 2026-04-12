@@ -2,7 +2,7 @@
 
 Status: active
 Owner: Infinite Loop Audio
-Updated: 2026-04-10
+Updated: 2026-04-12
 
 ## Coverage Rules
 
@@ -25,16 +25,25 @@ Updated: 2026-04-10
 
 | Boundary | Why needed | Blocking roadmaps | Next action |
 |---|---|---|---|
-| VeSTige loader ABI contract | Defines which VeSTige entrypoints Keepsake calls and how | g01.002+ (optional) | Author as 003 if loader boundary needs stabilizing |
-| Platform config format | config.toml schema and scan path semantics | g01.003+ (planned) | Create once format is decided |
+| VeSTige loader ABI contract | Defines which VeSTige entrypoints Keepsake calls and how | release-hardening only if loader boundary drifts again | Author as 003 only if the boundary needs stabilizing during release work |
+| Platform config format | config.toml schema and scan path semantics | g02.001-g02.002 | Author once the alpha support envelope and user-facing config docs are settled |
 
 ## Roadmap Readiness
 
-g01.001 is **complete**. g01.002 is **ready** — the IPC bridge protocol
-contract (004) is authored and the milestone card is complete. Execution can
-begin.
+G01 is complete. G02 is active.
+
+The release stream depends on the current contract set plus one still-thin
+boundary:
+
+- `002-clap-factory-interface.md` governs descriptor stability and IDs
+- `004-ipc-bridge-protocol.md` governs bridge lifecycle and failure semantics
+- `006-process-isolation-policy.md` governs shared/per-instance release
+  behavior
+- platform config format still needs a fuller user-facing contract before
+  packaging and install docs can be treated as settled
 
 ## Next Task
 
-Land g01.002 — implement the bridge binary, pipe protocol, shared memory
-audio transfer, and CLAP plugin lifecycle.
+Execute g02.001 — lock the alpha support envelope, then decide whether the
+platform config schema needs promotion into its own contract before packaging
+and install docs close.

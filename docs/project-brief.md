@@ -4,6 +4,12 @@
 
 Published by [Infinite Loop Audio](https://github.com/infinite-loop-audio) under the GNU Lesser General Public License v2.1.
 
+Current release posture:
+
+- strongest proven lane: macOS + REAPER + VST2
+- broader platform/format coverage exists in code but should be treated as
+  experimental until the `v0.1-alpha` validation matrix proves otherwise
+
 ---
 
 ## What Keepsake is
@@ -13,6 +19,10 @@ Keepsake is a CLAP plugin that internally loads and runs legacy plugins using fo
 Each plugin runs in an isolated subprocess, providing crash isolation and bitness bridging — 32-bit plugins run in a 32-bit helper process while the host stays 64-bit.
 
 The user installs Keepsake once. Their CLAP host scans it, and their legacy plugins appear alongside everything else in the plugin browser.
+
+For the first public alpha, the support claim should be narrower than the full
+architectural target. This brief describes the product direction and legal
+posture, not blanket proof that every implemented path is already release-grade.
 
 ---
 

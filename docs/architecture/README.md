@@ -25,6 +25,5 @@ They set the realized constraints roadmap batches must honor.
 
 ## Next Task
 
-Fill `system-architecture.md` and `system-inventory.md` with the initial CLAP
-plugin factory model and VeSTige loading surfaces once the first roadmap
-milestone is drafted.
+Keep architecture aligned with the alpha support envelope so implemented system
+shape and publicly claimed release support do not drift apart during g02.

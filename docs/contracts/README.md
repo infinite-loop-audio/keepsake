@@ -21,5 +21,5 @@ Start there.
 
 ## Next Task
 
-Add the first boundary contract once the CLAP factory and VeSTige loader
-surfaces are defined and the first roadmap milestone is drafted.
+Use g02 to decide whether the platform config and release-surface boundaries
+need additional contracts before `v0.1-alpha` packaging and publication.

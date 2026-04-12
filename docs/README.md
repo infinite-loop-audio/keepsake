@@ -7,6 +7,7 @@
 - [`contracts/README.md`](contracts/README.md)
 - [`roadmaps/README.md`](roadmaps/README.md)
 - [`logs/README.md`](logs/README.md)
+- [`known-issues-v0.1-alpha.md`](known-issues-v0.1-alpha.md)
 
 Stricter delivery layer (installed):
 
@@ -35,6 +36,17 @@ If `specs/` exists, treat it as provisional planning that should promote into
 
 ## Current Posture
 
-G01 complete. The full pipeline works: config → scan → cache → factory → bridge
-→ audio. Both arm64 and x86_64 VST2 plugins work on Apple Silicon. Platform
-abstraction covers macOS, Windows, and Linux. Next: assess g02.
+G01 is complete. The core bridge lanes exist: config → scan → cache → factory
+→ bridge → audio, plus GUI, CI, and codebase-health follow-through.
+
+G02 is active. This is the `v0.1-alpha` release stream:
+
+- define the honest support envelope
+- close docs drift
+- package artifacts
+- collect release-window evidence
+- publish from a known-issues posture
+
+The strongest current proof is still the macOS + REAPER + VST2 lane. Treat
+broader platform/format support as experimental until g02 validation says
+otherwise.
