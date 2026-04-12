@@ -147,12 +147,76 @@ vst_scan_dir="$tmp_dir/vst-targets"
 empty_vst_dir="$tmp_dir/empty-vst"
 script_path="$repo_root/tools/reaper-smoke.lua"
 default_install_bundle="$HOME/Library/Audio/Plug-Ins/CLAP/keepsake.clap"
+default_reaper_clap_ini="$HOME/Library/Application Support/REAPER/reaper-clap-macos-aarch64.ini"
+reaper_clap_backup="$tmp_dir/reaper-clap.backup.ini"
 
 cleanup() {
   if [[ "${reaper_pid:-}" != "" ]] && kill -0 "$reaper_pid" 2>/dev/null; then
     kill "$reaper_pid" 2>/dev/null || true
     sleep 1
     kill -9 "$reaper_pid" 2>/dev/null || true
+  fi
+
+  if [[ "$use_default_config" -eq 1 && -f "$reaper_clap_backup" ]]; then
+    python3 - "$reaper_clap_backup" "$default_reaper_clap_ini" <<'PY'
+from pathlib import Path
+import sys
+
+backup_path = Path(sys.argv[1])
+target_path = Path(sys.argv[2])
+section_name = "keepsake.clap"
+
+def parse_sections(text):
+    lines = text.splitlines(keepends=True)
+    sections = []
+    current_name = None
+    current_lines = []
+    for line in lines:
+        if line.startswith("[") and "]" in line:
+            if current_name is not None:
+                sections.append((current_name, current_lines))
+            current_name = line.strip()[1:-1]
+            current_lines = [line]
+        elif current_name is None:
+            sections.append((None, [line]))
+        else:
+            current_lines.append(line)
+    if current_name is not None:
+        sections.append((current_name, current_lines))
+    return sections
+
+backup_text = backup_path.read_text() if backup_path.exists() else ""
+target_text = target_path.read_text() if target_path.exists() else ""
+
+backup_sections = parse_sections(backup_text)
+target_sections = parse_sections(target_text)
+
+backup_keepsake = None
+for name, lines in backup_sections:
+    if name == section_name:
+        backup_keepsake = lines
+        break
+
+result = []
+inserted = False
+for name, lines in target_sections:
+    if name == section_name:
+        if backup_keepsake is not None:
+            result.extend(backup_keepsake)
+            inserted = True
+        continue
+    result.extend(lines)
+
+if backup_keepsake is not None and not inserted:
+    if result and not result[-1].endswith("\n"):
+        result[-1] += "\n"
+    if result and result[-1] != "\n":
+        result.append("\n")
+    result.extend(backup_keepsake)
+
+target_path.parent.mkdir(parents=True, exist_ok=True)
+target_path.write_text("".join(result))
+PY
   fi
 
   if [[ "$keep_temp" -eq 0 ]]; then
@@ -189,6 +253,14 @@ if [[ "$sync_default_install" -eq 1 ]]; then
   mkdir -p "$default_install_bundle"
   rsync -a --delete "$clap_bundle/" "$default_install_bundle/"
   touch "$default_install_bundle" "$default_install_bundle/Contents/MacOS/keepsake"
+fi
+
+if [[ "$use_default_config" -eq 1 ]]; then
+  if [[ -f "$default_reaper_clap_ini" ]]; then
+    cp "$default_reaper_clap_ini" "$reaper_clap_backup"
+  else
+    : >"$reaper_clap_backup"
+  fi
 fi
 
 echo "plugin_id=$plugin_id"
