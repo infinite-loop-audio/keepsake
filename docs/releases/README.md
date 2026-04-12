@@ -11,6 +11,8 @@ published artifacts actually claim.
   release-window support matrix and evidence posture
 - [`v0.1-alpha-publish-checklist.md`](v0.1-alpha-publish-checklist.md) —
   step-by-step publication gate for the first alpha
+- [`../logs/templates/release-checkpoint-template.md`](../logs/templates/release-checkpoint-template.md) —
+  one dated closeout log template for the actual release cut
 
 ## Rule
 
@@ -20,8 +22,9 @@ Do not publish from chat memory alone. Releases should be backed by:
 - current known-issues posture
 - current validation evidence
 - current changelog/version surfaces
+- one dated release checkpoint log when the tag is actually cut
 
 ## Next Task
 
-Draft and refine the `v0.1-alpha` release surface during g02.002, then lock it
-against the validation matrix before publication.
+Use the publish checklist and release checkpoint template during g02.004 so the
+actual release cut leaves one dated evidence artifact, not just a tag.
