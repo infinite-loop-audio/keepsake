@@ -44,8 +44,12 @@ file(CREATE_LINK
 add_library(keepsake MODULE
     src/main.cpp
     src/factory.cpp
+    src/factory_helpers.cpp
     src/vst2_loader.cpp
+    src/vst2_loader_bridge.cpp
     src/plugin.cpp
+    src/plugin_callbacks.cpp
+    src/plugin_async.cpp
     src/plugin_params.cpp
     src/plugin_state.cpp
     src/config.cpp
@@ -117,7 +121,10 @@ endif()
 # --- Bridge helper binary ---
 
 if(APPLE)
-    set(BRIDGE_GUI_SRC src/bridge_gui_mac.mm)
+    set(BRIDGE_GUI_SRC
+        src/bridge_gui_mac.mm
+        src/bridge_gui_mac_window.mm
+        src/bridge_gui_mac_iosurface.mm)
     set(BRIDGE_AU_SRC  src/bridge_loader_au.mm)
 else()
     # Windows and Linux GUI with embedded editor support
@@ -127,6 +134,7 @@ endif()
 
 add_executable(keepsake-bridge
     src/bridge_main.cpp
+    src/bridge_runtime.cpp
     src/bridge_loader_vst2.cpp
     src/bridge_loader_vst3.cpp
     src/bridge_loader_factory.cpp
@@ -175,6 +183,7 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
     # Build an x86_64 bridge binary for loading x86_64 VST2 plugins
     add_executable(keepsake-bridge-x86_64
         src/bridge_main.cpp
+        src/bridge_runtime.cpp
         src/bridge_loader_vst2.cpp
         src/bridge_loader_vst3.cpp
         src/bridge_loader_factory.cpp

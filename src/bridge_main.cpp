@@ -8,18 +8,15 @@
 //
 
 #include "ipc.h"
-#include "bridge_loader.h"
+#include "bridge_runtime.h"
 #include "bridge_gui.h"
 
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <string>
 #include <vector>
-#include <unordered_map>
 
 #ifndef _WIN32
-#include <unistd.h>
 #include <poll.h>
 #else
 #include <windows.h>
@@ -29,357 +26,14 @@
 
 // Bridge I/O: command pipe (stdin/stdout) + wake pipe (fd 3)
 #ifdef _WIN32
-static PlatformPipe g_pipe_in  = GetStdHandle(STD_INPUT_HANDLE);
-static PlatformPipe g_pipe_out = GetStdHandle(STD_OUTPUT_HANDLE);
-static PlatformPipe g_wake_fd  = PLATFORM_INVALID_PIPE;
+PlatformPipe g_pipe_in  = GetStdHandle(STD_INPUT_HANDLE);
+PlatformPipe g_pipe_out = GetStdHandle(STD_OUTPUT_HANDLE);
+PlatformPipe g_wake_fd  = PLATFORM_INVALID_PIPE;
 #else
-static PlatformPipe g_pipe_in  = STDIN_FILENO;
-static PlatformPipe g_pipe_out = PLATFORM_BRIDGE_IPC_OUT_FD;
-static PlatformPipe g_wake_fd  = 3; // wake pipe from parent, duped to fd 3
+PlatformPipe g_pipe_in  = STDIN_FILENO;
+PlatformPipe g_pipe_out = PLATFORM_BRIDGE_IPC_OUT_FD;
+PlatformPipe g_wake_fd  = 3;
 #endif
-
-// --- Per-instance state ---
-
-struct PluginInstance {
-    uint32_t id;
-    BridgeLoader *loader = nullptr;
-    PlatformShm shm;
-    int32_t num_inputs = 0;
-    int32_t num_outputs = 0;
-    uint32_t max_frames = 0;
-    volatile bool active = false;
-    bool processing = false;
-#ifndef _WIN32
-    pthread_t audio_thread = 0;
-#endif
-};
-
-static std::unordered_map<uint32_t, PluginInstance *> g_instances;
-static uint32_t g_next_instance_id = 1;
-
-static PluginInstance *get_instance(uint32_t id) {
-    auto it = g_instances.find(id);
-    return (it != g_instances.end()) ? it->second : nullptr;
-}
-
-static void destroy_instance(uint32_t id) {
-    auto it = g_instances.find(id);
-    if (it == g_instances.end()) return;
-    auto *inst = it->second;
-    if (inst->loader) {
-        if (inst->active) inst->loader->deactivate();
-        inst->loader->close();
-        delete inst->loader;
-    }
-    if (inst->shm.ptr) platform_shm_close(inst->shm);
-    delete inst;
-    g_instances.erase(it);
-}
-
-static void destroy_all_instances() {
-    std::vector<uint32_t> ids;
-    for (auto &kv : g_instances) ids.push_back(kv.first);
-    for (auto id : ids) destroy_instance(id);
-}
-
-// --- Audio processing thread ---
-// One thread per active instance. Blocks on pthread_cond_wait in shared
-// memory until the host signals PROCESS_REQUESTED.
-
-#ifndef _WIN32
-static void *audio_thread_func(void *arg) {
-    auto *inst = static_cast<PluginInstance *>(arg);
-    auto *ctrl = shm_control(inst->shm.ptr);
-
-    // Pre-allocate channel pointers
-    std::vector<float *> in_ptrs(static_cast<size_t>(inst->num_inputs));
-    std::vector<float *> out_ptrs(static_cast<size_t>(inst->num_outputs));
-
-    fprintf(stderr, "bridge: audio thread started for instance %u\n", inst->id);
-
-    while (inst->active) {
-        pthread_mutex_lock(&ctrl->mutex);
-
-        // Block until host signals PROCESS_REQUESTED
-        while (ctrl->state != SHM_STATE_PROCESS_REQUESTED && inst->active) {
-            struct timespec ts;
-            clock_gettime(CLOCK_REALTIME, &ts);
-            ts.tv_nsec += 50000000; // 50ms timeout (check active flag)
-            if (ts.tv_nsec >= 1000000000) {
-                ts.tv_sec++;
-                ts.tv_nsec -= 1000000000;
-            }
-            pthread_cond_timedwait(&ctrl->cond, &ctrl->mutex, &ts);
-        }
-
-        if (!inst->active) {
-            pthread_mutex_unlock(&ctrl->mutex);
-            break;
-        }
-
-        // Process audio
-        uint32_t nframes = ctrl->num_frames;
-        if (nframes > inst->max_frames) nframes = inst->max_frames;
-
-        for (uint32_t p = 0; p < ctrl->param_count && p < 64; p++)
-            inst->loader->set_param(ctrl->params[p].index,
-                                     ctrl->params[p].value);
-        for (uint32_t m = 0; m < ctrl->midi_count && m < SHM_MAX_MIDI_EVENTS; m++)
-            inst->loader->send_midi(ctrl->midi_events[m].delta_frames,
-                                     ctrl->midi_events[m].data);
-
-        for (int i = 0; i < inst->num_inputs; i++)
-            in_ptrs[static_cast<size_t>(i)] =
-                shm_audio_inputs(inst->shm.ptr, i, inst->max_frames);
-        for (int i = 0; i < inst->num_outputs; i++)
-            out_ptrs[static_cast<size_t>(i)] =
-                shm_audio_outputs(inst->shm.ptr, inst->num_inputs,
-                                   i, inst->max_frames);
-
-        inst->loader->process(
-            inst->num_inputs > 0 ? in_ptrs.data() : nullptr,
-            inst->num_inputs,
-            inst->num_outputs > 0 ? out_ptrs.data() : nullptr,
-            inst->num_outputs, nframes);
-
-        ctrl->state = SHM_STATE_PROCESS_DONE;
-        pthread_cond_signal(&ctrl->cond);
-        pthread_mutex_unlock(&ctrl->mutex);
-    }
-
-    fprintf(stderr, "bridge: audio thread stopped for instance %u\n", inst->id);
-    return nullptr;
-}
-#endif
-
-// --- Command handlers (instance-aware) ---
-
-static void handle_init(uint32_t /*caller_id*/, const std::vector<uint8_t> &payload) {
-    if (payload.size() < 5) {
-        ipc_write_error(g_pipe_out, "INIT payload too small");
-        return;
-    }
-
-    uint32_t format_id;
-    memcpy(&format_id, payload.data(), sizeof(format_id));
-    std::string path(payload.begin() + 4, payload.end());
-
-    auto *loader = create_loader(static_cast<PluginFormat>(format_id));
-    if (!loader) {
-        ipc_write_error(g_pipe_out, "unsupported format");
-        return;
-    }
-
-    // On macOS VST2, some JUCE editors appear to bind their message-manager
-    // thread identity to the thread that runs VSTPluginMain/effOpen. Loading
-    // on the bridge main thread keeps later effEditOpen calls on the same
-    // thread and avoids JUCE editor deadlocks.
-    bool load_on_main_thread = false;
-#if defined(__APPLE__)
-    load_on_main_thread = (format_id == FORMAT_VST2);
-#endif
-
-    if (load_on_main_thread) {
-        if (!loader->load(path)) {
-            ipc_write_error(g_pipe_out, "failed to load plugin");
-            delete loader;
-            return;
-        }
-    } else {
-#ifndef _WIN32
-        // Load the plugin on a worker thread with a 5-second timeout.
-        // Some plugins hang during VSTPluginMain or effOpen (license checks, etc.)
-        volatile bool load_done = false;
-        volatile bool load_ok = false;
-
-        pthread_t lt;
-        struct LoadCtx { BridgeLoader *l; std::string p; volatile bool *done; volatile bool *ok; };
-        auto *lctx = new LoadCtx{loader, path, &load_done, &load_ok};
-
-        pthread_create(&lt, nullptr, [](void *arg) -> void * {
-            auto *c = static_cast<LoadCtx *>(arg);
-            *c->ok = c->l->load(c->p);
-            *c->done = true;
-            delete c;
-            return nullptr;
-        }, lctx);
-
-        // Wait up to 5 seconds
-        for (int i = 0; i < 50 && !load_done; i++) {
-            usleep(100000); // 100ms
-        }
-
-        if (!load_done) {
-            fprintf(stderr, "bridge: plugin load timed out (5s): %s\n", path.c_str());
-            pthread_detach(lt); // let it die eventually
-            ipc_write_error(g_pipe_out, "plugin load timed out");
-            // Don't delete loader — thread still using it
-            return;
-        }
-        pthread_join(lt, nullptr);
-
-        if (!load_ok) {
-            ipc_write_error(g_pipe_out, "failed to load plugin");
-            delete loader;
-            return;
-        }
-#else
-        if (!loader->load(path)) {
-            ipc_write_error(g_pipe_out, "failed to load plugin");
-            delete loader;
-            return;
-        }
-#endif
-    }
-
-    // Create instance
-    auto *inst = new PluginInstance();
-    inst->id = g_next_instance_id++;
-    inst->loader = loader;
-
-    IpcPluginInfo info = {};
-    std::vector<uint8_t> extra;
-    loader->get_info(info, extra);
-    inst->num_inputs = info.num_inputs;
-    inst->num_outputs = info.num_outputs;
-
-    g_instances[inst->id] = inst;
-
-    // Response: [instance_id][IpcPluginInfo][extra strings]
-    size_t total = 4 + sizeof(info) + extra.size();
-    std::vector<uint8_t> resp(total);
-    memcpy(resp.data(), &inst->id, 4);
-    memcpy(resp.data() + 4, &info, sizeof(info));
-    if (!extra.empty())
-        memcpy(resp.data() + 4 + sizeof(info), extra.data(), extra.size());
-
-    ipc_write_ok(g_pipe_out, resp.data(), static_cast<uint32_t>(total));
-    fprintf(stderr, "bridge: created instance %u for '%s'\n",
-            inst->id, path.c_str());
-}
-
-static void handle_set_shm(PluginInstance *inst, const std::vector<uint8_t> &payload) {
-    if (payload.size() < 8) {
-        ipc_write_error(g_pipe_out, "SET_SHM payload too small");
-        return;
-    }
-    uint32_t name_len;
-    memcpy(&name_len, payload.data(), 4);
-    if (payload.size() < 4 + name_len + 4) {
-        ipc_write_error(g_pipe_out, "SET_SHM payload malformed");
-        return;
-    }
-    std::string name(payload.data() + 4, payload.data() + 4 + name_len);
-    uint32_t shm_size;
-    memcpy(&shm_size, payload.data() + 4 + name_len, 4);
-
-    if (inst->shm.ptr) platform_shm_close(inst->shm);
-    if (!platform_shm_open(inst->shm, name, shm_size)) {
-        ipc_write_error(g_pipe_out, "failed to open shared memory");
-        return;
-    }
-    ipc_write_ok(g_pipe_out);
-}
-
-static void handle_activate(PluginInstance *inst, const std::vector<uint8_t> &payload) {
-    if (!inst->loader || payload.size() < sizeof(IpcActivatePayload)) {
-        ipc_write_error(g_pipe_out, "ACTIVATE: not ready");
-        return;
-    }
-    IpcActivatePayload ap;
-    memcpy(&ap, payload.data(), sizeof(ap));
-    inst->max_frames = ap.max_frames;
-    inst->loader->activate(ap.sample_rate, ap.max_frames);
-    inst->active = true;
-
-    // Start audio processing thread
-#ifndef _WIN32
-    if (inst->shm.ptr) {
-        pthread_create(&inst->audio_thread, nullptr, audio_thread_func, inst);
-    }
-#endif
-
-    ipc_write_ok(g_pipe_out);
-}
-
-static void handle_process(PluginInstance *inst, const std::vector<uint8_t> &payload) {
-    if (!inst->loader || !inst->active || !inst->shm.ptr) {
-        ipc_write_error(g_pipe_out, "PROCESS: not ready");
-        return;
-    }
-    IpcProcessPayload pp;
-    memcpy(&pp, payload.data(), sizeof(pp));
-    uint32_t frames = pp.num_frames;
-    if (frames > inst->max_frames) frames = inst->max_frames;
-
-    auto *base = static_cast<float *>(inst->shm.ptr);
-    std::vector<float *> in_ptrs(static_cast<size_t>(inst->num_inputs));
-    std::vector<float *> out_ptrs(static_cast<size_t>(inst->num_outputs));
-    for (int i = 0; i < inst->num_inputs; i++)
-        in_ptrs[static_cast<size_t>(i)] = base + i * inst->max_frames;
-    for (int i = 0; i < inst->num_outputs; i++)
-        out_ptrs[static_cast<size_t>(i)] =
-            base + (inst->num_inputs + i) * inst->max_frames;
-
-    inst->loader->process(
-        inst->num_inputs > 0 ? in_ptrs.data() : nullptr, inst->num_inputs,
-        inst->num_outputs > 0 ? out_ptrs.data() : nullptr, inst->num_outputs,
-        frames);
-
-    ipc_write_process_done(g_pipe_out);
-}
-
-static void handle_set_param(PluginInstance *inst, const std::vector<uint8_t> &payload) {
-    if (!inst->loader || payload.size() < sizeof(IpcSetParamPayload)) return;
-    IpcSetParamPayload sp;
-    memcpy(&sp, payload.data(), sizeof(sp));
-    inst->loader->set_param(sp.index, sp.value);
-}
-
-static void handle_midi_event(PluginInstance *inst, const std::vector<uint8_t> &payload) {
-    if (!inst->loader || payload.size() < sizeof(IpcMidiEventPayload)) return;
-    IpcMidiEventPayload mp;
-    memcpy(&mp, payload.data(), sizeof(mp));
-    inst->loader->send_midi(mp.delta_frames, mp.data);
-}
-
-static void handle_get_param_info(PluginInstance *inst, const std::vector<uint8_t> &payload) {
-    if (!inst->loader || payload.size() < 4) {
-        ipc_write_error(g_pipe_out, "GET_PARAM_INFO: not ready");
-        return;
-    }
-    uint32_t index;
-    memcpy(&index, payload.data(), 4);
-    IpcParamInfoResponse resp = {};
-    if (inst->loader->get_param_info(index, resp))
-        ipc_write_ok(g_pipe_out, &resp, sizeof(resp));
-    else
-        ipc_write_error(g_pipe_out, "GET_PARAM_INFO: index out of range");
-}
-
-static void handle_get_chunk(PluginInstance *inst) {
-    if (!inst->loader) { ipc_write_error(g_pipe_out, "GET_CHUNK: not ready"); return; }
-    auto chunk = inst->loader->get_chunk();
-    ipc_write_ok(g_pipe_out, chunk.empty() ? nullptr : chunk.data(),
-                  static_cast<uint32_t>(chunk.size()));
-}
-
-static void handle_set_chunk(PluginInstance *inst, const std::vector<uint8_t> &payload) {
-    if (!inst->loader || payload.empty()) {
-        ipc_write_error(g_pipe_out, "SET_CHUNK: not ready"); return;
-    }
-    inst->loader->set_chunk(payload.data(), payload.size());
-    ipc_write_ok(g_pipe_out);
-}
-
-static void handle_editor_get_rect(PluginInstance *inst) {
-    IpcEditorRect rect = {};
-    int w = 0, h = 0;
-    if (inst->loader && inst->loader->get_editor_rect(w, h)) {
-        rect.width = w; rect.height = h;
-    }
-    ipc_write_ok(g_pipe_out, &rect, sizeof(rect));
-}
 
 // --- Main loop ---
 
@@ -407,11 +61,6 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "bridge: started (pid=%d) wake=%s\n", getpid(),
             has_wake_pipe ? "pipe" : "poll");
 
-    // Pre-allocated channel pointer arrays (avoid malloc in audio path)
-    std::vector<float *> proc_in_ptrs;
-    std::vector<float *> proc_out_ptrs;
-
-    // GUI throttle — 60fps is plenty
     uint64_t last_gui_idle_us = 0;
     auto now_us = []() -> uint64_t {
 #ifdef _WIN32
@@ -576,24 +225,7 @@ int main(int argc, char *argv[]) {
             inst->processing = false;
             ipc_write_ok(g_pipe_out);
             break;
-        case IPC_OP_DEACTIVATE:
-            if (inst->loader && inst->active) {
-                inst->active = false; // signals audio thread to stop
-#ifndef _WIN32
-                if (inst->shm.ptr) {
-                    // Wake the audio thread so it sees active=false
-                    auto *dc = shm_control(inst->shm.ptr);
-                    pthread_mutex_lock(&dc->mutex);
-                    pthread_cond_signal(&dc->cond);
-                    pthread_mutex_unlock(&dc->mutex);
-                    pthread_join(inst->audio_thread, nullptr);
-                    inst->audio_thread = 0;
-                }
-#endif
-                inst->loader->deactivate();
-            }
-            ipc_write_ok(g_pipe_out);
-            break;
+        case IPC_OP_DEACTIVATE: handle_deactivate(inst); break;
         default:
             ipc_write_error(g_pipe_out, "unknown opcode");
             break;
@@ -601,7 +233,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Cleanup all instances
-    if (gui_is_open()) gui_close_editor(nullptr) /* TODO: pass active editor's loader */;
+    if (gui_is_open()) gui_close_editor(nullptr);
     destroy_all_instances();
 
     fprintf(stderr, "bridge: exiting cleanly\n");
