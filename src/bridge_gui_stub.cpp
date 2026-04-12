@@ -355,6 +355,10 @@ void gui_idle(BridgeLoader *loader) {
 }
 
 bool gui_is_open() { return g_editor_open; }
+uint32_t gui_open_editor_iosurface(BridgeLoader *, int, int) { return 0; }
+void gui_forward_mouse(const IpcMouseEvent &) {}
+void gui_forward_key(const IpcKeyEvent &) {}
+bool gui_is_iosurface_mode() { return false; }
 
 #else
 // --- Fallback: no GUI ---
@@ -368,5 +372,9 @@ bool gui_get_editor_rect(BridgeLoader *l, int &w, int &h) {
 }
 void gui_idle(BridgeLoader *) {}
 bool gui_is_open() { return false; }
+uint32_t gui_open_editor_iosurface(BridgeLoader *, int, int) { return 0; }
+void gui_forward_mouse(const IpcMouseEvent &) {}
+void gui_forward_key(const IpcKeyEvent &) {}
+bool gui_is_iosurface_mode() { return false; }
 
 #endif

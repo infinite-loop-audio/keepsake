@@ -414,10 +414,14 @@ int main(int argc, char *argv[]) {
     // GUI throttle — 60fps is plenty
     uint64_t last_gui_idle_us = 0;
     auto now_us = []() -> uint64_t {
+#ifdef _WIN32
+        return static_cast<uint64_t>(GetTickCount64()) * 1000;
+#else
         struct timespec ts;
         clock_gettime(CLOCK_MONOTONIC, &ts);
         return static_cast<uint64_t>(ts.tv_sec) * 1000000 +
                static_cast<uint64_t>(ts.tv_nsec) / 1000;
+#endif
     };
 
     // Audio processing runs on a dedicated thread per active instance.

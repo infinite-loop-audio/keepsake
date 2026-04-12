@@ -729,8 +729,11 @@ bool keepsake_factory_init(const char *plugin_path) {
         cache_save(all_plugins);
     }
 
-    // Filter to only expose plugins the host can't load natively
-    filter_plugins(all_plugins, cfg);
+    // Targeted env scans are an explicit request for those exact plugins.
+    // Do not hide them behind the default auto-expose policy.
+    if (!targeted_vst2_override) {
+        filter_plugins(all_plugins, cfg);
+    }
 
     build_descriptors(all_plugins);
     return true;
