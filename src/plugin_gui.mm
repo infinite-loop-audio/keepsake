@@ -10,6 +10,8 @@
 #import <Cocoa/Cocoa.h>
 #endif
 
+static const int GUI_OPEN_TIMEOUT_MS = 5000;
+
 static bool gui_is_api_supported(const clap_plugin_t *plugin,
                                    const char *api, bool is_floating) {
     auto *kp = get(plugin);
@@ -92,7 +94,11 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
 #ifdef __APPLE__
     // macOS: open a floating window (cross-process embedding not viable)
     if (!kp->editor_open) {
-        if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN)) return false;
+        if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN, nullptr, 0, nullptr,
+                           GUI_OPEN_TIMEOUT_MS)) {
+            fprintf(stderr, "keepsake: gui_set_parent() editor open failed\n");
+            return false;
+        }
         kp->editor_open = true;
     }
     return true;
@@ -120,7 +126,11 @@ static bool gui_show(const clap_plugin_t *plugin) {
             kp->gui_is_floating, kp->editor_open);
     if (kp->crashed || !kp->has_editor) return false;
     if (kp->gui_is_floating && !kp->editor_open) {
-        if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN)) return false;
+        if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN, nullptr, 0, nullptr,
+                           GUI_OPEN_TIMEOUT_MS)) {
+            fprintf(stderr, "keepsake: gui_show() editor open failed\n");
+            return false;
+        }
         kp->editor_open = true;
     }
     return true;

@@ -77,15 +77,49 @@ static bool send_and_wait_bridge(BridgeProcess *bridge,
     return true;
 }
 
+static const char *ipc_opcode_name(uint32_t opcode) {
+    switch (opcode) {
+    case IPC_OP_INIT: return "INIT";
+    case IPC_OP_SET_SHM: return "SET_SHM";
+    case IPC_OP_ACTIVATE: return "ACTIVATE";
+    case IPC_OP_PROCESS: return "PROCESS";
+    case IPC_OP_SET_PARAM: return "SET_PARAM";
+    case IPC_OP_STOP_PROC: return "STOP_PROC";
+    case IPC_OP_START_PROC: return "START_PROC";
+    case IPC_OP_DEACTIVATE: return "DEACTIVATE";
+    case IPC_OP_SHUTDOWN: return "SHUTDOWN";
+    case IPC_OP_MIDI_EVENT: return "MIDI_EVENT";
+    case IPC_OP_GET_PARAM_INFO: return "GET_PARAM_INFO";
+    case IPC_OP_GET_CHUNK: return "GET_CHUNK";
+    case IPC_OP_SET_CHUNK: return "SET_CHUNK";
+    case IPC_OP_EDITOR_OPEN: return "EDITOR_OPEN";
+    case IPC_OP_EDITOR_CLOSE: return "EDITOR_CLOSE";
+    case IPC_OP_EDITOR_GET_RECT: return "EDITOR_GET_RECT";
+    case IPC_OP_EDITOR_SET_PARENT: return "EDITOR_SET_PARENT";
+    case IPC_OP_EDITOR_MOUSE: return "EDITOR_MOUSE";
+    case IPC_OP_EDITOR_KEY: return "EDITOR_KEY";
+    default: return "UNKNOWN";
+    }
+}
+
 bool send_and_wait(KeepsakePlugin *kp, uint32_t opcode,
                     const void *payload,
                     uint32_t size,
-                    std::vector<uint8_t> *ok_payload) {
+                    std::vector<uint8_t> *ok_payload,
+                    int timeout_ms) {
     if (kp->crashed || !kp->bridge) return false;
     std::lock_guard<std::mutex> lock(kp->ipc_mutex);
     bool ok = send_and_wait_bridge(kp->bridge, kp->instance_id, opcode,
-                                   payload, size, ok_payload, 3000);
-    if (!ok) kp->crashed = true;
+                                   payload, size, ok_payload, timeout_ms);
+    if (!ok) {
+        const bool alive = platform_process_alive(kp->bridge->proc);
+        fprintf(stderr,
+                "keepsake: %s failed after %dms (bridge pid=%d alive=%d instance=%u)\n",
+                ipc_opcode_name(opcode), timeout_ms,
+                static_cast<int>(kp->bridge->proc.pid), alive ? 1 : 0,
+                kp->instance_id);
+        kp->crashed = true;
+    }
     return ok;
 }
 

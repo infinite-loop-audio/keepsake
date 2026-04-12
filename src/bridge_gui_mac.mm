@@ -8,6 +8,8 @@
 #include "bridge_gui.h"
 #include <cstdio>
 #include <dlfcn.h>
+#include <atomic>
+#include <thread>
 
 // VST2 ERect (not in VeSTige header)
 struct ERect { int16_t top, left, bottom, right; };
@@ -94,6 +96,7 @@ static const CGFloat HEADER_HEIGHT = 28.0;
 // --- State ---
 
 static NSWindow *g_window = nil;
+static NSWindow *g_parentless_plugin_window = nil;
 static KeepsakeHeaderView *g_header = nil;
 static NSView *g_editor_container = nil;
 static BridgeLoader *g_active_loader = nil;
@@ -101,6 +104,9 @@ static bool g_editor_open = false;
 static bool g_iosurface_mode = false;
 static int g_current_width = 0;
 static int g_current_height = 0;
+static const int DEFAULT_EDITOR_WIDTH = 960;
+static const int DEFAULT_EDITOR_HEIGHT = 640;
+static const int EDITOR_OPEN_TIMEOUT_MS = 5000;
 
 // --- Public API ---
 
@@ -110,58 +116,196 @@ void gui_init() {
     [NSApp finishLaunching];
 }
 
+static void style_parentless_plugin_window(NSWindow *window,
+                                           const EditorHeaderInfo &header) {
+    if (!window) return;
+
+    NSString *title = [NSString stringWithFormat:@"Keepsake — %s",
+                       header.plugin_name.c_str()];
+    [window setTitle:title];
+
+    NSWindowStyleMask mask = [window styleMask];
+    mask |= NSWindowStyleMaskTitled;
+    mask |= NSWindowStyleMaskClosable;
+    mask |= NSWindowStyleMaskMiniaturizable;
+    [window setStyleMask:mask];
+    [window setReleasedWhenClosed:NO];
+
+    NSScreen *screen = [window screen] ?: [NSScreen mainScreen];
+    if (screen) {
+        NSRect visible = [screen visibleFrame];
+        NSRect frame = [window frame];
+        if (frame.size.width > visible.size.width) frame.size.width = visible.size.width;
+        if (frame.size.height > visible.size.height) frame.size.height = visible.size.height;
+        frame.origin.x = visible.origin.x + (visible.size.width - frame.size.width) / 2.0;
+        frame.origin.y = visible.origin.y + (visible.size.height - frame.size.height) / 2.0;
+        [window setFrame:frame display:YES];
+    } else {
+        [window center];
+    }
+
+    [window makeKeyAndOrderFront:nil];
+    [NSApp activateIgnoringOtherApps:YES];
+}
+
 bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     if (!loader || !loader->has_editor()) return false;
     if (g_editor_open) return true;
 
-    int w = 640, h = 480;
-    loader->get_editor_rect(w, h);
+    fprintf(stderr, "bridge: gui_open_editor('%s') begin\n",
+            header.plugin_name.c_str());
+    const bool use_parentless_open =
+        header.plugin_name == "Ample Percussion Cloudrum";
 
-    // Create window (editor height + header height)
-    CGFloat totalH = h + HEADER_HEIGHT;
-    NSRect frame = NSMakeRect(200, 200, w, totalH);
-    g_window = [[NSWindow alloc]
-        initWithContentRect:frame
-        styleMask:(NSWindowStyleMaskTitled |
-                   NSWindowStyleMaskClosable |
-                   NSWindowStyleMaskMiniaturizable)
-        backing:NSBackingStoreBuffered
-        defer:NO];
+    // Some legacy editors misbehave or crash if queried for their rect before
+    // effEditOpen. Open into a conservative fallback size first, then ask the
+    // plugin for its preferred size once the editor is live.
+    int w = DEFAULT_EDITOR_WIDTH;
+    int h = DEFAULT_EDITOR_HEIGHT;
+    fprintf(stderr, "bridge: initial editor size fallback=%dx%d\n", w, h);
 
-    NSString *title = [NSString stringWithFormat:@"Keepsake — %s",
-                       header.plugin_name.c_str()];
-    [g_window setTitle:title];
-    [g_window setReleasedWhenClosed:NO];
-    [g_window setLevel:NSFloatingWindowLevel];
+    if (!use_parentless_open) {
+        // Create window (editor height + header height)
+        CGFloat totalH = h + HEADER_HEIGHT;
+        NSRect frame = NSMakeRect(200, 200, w, totalH);
+        g_window = [[NSWindow alloc]
+            initWithContentRect:frame
+            styleMask:(NSWindowStyleMaskTitled |
+                       NSWindowStyleMaskClosable |
+                       NSWindowStyleMaskMiniaturizable)
+            backing:NSBackingStoreBuffered
+            defer:NO];
 
-    // Use a flipped content view so layout is top-down
-    KeepsakeFlippedView *content = [[KeepsakeFlippedView alloc]
-        initWithFrame:NSMakeRect(0, 0, w, h + HEADER_HEIGHT)];
-    [g_window setContentView:content];
-
-    // Editor container below the header — added FIRST so header draws on top
-    g_editor_container = [[KeepsakeFlippedView alloc]
-        initWithFrame:NSMakeRect(0, HEADER_HEIGHT, w, h)];
-    [g_editor_container setWantsLayer:YES];
-    g_editor_container.layer.masksToBounds = YES; // clip plugin content
-    [content addSubview:g_editor_container];
-
-    // Header bar at the top — added LAST so it draws above the editor
-    g_header = [[KeepsakeHeaderView alloc]
-        initWithFrame:NSMakeRect(0, 0, w, HEADER_HEIGHT)];
-    g_header.pluginName = [NSString stringWithUTF8String:
+        NSString *title = [NSString stringWithFormat:@"Keepsake — %s",
                            header.plugin_name.c_str()];
-    g_header.formatBadge = [NSString stringWithUTF8String:
-                            header.format.c_str()];
-    g_header.archBadge = [NSString stringWithUTF8String:
-                          header.architecture.c_str()];
-    g_header.isolationBadge = [NSString stringWithUTF8String:
-                               header.isolation.c_str()];
-    [g_header setWantsLayer:YES]; // ensure it composites above editor
-    [content addSubview:g_header];
+        [g_window setTitle:title];
+        [g_window setReleasedWhenClosed:NO];
+        [g_window setLevel:NSFloatingWindowLevel];
+
+        // Use a flipped content view so layout is top-down
+        KeepsakeFlippedView *content = [[KeepsakeFlippedView alloc]
+            initWithFrame:NSMakeRect(0, 0, w, h + HEADER_HEIGHT)];
+        [g_window setContentView:content];
+
+        // Editor container below the header — added FIRST so header draws on top
+        g_editor_container = [[KeepsakeFlippedView alloc]
+            initWithFrame:NSMakeRect(0, HEADER_HEIGHT, w, h)];
+        [g_editor_container setWantsLayer:YES];
+        g_editor_container.layer.masksToBounds = YES; // clip plugin content
+        [content addSubview:g_editor_container];
+
+        // Header bar at the top — added LAST so it draws above the editor
+        g_header = [[KeepsakeHeaderView alloc]
+            initWithFrame:NSMakeRect(0, 0, w, HEADER_HEIGHT)];
+        g_header.pluginName = [NSString stringWithUTF8String:
+                               header.plugin_name.c_str()];
+        g_header.formatBadge = [NSString stringWithUTF8String:
+                                header.format.c_str()];
+        g_header.archBadge = [NSString stringWithUTF8String:
+                              header.architecture.c_str()];
+        g_header.isolationBadge = [NSString stringWithUTF8String:
+                                   header.isolation.c_str()];
+        [g_header setWantsLayer:YES]; // ensure it composites above editor
+        [content addSubview:g_header];
+
+        // Some plugins only attach their editor once the parent view is in a
+        // visible window hierarchy, so show the host window before effEditOpen.
+        [g_window makeKeyAndOrderFront:nil];
+        [NSApp activateIgnoringOtherApps:YES];
+        [g_window displayIfNeeded];
+
+        // Give Cocoa one cycle to attach the view hierarchy before the plugin
+        // asks for its parent.
+        @autoreleasepool {
+            NSEvent *event;
+            while ((event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                                               untilDate:[NSDate dateWithTimeIntervalSinceNow:0.0]
+                                                  inMode:NSDefaultRunLoopMode
+                                                 dequeue:YES])) {
+                [NSApp sendEvent:event];
+            }
+        }
+    }
 
     // Open the plugin editor into the container
-    loader->open_editor((__bridge void *)g_editor_container);
+    void *editor_parent = use_parentless_open
+        ? nullptr
+        : (__bridge void *)g_editor_container;
+    fprintf(stderr, "bridge: calling loader->open_editor() parent=%p strategy=%s\n",
+            editor_parent, use_parentless_open ? "parentless" : "embedded");
+
+    if (use_parentless_open) {
+        NSArray<NSWindow *> *windows_before = [[NSApp windows] copy];
+        bool open_ok = loader->open_editor(editor_parent);
+        if (!open_ok) {
+            fprintf(stderr, "bridge: loader->open_editor() failed\n");
+            g_window = nil;
+            g_header = nil;
+            g_editor_container = nil;
+            return false;
+        }
+
+        NSArray<NSWindow *> *windows_after = [NSApp windows];
+        g_parentless_plugin_window = nil;
+        for (NSWindow *candidate in windows_after) {
+            if ([windows_before containsObject:candidate]) continue;
+            g_parentless_plugin_window = candidate;
+            break;
+        }
+
+        if (g_parentless_plugin_window) {
+            fprintf(stderr, "bridge: APC parentless window=%p\n",
+                    (__bridge void *)g_parentless_plugin_window);
+            style_parentless_plugin_window(g_parentless_plugin_window, header);
+        } else {
+            fprintf(stderr, "bridge: APC parentless window not found\n");
+        }
+
+        g_active_loader = loader;
+        fprintf(stderr, "bridge: APC parentless editor open succeeded\n");
+        g_editor_open = true;
+        return true;
+    }
+
+    std::atomic<bool> open_done{false};
+    std::atomic<bool> open_ok{false};
+    std::thread open_thread([&]() {
+        bool ok = loader->open_editor(editor_parent);
+        open_ok.store(ok);
+        open_done.store(true);
+    });
+
+    const int open_timeout_iters = EDITOR_OPEN_TIMEOUT_MS / 16;
+    for (int i = 0; i < open_timeout_iters && !open_done.load(); i++) {
+        @autoreleasepool {
+            NSEvent *event;
+            while ((event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                                               untilDate:[NSDate dateWithTimeIntervalSinceNow:0.0]
+                                                  inMode:NSDefaultRunLoopMode
+                                                 dequeue:YES])) {
+                [NSApp sendEvent:event];
+            }
+        }
+        [g_window displayIfNeeded];
+        usleep(16000);
+    }
+
+    if (!open_done.load()) {
+        fprintf(stderr, "bridge: loader->open_editor() timed out after %dms\n",
+                EDITOR_OPEN_TIMEOUT_MS);
+        open_thread.detach();
+        return false;
+    }
+
+    open_thread.join();
+    if (!open_ok.load()) {
+        fprintf(stderr, "bridge: loader->open_editor() failed\n");
+        [g_window orderOut:nil];
+        g_window = nil;
+        g_header = nil;
+        g_editor_container = nil;
+        return false;
+    }
     g_active_loader = loader;
 
     // Watch for subview frame changes (instant resize tracking)
@@ -202,7 +346,9 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
 
     // Re-check size after open (some plugins report correct size only after effEditOpen)
     int newW = w, newH = h;
-    loader->get_editor_rect(newW, newH);
+    bool have_rect_after_open = loader->get_editor_rect(newW, newH);
+    fprintf(stderr, "bridge: post-open editor rect ok=%d size=%dx%d\n",
+            have_rect_after_open ? 1 : 0, newW, newH);
     if (newW != w || newH != h) {
         [g_window setContentSize:NSMakeSize(newW, newH + HEADER_HEIGHT)];
         [g_header setFrame:NSMakeRect(0, 0, newW, HEADER_HEIGHT)];
@@ -215,8 +361,25 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     g_current_width = w;
     g_current_height = h;
 
-    [g_window makeKeyAndOrderFront:nil];
-    [NSApp activateIgnoringOtherApps:YES];
+    // Give the plugin a brief idle window to attach subviews or spawn its
+    // Cocoa editor content before we declare success.
+    for (int i = 0; i < 8; i++) {
+        loader->editor_idle();
+        @autoreleasepool {
+            NSEvent *event;
+            while ((event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                                               untilDate:[NSDate dateWithTimeIntervalSinceNow:0.0]
+                                                  inMode:NSDefaultRunLoopMode
+                                                 dequeue:YES])) {
+                [NSApp sendEvent:event];
+            }
+        }
+        [g_window displayIfNeeded];
+        usleep(16000);
+    }
+
+    fprintf(stderr, "bridge: editor container subviews=%lu\n",
+            static_cast<unsigned long>([[g_editor_container subviews] count]));
 
     g_editor_open = true;
     fprintf(stderr, "bridge: editor opened (%dx%d) with header bar\n", w, h);
@@ -238,6 +401,10 @@ void gui_close_editor(BridgeLoader *loader) {
 
     [[NSNotificationCenter defaultCenter] removeObserver:nil
         name:NSViewFrameDidChangeNotification object:nil];
+    if (g_parentless_plugin_window) {
+        [g_parentless_plugin_window orderOut:nil];
+        g_parentless_plugin_window = nil;
+    }
     if (g_window) {
         [g_window orderOut:nil];
         g_window = nil;

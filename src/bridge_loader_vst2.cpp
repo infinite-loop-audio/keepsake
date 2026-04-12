@@ -6,6 +6,7 @@
 #include <vestige/vestige.h>
 #include <cstdio>
 #include <cstring>
+#include <atomic>
 
 #ifndef _WIN32
 #include <dlfcn.h>
@@ -23,17 +24,128 @@ typedef AEffect *(__cdecl *VstEntry)(audioMasterCallback);
 
 static double s_sample_rate = 44100.0;
 static uint32_t s_max_frames = 512;
+static thread_local bool s_editor_open_in_progress = false;
+static std::atomic<uint32_t> s_editor_host_callback_count{0};
+static std::atomic<uint32_t> s_editor_automation_count{0};
+static std::atomic<int32_t> s_editor_last_automated_index{-1};
+static std::atomic<uint32_t> s_editor_open_edit_depth{0};
+static std::atomic<float> s_editor_last_automated_value{0.0f};
+
+static const char *vst2_opcode_name(int32_t opcode) {
+    switch (opcode) {
+    case audioMasterAutomate: return "audioMasterAutomate";
+    case audioMasterVersion: return "audioMasterVersion";
+    case audioMasterCurrentId: return "audioMasterCurrentId";
+    case audioMasterIdle: return "audioMasterIdle";
+    case audioMasterPinConnected: return "audioMasterPinConnected";
+    case audioMasterWantMidi: return "audioMasterWantMidi";
+    case audioMasterGetTime: return "audioMasterGetTime";
+    case audioMasterProcessEvents: return "audioMasterProcessEvents";
+    case audioMasterIOChanged: return "audioMasterIOChanged";
+    case audioMasterSizeWindow: return "audioMasterSizeWindow";
+    case audioMasterGetSampleRate: return "audioMasterGetSampleRate";
+    case audioMasterGetBlockSize: return "audioMasterGetBlockSize";
+    case audioMasterGetInputLatency: return "audioMasterGetInputLatency";
+    case audioMasterGetOutputLatency: return "audioMasterGetOutputLatency";
+    case audioMasterGetCurrentProcessLevel: return "audioMasterGetCurrentProcessLevel";
+    case audioMasterGetAutomationState: return "audioMasterGetAutomationState";
+    case audioMasterOfflineStart: return "audioMasterOfflineStart";
+    case audioMasterOfflineRead: return "audioMasterOfflineRead";
+    case audioMasterOfflineWrite: return "audioMasterOfflineWrite";
+    case audioMasterOfflineGetCurrentPass: return "audioMasterOfflineGetCurrentPass";
+    case audioMasterOfflineGetCurrentMetaPass: return "audioMasterOfflineGetCurrentMetaPass";
+    case audioMasterGetVendorString: return "audioMasterGetVendorString";
+    case audioMasterGetProductString: return "audioMasterGetProductString";
+    case audioMasterGetVendorVersion: return "audioMasterGetVendorVersion";
+    case audioMasterVendorSpecific: return "audioMasterVendorSpecific";
+    case audioMasterSetIcon: return "audioMasterSetIcon";
+    case audioMasterCanDo: return "audioMasterCanDo";
+    case audioMasterGetLanguage: return "audioMasterGetLanguage";
+    case audioMasterOpenWindow: return "audioMasterOpenWindow";
+    case audioMasterCloseWindow: return "audioMasterCloseWindow";
+    case audioMasterGetDirectory: return "audioMasterGetDirectory";
+    case audioMasterUpdateDisplay: return "audioMasterUpdateDisplay";
+    case audioMasterBeginEdit: return "audioMasterBeginEdit";
+    case audioMasterEndEdit: return "audioMasterEndEdit";
+    case audioMasterOpenFileSelector: return "audioMasterOpenFileSelector";
+    case audioMasterCloseFileSelector: return "audioMasterCloseFileSelector";
+    default: return "audioMaster?";
+    }
+}
 
 static intptr_t __cdecl vst2_host_callback(
-    AEffect *, int32_t opcode, int32_t, intptr_t, void *, float) {
+    AEffect *, int32_t opcode, int32_t index, intptr_t value, void *ptr, float opt) {
+    if (s_editor_open_in_progress) {
+        uint32_t seq = s_editor_host_callback_count.fetch_add(1) + 1;
+        if (opcode == audioMasterCanDo && ptr) {
+            fprintf(stderr,
+                    "bridge/vst2: hostcb[%u] %s('%s') index=%d value=%ld opt=%.3f\n",
+                    seq, vst2_opcode_name(opcode),
+                    static_cast<const char *>(ptr), index,
+                    static_cast<long>(value), static_cast<double>(opt));
+        } else {
+            fprintf(stderr,
+                    "bridge/vst2: hostcb[%u] %s index=%d value=%ld ptr=%p opt=%.3f\n",
+                    seq, vst2_opcode_name(opcode), index,
+                    static_cast<long>(value), ptr, static_cast<double>(opt));
+        }
+    }
+
     switch (opcode) {
+    case audioMasterAutomate:
+        s_editor_last_automated_index.store(index);
+        s_editor_last_automated_value.store(opt);
+        s_editor_automation_count.fetch_add(1);
+        return 1;
     case audioMasterVersion:    return 2400;
     case audioMasterCurrentId:  return 0;
+    case audioMasterIdle:       return 1;
+    case audioMasterWantMidi:   return 1;
+    case audioMasterGetTime:    return 0;
+    case audioMasterProcessEvents: return 1;
     case audioMasterGetSampleRate: return static_cast<intptr_t>(s_sample_rate);
     case audioMasterGetBlockSize:  return static_cast<intptr_t>(s_max_frames);
+    case audioMasterGetInputLatency: return 0;
+    case audioMasterGetOutputLatency: return 0;
     case audioMasterGetCurrentProcessLevel: return 0;
-    case audioMasterGetAutomationState: return 0;
-    case audioMasterCanDo:      return 0;
+    case audioMasterGetAutomationState:
+        return kVstAutomationReading |
+               (s_editor_open_edit_depth.load() > 0 ? kVstAutomationWriting : 0);
+    case audioMasterGetVendorString:
+        if (ptr) {
+            strncpy(static_cast<char *>(ptr), "Infinite Loop Audio", 64);
+            static_cast<char *>(ptr)[63] = '\0';
+            return 1;
+        }
+        return 0;
+    case audioMasterGetProductString:
+        if (ptr) {
+            strncpy(static_cast<char *>(ptr), "Keepsake", 64);
+            static_cast<char *>(ptr)[63] = '\0';
+            return 1;
+        }
+        return 0;
+    case audioMasterGetVendorVersion: return 1;
+    case audioMasterCanDo:
+        if (!ptr) return 0;
+        if (strcmp(static_cast<const char *>(ptr), "sendVstEvents") == 0) return 1;
+        if (strcmp(static_cast<const char *>(ptr), "sendVstMidiEvent") == 0) return 1;
+        if (strcmp(static_cast<const char *>(ptr), "receiveVstEvents") == 0) return 1;
+        if (strcmp(static_cast<const char *>(ptr), "receiveVstMidiEvent") == 0) return 1;
+        if (strcmp(static_cast<const char *>(ptr), "sizeWindow") == 0) return 1;
+        if (strcmp(static_cast<const char *>(ptr), "supportShell") == 0) return 1;
+        return 0;
+    case audioMasterGetLanguage: return kVstLangEnglish;
+    case audioMasterSizeWindow: return 1;
+    case audioMasterUpdateDisplay: return 1;
+    case audioMasterBeginEdit:
+        s_editor_open_edit_depth.fetch_add(1);
+        return 1;
+    case audioMasterEndEdit: {
+        uint32_t depth = s_editor_open_edit_depth.load();
+        if (depth > 0) s_editor_open_edit_depth.fetch_sub(1);
+        return 1;
+    }
     case audioMasterIOChanged:  return 1;
     default: return 0;
     }
@@ -225,8 +337,25 @@ public:
 
     bool open_editor(void *parent) override {
         if (!effect || !effect->dispatcher) return false;
-        effect->dispatcher(effect, effEditOpen, 0, 0, parent, 0.0f);
-        return true;
+        fprintf(stderr, "bridge/vst2: effEditOpen parent=%p begin\n", parent);
+        s_editor_host_callback_count.store(0);
+        s_editor_automation_count.store(0);
+        s_editor_last_automated_index.store(-1);
+        s_editor_last_automated_value.store(0.0f);
+        s_editor_open_edit_depth.store(0);
+        s_editor_open_in_progress = true;
+        intptr_t result =
+            effect->dispatcher(effect, effEditOpen, 0, 0, parent, 0.0f);
+        s_editor_open_in_progress = false;
+        fprintf(stderr,
+                "bridge/vst2: effEditOpen -> %ld callbacks=%u automates=%u last-index=%d last-value=%.3f edit-depth=%u\n",
+                static_cast<long>(result),
+                s_editor_host_callback_count.load(),
+                s_editor_automation_count.load(),
+                s_editor_last_automated_index.load(),
+                static_cast<double>(s_editor_last_automated_value.load()),
+                s_editor_open_edit_depth.load());
+        return result != 0;
     }
 
     void close_editor() override {
@@ -242,11 +371,18 @@ public:
     bool get_editor_rect(int &w, int &h) override {
         struct ERect { int16_t top, left, bottom, right; };
         ERect *rect = nullptr;
+        intptr_t result = 0;
+        fprintf(stderr, "bridge/vst2: effEditGetRect begin\n");
         if (effect->dispatcher)
-            effect->dispatcher(effect, effEditGetRect, 0, 0, &rect, 0);
+            result = effect->dispatcher(effect, effEditGetRect, 0, 0, &rect, 0);
+        fprintf(stderr, "bridge/vst2: effEditGetRect raw -> %ld rect=%p\n",
+                static_cast<long>(result), static_cast<void *>(rect));
         if (!rect) return false;
         w = rect->right - rect->left;
         h = rect->bottom - rect->top;
+        fprintf(stderr,
+                "bridge/vst2: effEditGetRect -> %ld rect=%p size=%dx%d\n",
+                static_cast<long>(result), static_cast<void *>(rect), w, h);
         return (w > 0 && h > 0);
     }
 

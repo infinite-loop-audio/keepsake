@@ -22,7 +22,8 @@ inline KeepsakePlugin *get(const clap_plugin_t *plugin) {
 bool send_and_wait(KeepsakePlugin *kp, uint32_t opcode,
                     const void *payload = nullptr,
                     uint32_t size = 0,
-                    std::vector<uint8_t> *ok_payload = nullptr);
+                    std::vector<uint8_t> *ok_payload = nullptr,
+                    int timeout_ms = 3000);
 
 // Pull async bridge-init results into the live plugin instance once ready.
 void sync_async_init(KeepsakePlugin *kp);

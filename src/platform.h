@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <cerrno>
 #include <string>
 
 // ============================================================
@@ -239,6 +240,18 @@ static inline void platform_force_kill(PlatformProcess &proc) {
 }
 
 #endif
+
+static inline bool platform_process_alive(const PlatformProcess &proc) {
+#ifdef _WIN32
+    if (proc.process_handle == INVALID_HANDLE_VALUE) return false;
+    DWORD rc = WaitForSingleObject(proc.process_handle, 0);
+    return rc == WAIT_TIMEOUT;
+#else
+    if (proc.pid <= 0) return false;
+    if (kill(proc.pid, 0) == 0) return true;
+    return errno == EPERM;
+#endif
+}
 
 // ============================================================
 // Pipe I/O (cross-platform)

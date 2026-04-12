@@ -170,50 +170,67 @@ static void handle_init(uint32_t /*caller_id*/, const std::vector<uint8_t> &payl
         return;
     }
 
-    // Load the plugin on a thread with a 5-second timeout.
-    // Some plugins hang during VSTPluginMain or effOpen (license checks, etc.)
-#ifndef _WIN32
-    volatile bool load_done = false;
-    volatile bool load_ok = false;
-
-    pthread_t lt;
-    struct LoadCtx { BridgeLoader *l; std::string p; volatile bool *done; volatile bool *ok; };
-    auto *lctx = new LoadCtx{loader, path, &load_done, &load_ok};
-
-    pthread_create(&lt, nullptr, [](void *arg) -> void * {
-        auto *c = static_cast<LoadCtx *>(arg);
-        *c->ok = c->l->load(c->p);
-        *c->done = true;
-        delete c;
-        return nullptr;
-    }, lctx);
-
-    // Wait up to 5 seconds
-    for (int i = 0; i < 50 && !load_done; i++) {
-        usleep(100000); // 100ms
-    }
-
-    if (!load_done) {
-        fprintf(stderr, "bridge: plugin load timed out (5s): %s\n", path.c_str());
-        pthread_detach(lt); // let it die eventually
-        ipc_write_error(g_pipe_out, "plugin load timed out");
-        // Don't delete loader — thread still using it
-        return;
-    }
-    pthread_join(lt, nullptr);
-
-    if (!load_ok) {
-        ipc_write_error(g_pipe_out, "failed to load plugin");
-        delete loader;
-        return;
-    }
-#else
-    if (!loader->load(path)) {
-        ipc_write_error(g_pipe_out, "failed to load plugin");
-        delete loader;
-        return;
-    }
+    // On macOS VST2, some JUCE editors appear to bind their message-manager
+    // thread identity to the thread that runs VSTPluginMain/effOpen. Loading
+    // on the bridge main thread keeps later effEditOpen calls on the same
+    // thread and avoids JUCE editor deadlocks.
+    bool load_on_main_thread = false;
+#if defined(__APPLE__)
+    load_on_main_thread = (format_id == FORMAT_VST2);
 #endif
+
+    if (load_on_main_thread) {
+        if (!loader->load(path)) {
+            ipc_write_error(g_pipe_out, "failed to load plugin");
+            delete loader;
+            return;
+        }
+    } else {
+#ifndef _WIN32
+        // Load the plugin on a worker thread with a 5-second timeout.
+        // Some plugins hang during VSTPluginMain or effOpen (license checks, etc.)
+        volatile bool load_done = false;
+        volatile bool load_ok = false;
+
+        pthread_t lt;
+        struct LoadCtx { BridgeLoader *l; std::string p; volatile bool *done; volatile bool *ok; };
+        auto *lctx = new LoadCtx{loader, path, &load_done, &load_ok};
+
+        pthread_create(&lt, nullptr, [](void *arg) -> void * {
+            auto *c = static_cast<LoadCtx *>(arg);
+            *c->ok = c->l->load(c->p);
+            *c->done = true;
+            delete c;
+            return nullptr;
+        }, lctx);
+
+        // Wait up to 5 seconds
+        for (int i = 0; i < 50 && !load_done; i++) {
+            usleep(100000); // 100ms
+        }
+
+        if (!load_done) {
+            fprintf(stderr, "bridge: plugin load timed out (5s): %s\n", path.c_str());
+            pthread_detach(lt); // let it die eventually
+            ipc_write_error(g_pipe_out, "plugin load timed out");
+            // Don't delete loader — thread still using it
+            return;
+        }
+        pthread_join(lt, nullptr);
+
+        if (!load_ok) {
+            ipc_write_error(g_pipe_out, "failed to load plugin");
+            delete loader;
+            return;
+        }
+#else
+        if (!loader->load(path)) {
+            ipc_write_error(g_pipe_out, "failed to load plugin");
+            delete loader;
+            return;
+        }
+#endif
+    }
 
     // Create instance
     auto *inst = new PluginInstance();
@@ -487,6 +504,9 @@ int main(int argc, char *argv[]) {
         case IPC_OP_GET_CHUNK:  handle_get_chunk(inst); break;
         case IPC_OP_SET_CHUNK:  handle_set_chunk(inst, payload); break;
         case IPC_OP_EDITOR_OPEN:
+            fprintf(stderr, "bridge: IPC_OP_EDITOR_OPEN instance=%u has_loader=%d has_editor=%d\n",
+                    instance_id, inst->loader ? 1 : 0,
+                    (inst->loader && inst->loader->has_editor()) ? 1 : 0);
             if (inst->loader && inst->loader->has_editor()) {
                 EditorHeaderInfo hdr;
                 hdr.format = "VST2";
@@ -509,10 +529,17 @@ int main(int argc, char *argv[]) {
                 else
                     hdr.plugin_name = "Plugin";
 
-                if (gui_open_editor(inst->loader, hdr))
+                fprintf(stderr, "bridge: opening editor for '%s'\n",
+                        hdr.plugin_name.c_str());
+                if (gui_open_editor(inst->loader, hdr)) {
+                    fprintf(stderr, "bridge: editor open OK instance=%u\n",
+                            instance_id);
                     ipc_write_ok(g_pipe_out);
-                else
+                } else {
+                    fprintf(stderr, "bridge: editor open FAILED instance=%u\n",
+                            instance_id);
                     ipc_write_error(g_pipe_out, "EDITOR_OPEN: failed");
+                }
             } else {
                 ipc_write_error(g_pipe_out, "EDITOR_OPEN: no editor");
             }
