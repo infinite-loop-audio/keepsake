@@ -42,8 +42,10 @@ should not imply equal confidence without fresh release-window evidence.
 - Windows and Linux have green CI builds, but CI success alone is not yet the
   same as full alpha support proof for real-host GUI and runtime behavior.
 - Linux now has exploratory Ubuntu ARM64 VM host evidence with native ARM64
-  REAPER and the repo `test-plugin.so`, including scan/add/UI-open success, but
-  transport playback still timed out in that VM path.
+  REAPER and the repo `test-plugin.so`, including scan/add/UI/transport
+  success. The remaining caveat is that this is still ARM64 VM evidence, not a
+  direct `linux-x64` host-validation pass against the current public artifact
+  target.
 
 ### GUI/editor behavior
 

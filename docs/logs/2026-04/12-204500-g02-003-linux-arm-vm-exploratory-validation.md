@@ -13,7 +13,9 @@ Release lane: experimental Linux exploratory host evidence
 - Installed native ARM64 REAPER 7.69 in the VM.
 - Installed Keepsake and the repo `test-plugin.so` into Linux user plugin paths.
 - Proved real-host scan/add-FX/UI-open behavior in REAPER.
-- Hit a transport-play timeout in REAPER, so this lane remains exploratory and partial.
+- After enabling ALSA in REAPER, proved short transport play/stop behavior too.
+- This lane remains exploratory because it is Ubuntu ARM64 + native ARM64 REAPER,
+  not the current `linux-x64` public artifact target.
 
 ## Environment
 
@@ -97,38 +99,46 @@ Key timings:
 
 ### Real-host transport lane
 
-Result:
+Initial result:
 - FAIL
+
+Initial failure:
+- `transport-play-timeout`
+
+Follow-up result after enabling ALSA in REAPER:
+- PASS
 
 Checks:
 - scan/discovery passed
 - FX add passed
 - UI open passed
-- transport play did not enter playing state before timeout
+- transport play passed
+- transport stop passed
 
-Key timings:
+Key timings after audio-device fix:
 
-- scan found: `25 ms`
-- add FX finish: `170 ms`
-- UI open finish: `209 ms`
-- transport play start: `1735 ms`
-- failure: `transport-play-timeout`
+- scan found: `66 ms`
+- add FX finish: `403 ms`
+- UI open finish: `514 ms`
+- transport playing: `2072 ms`
+- transport stopped: `3116 ms`
+- result: `PASS`
 
 ## Release Read
 
 - This is useful Linux host evidence.
-- It is not strong enough to promote Linux into the primary supported `v0.1-alpha` lane.
+- It is still not strong enough to promote Linux into the primary supported `v0.1-alpha` lane.
 - Current honest read:
-  - Linux exploratory host/UI proof exists on Ubuntu ARM64 + native ARM64 REAPER + repo `test-plugin.so`
-  - transport/audio proof is still incomplete in this VM path
+  - Linux exploratory host/runtime proof exists on Ubuntu ARM64 + native ARM64 REAPER + repo `test-plugin.so`
+  - the strongest remaining caveat is architecture mismatch with the public `linux-x64` artifact target, not basic host functionality
 
 ## Risks / Follow-ups
 
 - This VM is ARM64, not the current `linux-x64` release artifact target.
 - The strongest Linux lane would still be real `x86_64` Linux host proof.
-- Transport timeout may be an audio-device/session issue rather than a Keepsake bridge failure.
+- Transport timeout was resolved after enabling ALSA in REAPER.
 - Third-party Linux VST2 proof is still missing; this run used the repo test plugin.
 
 ## Next Task
 
-Investigate the Linux REAPER transport timeout in the VM, then decide whether this exploratory lane is enough to justify shipping Linux artifacts as experimental attachments in `v0.1-alpha`.
+Decide whether this Ubuntu ARM64 exploratory host proof is enough to justify shipping Linux artifacts as experimental attachments in `v0.1-alpha`, or whether a real `linux-x64` host pass is still required first.
