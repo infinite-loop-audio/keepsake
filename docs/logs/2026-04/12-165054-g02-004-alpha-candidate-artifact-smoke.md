@@ -1,6 +1,6 @@
 # Release Checkpoint — v0.1-alpha Candidate Artifact Smoke
 
-Status: recorded
+Status: updated
 Date: 2026-04-12
 Owner: Codex
 Roadmap: g02.004
@@ -8,8 +8,9 @@ Release: v0.1-alpha
 
 ## Summary
 
-- Built the first repeatable alpha candidate package from the current repo state.
-- Verified the packaged macOS artifact through a guarded real-REAPER smoke on the primary lane.
+- Built the first repeatable alpha candidate package from the repo.
+- Moved publishable artifact build into GitHub Actions.
+- Verified final release-artifact CI and normal CI on the current candidate commit.
 
 ## Scope Freeze
 
@@ -42,19 +43,27 @@ Release: v0.1-alpha
   - `docs/logs/2026-04/12-141500-g02-003-alpha-primary-validation.md`
 - release read:
   - packaged macOS alpha candidate still matches the supported lane
+  - CI-built artifacts now exist for macOS arm64, Linux x64, and Windows x64
 
 ## Artifact Build
 
 - release candidate command:
   - `effigy release:candidate:alpha`
 - artifacts built:
-  - `dist/v0.1-alpha/keepsake-macos-universal-v0.1-alpha.zip`
+  - local dry-run:
+    - `dist/v0.1-alpha/keepsake-macos-arm64-v0.1-alpha.zip`
+  - CI artifacts:
+    - `macos-arm64`
+    - `linux-x64`
+    - `windows-x64`
 - helper-binary layout verified:
   - yes
 - checksum manifest:
-  - `dist/v0.1-alpha/SHA256SUMS.txt`
+  - local dry-run:
+    - `dist/v0.1-alpha/SHA256SUMS.txt`
 - checksum:
-  - `0da5c342315ea21b2ab8f836883064275464616cb892aaa578668812ecfc1bd8  keepsake-macos-universal-v0.1-alpha.zip`
+  - local dry-run:
+    - `359f1b77dbc0c94e4ee58f7229a3013a054f9bc4480c92884c8131209f7cf973  keepsake-macos-arm64-v0.1-alpha.zip`
 
 ## Release Notes
 
@@ -68,11 +77,16 @@ Release: v0.1-alpha
 ## Publication
 
 - release candidate commit:
-  - `6fb8197`
+  - `8d24765`
 - tag:
   - not cut
 - CI run:
-  - not refreshed in this checkpoint
+  - release artifacts:
+    - `24310750164`
+    - `https://github.com/infinite-loop-audio/keepsake/actions/runs/24310750164`
+  - normal CI:
+    - `24310748505`
+    - `https://github.com/infinite-loop-audio/keepsake/actions/runs/24310748505`
 - GitHub release URL:
   - not published
 
@@ -93,7 +107,9 @@ Release: v0.1-alpha
 
 - Packaged smoke from an isolated temp CLAP path timed out before REAPER ran the script.
 - Realistic installed-bundle smoke passed, so the blocker is in the isolated packaged REAPER launch shape, not in the packaged bundle itself.
+- Windows and Linux CI artifacts now exist, but release scope is still conservative.
+- Public alpha still needs an explicit ship/no-ship decision for the experimental Windows/Linux artifacts.
 
 ## Next Task
 
-Refresh CI on the release-candidate commit, then decide whether to cut `v0.1-alpha` from the current conservative scope or widen evidence first.
+Decide whether `v0.1-alpha` publishes macOS-only or ships the experimental Windows/Linux CI artifacts with explicit experimental wording.
