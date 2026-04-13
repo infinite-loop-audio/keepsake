@@ -7,8 +7,10 @@
 
 #ifdef _WIN32
 
+#include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <thread>
 #include <windows.h>
 
 static HWND g_editor_hwnd = nullptr;
@@ -23,6 +25,7 @@ static EditorHeaderInfo g_header_info;
 static const int WIN_HEADER_HEIGHT = 24;
 static int g_last_parent_w = 0;
 static int g_last_parent_h = 0;
+static const DWORD EMBED_OPEN_TIMEOUT_MS = 1500;
 
 static void position_and_show_floating_window(HWND hwnd) {
     if (!hwnd) return;
@@ -90,7 +93,12 @@ static void resize_embedded_editor_to_parent() {
     if (w == g_last_parent_w && h == g_last_parent_h) return;
     g_last_parent_w = w;
     g_last_parent_h = h;
-    MoveWindow(g_editor_hwnd, 0, 0, w, h, TRUE);
+    if (g_editor_panel_hwnd) {
+        MoveWindow(g_editor_hwnd, 0, 0, w, h, TRUE);
+        MoveWindow(g_editor_panel_hwnd, 0, 0, w, h, TRUE);
+    } else {
+        MoveWindow(g_editor_hwnd, 0, 0, w, h, TRUE);
+    }
 }
 
 static LRESULT CALLBACK EditorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -243,23 +251,85 @@ bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
 
     if (!g_editor_hwnd) return false;
 
-    keepsake_debug_log("bridge: editor embed parent=%p child=%p\n",
-                       static_cast<void *>(parent), static_cast<void *>(g_editor_hwnd));
-    if (!loader->open_editor(static_cast<void *>(g_editor_hwnd))) {
-        keepsake_debug_log("bridge: embedded editor open failed\n");
+    HWND editor_panel = CreateWindowExA(
+        0, "KeepsakeEditor", nullptr,
+        WS_CHILD | WS_VISIBLE,
+        0, 0, w, h,
+        g_editor_hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
+
+    if (!editor_panel) {
         DestroyWindow(g_editor_hwnd);
         g_editor_hwnd = nullptr;
         return false;
     }
+
+    g_editor_panel_hwnd = editor_panel;
     g_active_loader = loader;
     g_parent_hwnd = parent;
-    g_editor_open = true;
     g_last_parent_w = 0;
     g_last_parent_h = 0;
-
-    ShowWindow(g_editor_hwnd, SW_SHOW);
     resize_embedded_editor_to_parent();
     g_idle_timer = SetTimer(g_editor_hwnd, 1, 16, nullptr);
+
+    keepsake_debug_log("bridge: editor embed parent=%p child=%p\n",
+                       static_cast<void *>(parent), static_cast<void *>(g_editor_hwnd));
+
+    std::atomic<bool> open_done{false};
+    std::atomic<bool> open_ok{false};
+    std::thread open_thread([&]() {
+        open_ok.store(loader->open_editor(static_cast<void *>(editor_panel)),
+                      std::memory_order_release);
+        open_done.store(true, std::memory_order_release);
+    });
+
+    DWORD start = GetTickCount();
+    while (!open_done.load(std::memory_order_acquire)) {
+        MSG msg;
+        while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageA(&msg);
+        }
+        loader->editor_idle();
+        Sleep(16);
+        if (GetTickCount() - start >= EMBED_OPEN_TIMEOUT_MS) {
+            keepsake_debug_log("bridge: embedded editor open timed out after %lums\n",
+                               static_cast<unsigned long>(EMBED_OPEN_TIMEOUT_MS));
+            open_thread.detach();
+            if (g_idle_timer) {
+                KillTimer(g_editor_hwnd, g_idle_timer);
+                g_idle_timer = 0;
+            }
+            DestroyWindow(editor_panel);
+            DestroyWindow(g_editor_hwnd);
+            g_editor_panel_hwnd = nullptr;
+            g_editor_hwnd = nullptr;
+            g_active_loader = nullptr;
+            g_parent_hwnd = nullptr;
+            return false;
+        }
+    }
+
+    open_thread.join();
+    if (!open_ok.load(std::memory_order_acquire)) {
+        keepsake_debug_log("bridge: embedded editor open failed\n");
+        if (g_idle_timer) {
+            KillTimer(g_editor_hwnd, g_idle_timer);
+            g_idle_timer = 0;
+        }
+        DestroyWindow(editor_panel);
+        DestroyWindow(g_editor_hwnd);
+        g_editor_panel_hwnd = nullptr;
+        g_editor_hwnd = nullptr;
+        g_active_loader = nullptr;
+        g_parent_hwnd = nullptr;
+        return false;
+    }
+
+    g_editor_open = true;
+
+    ShowWindow(g_editor_hwnd, SW_SHOW);
+    ShowWindow(editor_panel, SW_SHOW);
+    resize_embedded_editor_to_parent();
     keepsake_debug_log("bridge: editor embedded in host window %p\n",
                        static_cast<void *>(parent));
     return true;
