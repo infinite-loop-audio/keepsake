@@ -108,6 +108,13 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
                        reinterpret_cast<void *>(static_cast<uintptr_t>(handle)));
     if (!send_and_wait(kp, IPC_OP_EDITOR_SET_PARENT, &handle, sizeof(handle),
                        nullptr, GUI_OPEN_TIMEOUT_MS)) {
+#ifdef _WIN32
+        if (platform_process_alive(kp->bridge->proc)) {
+            keepsake_debug_log("keepsake: gui_set_parent() timed out, assuming delayed success\n");
+            kp->editor_open = true;
+            return true;
+        }
+#endif
         keepsake_debug_log("keepsake: gui_set_parent() editor parent failed\n");
         return false;
     }

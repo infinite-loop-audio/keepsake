@@ -19,10 +19,26 @@ static bool g_editor_open = false;
 static UINT_PTR g_idle_timer = 0;
 static EditorHeaderInfo g_header_info;
 static const int WIN_HEADER_HEIGHT = 24;
+static int g_last_parent_w = 0;
+static int g_last_parent_h = 0;
+
+static void resize_embedded_editor_to_parent() {
+    if (!g_parent_hwnd || !g_editor_hwnd) return;
+    RECT rc = {};
+    if (!GetClientRect(g_parent_hwnd, &rc)) return;
+    int w = rc.right - rc.left;
+    int h = rc.bottom - rc.top;
+    if (w <= 0 || h <= 0) return;
+    if (w == g_last_parent_w && h == g_last_parent_h) return;
+    g_last_parent_w = w;
+    g_last_parent_h = h;
+    MoveWindow(g_editor_hwnd, 0, 0, w, h, TRUE);
+}
 
 static LRESULT CALLBACK EditorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_TIMER:
+        resize_embedded_editor_to_parent();
         if (g_active_loader) g_active_loader->editor_idle();
         return 0;
     case WM_CLOSE:
@@ -168,7 +184,11 @@ bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
     g_active_loader = loader;
     g_parent_hwnd = parent;
     g_editor_open = true;
+    g_last_parent_w = 0;
+    g_last_parent_h = 0;
 
+    ShowWindow(g_editor_hwnd, SW_SHOW);
+    resize_embedded_editor_to_parent();
     g_idle_timer = SetTimer(g_editor_hwnd, 1, 16, nullptr);
     keepsake_debug_log("bridge: editor embedded in host window %p\n",
                        static_cast<void *>(parent));
@@ -189,6 +209,8 @@ void gui_close_editor(BridgeLoader *loader) {
     }
     g_active_loader = nullptr;
     g_parent_hwnd = nullptr;
+    g_last_parent_w = 0;
+    g_last_parent_h = 0;
     g_editor_open = false;
 }
 
