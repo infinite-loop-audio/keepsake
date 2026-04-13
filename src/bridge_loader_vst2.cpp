@@ -3,6 +3,7 @@
 //
 
 #include "bridge_loader.h"
+#include "debug_log.h"
 #include <vestige/vestige.h>
 #include <atomic>
 #include <cstdio>
@@ -171,8 +172,18 @@ public:
     bool open_editor(void *parent) override {
         if (!effect || !effect->dispatcher) return false;
         s_editor_open_edit_depth.store(0);
+#ifdef _WIN32
+        unsigned long thread_id = static_cast<unsigned long>(GetCurrentThreadId());
+#else
+        unsigned long thread_id = 0;
+#endif
+        keepsake_debug_log("bridge/vst2: effEditOpen begin parent=%p effect=%p thread=%lu\n",
+                           parent, static_cast<void *>(effect), thread_id);
         intptr_t result =
             effect->dispatcher(effect, effEditOpen, 0, 0, parent, 0.0f);
+        keepsake_debug_log("bridge/vst2: effEditOpen end result=%lld parent=%p edit_depth=%d\n",
+                           static_cast<long long>(result), parent,
+                           s_editor_open_edit_depth.load());
         return result != 0;
     }
 

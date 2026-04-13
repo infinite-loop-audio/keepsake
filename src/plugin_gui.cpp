@@ -7,6 +7,7 @@
 
 #ifdef _WIN32
 static const int GUI_OPEN_TIMEOUT_MS = 45000;
+static const int GUI_EMBED_TIMEOUT_MS = 1500;
 #else
 static const int GUI_OPEN_TIMEOUT_MS = 5000;
 #endif
@@ -188,7 +189,7 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
     }
 
     if (!send_and_wait(kp, IPC_OP_EDITOR_SET_PARENT, &handle, sizeof(handle),
-                       nullptr, GUI_OPEN_TIMEOUT_MS)) {
+                       nullptr, GUI_EMBED_TIMEOUT_MS)) {
         if (platform_process_alive(kp->bridge->proc)) {
             keepsake_debug_log("keepsake: gui_set_parent embed failed, switching to floating fallback\n");
             kp->gui_embed_failed = true;
