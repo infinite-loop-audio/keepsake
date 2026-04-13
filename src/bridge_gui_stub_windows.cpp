@@ -27,6 +27,58 @@ static int g_last_parent_w = 0;
 static int g_last_parent_h = 0;
 static const DWORD EMBED_OPEN_TIMEOUT_MS = 1500;
 
+static void log_window_info(const char *label, HWND hwnd) {
+    if (!hwnd) {
+        keepsake_debug_log("bridge: %s hwnd=(null)\n", label);
+        return;
+    }
+    char klass[128] = {};
+    GetClassNameA(hwnd, klass, sizeof(klass));
+    RECT rc = {};
+    GetWindowRect(hwnd, &rc);
+    LONG_PTR style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+    LONG_PTR exstyle = GetWindowLongPtrA(hwnd, GWL_EXSTYLE);
+    HWND parent = GetParent(hwnd);
+    HWND owner = GetWindow(hwnd, GW_OWNER);
+    keepsake_debug_log(
+        "bridge: %s hwnd=%p class='%s' style=0x%llx exstyle=0x%llx parent=%p owner=%p visible=%d rect=%ld,%ld,%ld,%ld\n",
+        label,
+        static_cast<void *>(hwnd),
+        klass,
+        static_cast<long long>(style),
+        static_cast<long long>(exstyle),
+        static_cast<void *>(parent),
+        static_cast<void *>(owner),
+        IsWindowVisible(hwnd) ? 1 : 0,
+        static_cast<long>(rc.left),
+        static_cast<long>(rc.top),
+        static_cast<long>(rc.right),
+        static_cast<long>(rc.bottom));
+}
+
+static BOOL CALLBACK LogChildWindowsProc(HWND hwnd, LPARAM lParam) {
+    const char *label = reinterpret_cast<const char *>(lParam);
+    log_window_info(label, hwnd);
+    return TRUE;
+}
+
+static BOOL CALLBACK LogThreadWindowsProc(HWND hwnd, LPARAM) {
+    log_window_info("thread-window", hwnd);
+    EnumChildWindows(hwnd, LogChildWindowsProc, reinterpret_cast<LPARAM>("thread-child"));
+    return TRUE;
+}
+
+static void log_window_tree(const char *phase, HWND parent, HWND wrapper, HWND panel) {
+    keepsake_debug_log("bridge: window-tree phase=%s\n", phase);
+    log_window_info("host-parent", parent);
+    log_window_info("wrapper", wrapper);
+    log_window_info("panel", panel);
+    if (parent) EnumChildWindows(parent, LogChildWindowsProc, reinterpret_cast<LPARAM>("host-child"));
+    DWORD tid = GetCurrentThreadId();
+    keepsake_debug_log("bridge: window-tree thread=%lu\n", static_cast<unsigned long>(tid));
+    EnumThreadWindows(tid, LogThreadWindowsProc, 0);
+}
+
 static void position_and_show_floating_window(HWND hwnd) {
     if (!hwnd) return;
 
@@ -269,6 +321,7 @@ bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
     g_last_parent_w = 0;
     g_last_parent_h = 0;
     g_idle_timer = SetTimer(g_editor_hwnd, 1, 16, nullptr);
+    log_window_tree("before-embed-open", parent, g_editor_hwnd, editor_panel);
 
     keepsake_debug_log("bridge: editor embed parent=%p child=%p\n",
                        static_cast<void *>(parent), static_cast<void *>(g_editor_hwnd));
@@ -293,6 +346,7 @@ bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
         if (GetTickCount() - start >= EMBED_OPEN_TIMEOUT_MS) {
             keepsake_debug_log("bridge: embedded editor open timed out after %lums\n",
                                static_cast<unsigned long>(EMBED_OPEN_TIMEOUT_MS));
+            log_window_tree("embed-timeout", parent, g_editor_hwnd, editor_panel);
             open_thread.detach();
             if (g_idle_timer) {
                 KillTimer(g_editor_hwnd, g_idle_timer);
@@ -330,6 +384,7 @@ bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
     ShowWindow(g_editor_hwnd, SW_SHOW);
     ShowWindow(editor_panel, SW_SHOW);
     resize_embedded_editor_to_parent();
+    log_window_tree("after-embed-open", parent, g_editor_hwnd, editor_panel);
     keepsake_debug_log("bridge: editor embedded in host window %p\n",
                        static_cast<void *>(parent));
     return true;
