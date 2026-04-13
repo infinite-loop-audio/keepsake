@@ -3,9 +3,15 @@
 //
 
 #include "plugin_internal.h"
+#include "debug_log.h"
 
 static bool plugin_init(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
+    keepsake_debug_log("keepsake: plugin_init desc=%s path=%s format=%u isolation=%d\n",
+                       kp->descriptor ? kp->descriptor->id : "(null)",
+                       kp->vst2_path.c_str(),
+                       kp->format,
+                       static_cast<int>(kp->isolation));
     launch_async_init(kp);
     return true;
 }
@@ -43,6 +49,10 @@ static bool plugin_activate(const clap_plugin_t *plugin,
                             uint32_t min_frames,
                             uint32_t max_frames) {
     auto *kp = get(plugin);
+    keepsake_debug_log("keepsake: plugin_activate begin desc=%s sr=%.1f min=%u max=%u bridge_ok=%d crashed=%d\n",
+                       kp->descriptor ? kp->descriptor->id : "(null)",
+                       sample_rate, min_frames, max_frames,
+                       kp->bridge_ok ? 1 : 0, kp->crashed ? 1 : 0);
     sync_async_init(kp);
     if (kp->crashed) return false;
     (void)min_frames;
@@ -75,17 +85,20 @@ static bool plugin_activate(const clap_plugin_t *plugin,
         return false;
     }
 
-    if (!platform_shm_create(kp->shm, shm_name, shm_size)) return false;
-    shm_init_sync(shm_control(kp->shm.ptr));
-
     uint32_t name_len = static_cast<uint32_t>(shm_name.size());
     uint32_t shm_size32 = static_cast<uint32_t>(shm_size);
+    if (!platform_shm_create(kp->shm, shm_name, shm_size)) return false;
+    shm_init_sync(shm_control(kp->shm.ptr));
+    keepsake_debug_log("keepsake: plugin_activate shm name=%s size=%u\n",
+                       shm_name.c_str(), shm_size32);
     std::vector<uint8_t> shm_payload(4 + name_len + 4);
     memcpy(shm_payload.data(), &name_len, 4);
     memcpy(shm_payload.data() + 4, shm_name.data(), name_len);
     memcpy(shm_payload.data() + 4 + name_len, &shm_size32, 4);
 
     if (kp->bridge_ok) {
+        keepsake_debug_log("keepsake: plugin_activate sending SET_SHM/ACTIVATE instance=%u\n",
+                           kp->instance_id);
         if (!send_and_wait(kp, IPC_OP_SET_SHM, shm_payload.data(),
                            static_cast<uint32_t>(shm_payload.size()))) {
             platform_shm_close(kp->shm);
@@ -98,11 +111,15 @@ static bool plugin_activate(const clap_plugin_t *plugin,
             return false;
         }
     } else {
+        keepsake_debug_log("keepsake: plugin_activate queue async activation desc=%s\n",
+                           kp->descriptor ? kp->descriptor->id : "(null)");
         queue_async_activation(kp, shm_name, shm_size32, sample_rate,
                                max_frames, false);
     }
 
     kp->active = true;
+    keepsake_debug_log("keepsake: plugin_activate OK instance=%u active=%d\n",
+                       kp->instance_id, kp->active ? 1 : 0);
     return true;
 }
 
@@ -120,6 +137,8 @@ static void plugin_deactivate(const clap_plugin_t *plugin) {
 
 static bool plugin_start_processing(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
+    keepsake_debug_log("keepsake: plugin_start_processing begin instance=%u active=%d bridge_ok=%d\n",
+                       kp->instance_id, kp->active ? 1 : 0, kp->bridge_ok ? 1 : 0);
     sync_async_init(kp);
     if (!kp->active || kp->crashed) return false;
     if (kp->bridge_ok) {
@@ -132,6 +151,8 @@ static bool plugin_start_processing(const clap_plugin_t *plugin) {
         }
     }
     kp->processing = true;
+    keepsake_debug_log("keepsake: plugin_start_processing OK instance=%u\n",
+                       kp->instance_id);
     return true;
 }
 

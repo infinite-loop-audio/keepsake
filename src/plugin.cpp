@@ -4,6 +4,7 @@
 //
 
 #include "plugin_internal.h"
+#include "debug_log.h"
 
 static const char *ipc_opcode_name(uint32_t opcode) {
     switch (opcode) {
@@ -36,6 +37,8 @@ bool send_and_wait(KeepsakePlugin *kp, uint32_t opcode,
                     std::vector<uint8_t> *ok_payload,
                     int timeout_ms) {
     if (kp->crashed || !kp->bridge) return false;
+    keepsake_debug_log("keepsake: send_and_wait begin opcode=%s instance=%u timeout=%d\n",
+                       ipc_opcode_name(opcode), kp->instance_id, timeout_ms);
     std::lock_guard<std::mutex> lock(kp->ipc_mutex);
     bool ok = send_and_wait_bridge(kp->bridge, kp->instance_id, opcode,
                                    payload, size, ok_payload, timeout_ms);
@@ -58,6 +61,9 @@ bool send_and_wait(KeepsakePlugin *kp, uint32_t opcode,
             kp->crashed = true;
             break;
         }
+    } else {
+        keepsake_debug_log("keepsake: send_and_wait OK opcode=%s instance=%u\n",
+                           ipc_opcode_name(opcode), kp->instance_id);
     }
     return ok;
 }

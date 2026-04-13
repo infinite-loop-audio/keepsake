@@ -3,6 +3,7 @@
 //
 
 #include "bridge_runtime.h"
+#include "debug_log.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -50,9 +51,12 @@ void handle_init(uint32_t /*caller_id*/, const std::vector<uint8_t> &payload) {
     uint32_t format_id;
     memcpy(&format_id, payload.data(), sizeof(format_id));
     std::string path(payload.begin() + 4, payload.end());
+    keepsake_debug_log("bridge: INIT begin format=%u path=%s\n",
+                       format_id, path.c_str());
 
     auto *loader = create_loader(static_cast<PluginFormat>(format_id));
     if (!loader) {
+        keepsake_debug_log("bridge: INIT unsupported format=%u\n", format_id);
         ipc_write_error(g_pipe_out, "unsupported format");
         return;
     }
@@ -63,7 +67,9 @@ void handle_init(uint32_t /*caller_id*/, const std::vector<uint8_t> &payload) {
 #endif
 
     if (load_on_main_thread) {
+        keepsake_debug_log("bridge: INIT load on main thread path=%s\n", path.c_str());
         if (!loader->load(path)) {
+            keepsake_debug_log("bridge: INIT load FAILED path=%s\n", path.c_str());
             ipc_write_error(g_pipe_out, "failed to load plugin");
             delete loader;
             return;
@@ -106,7 +112,9 @@ void handle_init(uint32_t /*caller_id*/, const std::vector<uint8_t> &payload) {
             return;
         }
 #else
+        keepsake_debug_log("bridge: INIT load direct path=%s\n", path.c_str());
         if (!loader->load(path)) {
+            keepsake_debug_log("bridge: INIT load FAILED path=%s\n", path.c_str());
             ipc_write_error(g_pipe_out, "failed to load plugin");
             delete loader;
             return;
@@ -123,6 +131,9 @@ void handle_init(uint32_t /*caller_id*/, const std::vector<uint8_t> &payload) {
     loader->get_info(info, extra);
     inst->num_inputs = info.num_inputs;
     inst->num_outputs = info.num_outputs;
+    keepsake_debug_log("bridge: INIT loaded path=%s in=%d out=%d params=%d flags=%d\n",
+                       path.c_str(), info.num_inputs, info.num_outputs,
+                       info.num_params, info.flags);
 
     g_instances[inst->id] = inst;
 
@@ -135,5 +146,7 @@ void handle_init(uint32_t /*caller_id*/, const std::vector<uint8_t> &payload) {
     }
 
     ipc_write_ok(g_pipe_out, resp.data(), static_cast<uint32_t>(total));
+    keepsake_debug_log("bridge: INIT OK instance=%u path=%s\n",
+                       inst->id, path.c_str());
     fprintf(stderr, "bridge: created instance %u for '%s'\n", inst->id, path.c_str());
 }

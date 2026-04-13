@@ -3,6 +3,7 @@
 //
 
 #include "bridge_runtime.h"
+#include "debug_log.h"
 
 #include <cstdio>
 #include <cstring>
@@ -21,12 +22,17 @@ void handle_set_shm(PluginInstance *inst, const std::vector<uint8_t> &payload) {
     std::string name(payload.data() + 4, payload.data() + 4 + name_len);
     uint32_t shm_size;
     memcpy(&shm_size, payload.data() + 4 + name_len, 4);
+    keepsake_debug_log("bridge: SET_SHM begin instance=%u name=%s size=%u\n",
+                       inst ? inst->id : 0, name.c_str(), shm_size);
 
     if (inst->shm.ptr) platform_shm_close(inst->shm);
     if (!platform_shm_open(inst->shm, name, shm_size)) {
+        keepsake_debug_log("bridge: SET_SHM FAILED instance=%u name=%s\n",
+                           inst ? inst->id : 0, name.c_str());
         ipc_write_error(g_pipe_out, "failed to open shared memory");
         return;
     }
+    keepsake_debug_log("bridge: SET_SHM OK instance=%u\n", inst ? inst->id : 0);
     ipc_write_ok(g_pipe_out);
 }
 
@@ -37,10 +43,14 @@ void handle_activate(PluginInstance *inst, const std::vector<uint8_t> &payload) 
     }
     IpcActivatePayload ap;
     memcpy(&ap, payload.data(), sizeof(ap));
+    keepsake_debug_log("bridge: ACTIVATE begin instance=%u sr=%.1f max=%u\n",
+                       inst ? inst->id : 0, ap.sample_rate, ap.max_frames);
     inst->max_frames = ap.max_frames;
     inst->loader->activate(ap.sample_rate, ap.max_frames);
     inst->active = true;
     bridge_audio_start(inst);
+    keepsake_debug_log("bridge: ACTIVATE OK instance=%u active=%d\n",
+                       inst ? inst->id : 0, inst->active ? 1 : 0);
     ipc_write_ok(g_pipe_out);
 }
 
@@ -135,9 +145,13 @@ void handle_editor_get_rect(PluginInstance *inst) {
 
 void handle_deactivate(PluginInstance *inst) {
     if (inst->loader && inst->active) {
+        keepsake_debug_log("bridge: DEACTIVATE begin instance=%u\n",
+                           inst ? inst->id : 0);
         inst->active = false;
         bridge_audio_stop(inst);
         inst->loader->deactivate();
     }
+    keepsake_debug_log("bridge: DEACTIVATE OK instance=%u\n",
+                       inst ? inst->id : 0);
     ipc_write_ok(g_pipe_out);
 }

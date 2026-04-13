@@ -3,6 +3,7 @@
 //
 
 #include "plugin_internal.h"
+#include "debug_log.h"
 #include <chrono>
 #include <thread>
 
@@ -14,6 +15,8 @@ bool send_and_wait_bridge(BridgeProcess *bridge,
                           std::vector<uint8_t> *ok_payload,
                           int timeout_ms) {
     if (!bridge) return false;
+    keepsake_debug_log("keepsake: bridge send opcode=0x%02X instance=%u timeout=%d\n",
+                       opcode, instance_id, timeout_ms);
     if (!ipc_write_instance_msg(bridge->proc.pipe_to, opcode,
                                 instance_id, payload, size))
         return false;
@@ -22,6 +25,8 @@ bool send_and_wait_bridge(BridgeProcess *bridge,
     std::vector<uint8_t> resp_payload;
     if (!ipc_read_msg(bridge->proc.pipe_from, resp_op, resp_payload, timeout_ms))
         return false;
+    keepsake_debug_log("keepsake: bridge recv opcode=0x%02X instance=%u size=%zu\n",
+                       resp_op, instance_id, resp_payload.size());
     if (resp_op == IPC_OP_ERROR) {
         std::string msg(resp_payload.begin(), resp_payload.end());
         fprintf(stderr, "keepsake: bridge error: %s\n", msg.c_str());
@@ -94,18 +99,31 @@ void launch_async_init(KeepsakePlugin *kp) {
     state->format = kp->format;
     state->isolation = kp->isolation;
     kp->async_init = state;
+    keepsake_debug_log("keepsake: launch_async_init desc=%s path=%s format=%u isolation=%d\n",
+                       kp->descriptor ? kp->descriptor->id : "(null)",
+                       kp->vst2_path.c_str(),
+                       kp->format,
+                       static_cast<int>(kp->isolation));
 
     std::thread([state]() {
+        keepsake_debug_log("keepsake: async thread acquire bridge path=%s format=%u isolation=%d\n",
+                           state->plugin_path.c_str(),
+                           state->format,
+                           static_cast<int>(state->isolation));
         BridgeProcess *bridge = state->pool->acquire(
             state->bridge_binary, state->plugin_path, state->format,
             state->isolation);
         if (!bridge) {
+            keepsake_debug_log("keepsake: async acquire bridge FAILED path=%s\n",
+                               state->plugin_path.c_str());
             std::lock_guard<std::mutex> lock(state->mutex);
             state->completed = true;
             state->cv.notify_all();
             request_host_refresh(state->host);
             return;
         }
+        keepsake_debug_log("keepsake: async acquire bridge OK pid=%d\n",
+                           static_cast<int>(bridge->proc.pid));
 
         {
             std::lock_guard<std::mutex> lock(state->mutex);
@@ -141,7 +159,12 @@ void launch_async_init(KeepsakePlugin *kp) {
             num_outputs = pi.num_outputs;
             num_params = pi.num_params;
             has_editor = (pi.flags & 1) != 0;
+            keepsake_debug_log("keepsake: async INIT OK instance=%u in=%d out=%d params=%d editor=%d\n",
+                               instance_id, num_inputs, num_outputs, num_params,
+                               has_editor ? 1 : 0);
         } else {
+            keepsake_debug_log("keepsake: async INIT FAILED path=%s ok=%d payload=%zu\n",
+                               state->plugin_path.c_str(), ok ? 1 : 0, ok_data.size());
             ok = false;
         }
 
@@ -176,9 +199,15 @@ void launch_async_init(KeepsakePlugin *kp) {
                                           static_cast<uint32_t>(shm_payload.size()),
                                           nullptr, 3000);
                 if (ok) {
+                    keepsake_debug_log("keepsake: async SET_SHM OK instance=%u size=%u\n",
+                                       instance_id, shm_size);
                     IpcActivatePayload ap = { sample_rate, max_frames };
                     ok = send_and_wait_bridge(bridge, instance_id, IPC_OP_ACTIVATE,
                                               &ap, sizeof(ap), nullptr, 3000);
+                    if (ok) {
+                        keepsake_debug_log("keepsake: async ACTIVATE OK instance=%u sr=%.1f max=%u\n",
+                                           instance_id, sample_rate, max_frames);
+                    }
                 }
                 if (ok) {
                     std::lock_guard<std::mutex> lock(state->mutex);
@@ -190,6 +219,8 @@ void launch_async_init(KeepsakePlugin *kp) {
                 ok = send_and_wait_bridge(bridge, instance_id, IPC_OP_START_PROC,
                                           nullptr, 0, nullptr, 3000);
                 if (ok) {
+                    keepsake_debug_log("keepsake: async START_PROC OK instance=%u\n",
+                                       instance_id);
                     std::lock_guard<std::mutex> lock(state->mutex);
                     state->start_sent = true;
                 }
@@ -213,6 +244,8 @@ void launch_async_init(KeepsakePlugin *kp) {
         }
 
         if (!ok) {
+            keepsake_debug_log("keepsake: async init final FAILED path=%s\n",
+                               state->plugin_path.c_str());
             bool owns_bridge = false;
             {
                 std::lock_guard<std::mutex> lock(state->mutex);
@@ -221,6 +254,8 @@ void launch_async_init(KeepsakePlugin *kp) {
             }
             if (owns_bridge) state->pool->abandon(bridge);
         }
+        keepsake_debug_log("keepsake: async init final completed success=%d instance=%u\n",
+                           ok ? 1 : 0, instance_id);
 
         request_host_refresh(state->host);
     }).detach();

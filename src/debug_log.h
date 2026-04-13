@@ -10,6 +10,7 @@ static inline void keepsake_debug_vlog(const char *fmt, va_list args) {
     va_list stderr_args;
     va_copy(stderr_args, args);
     vfprintf(stderr, fmt, stderr_args);
+    fflush(stderr);
     va_end(stderr_args);
 
     char temp_path[MAX_PATH];
