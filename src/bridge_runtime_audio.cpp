@@ -3,16 +3,61 @@
 //
 
 #include "bridge_runtime.h"
+#include "debug_log.h"
 
-#ifndef _WIN32
 #include <cstdio>
 
-static void *audio_thread_func(void *arg) {
-    auto *inst = static_cast<PluginInstance *>(arg);
+#ifdef _WIN32
+#include <process.h>
+#endif
+
+static void bridge_process_shm_request(PluginInstance *inst) {
     auto *ctrl = shm_control(inst->shm.ptr);
 
     std::vector<float *> in_ptrs(static_cast<size_t>(inst->num_inputs));
     std::vector<float *> out_ptrs(static_cast<size_t>(inst->num_outputs));
+
+    uint32_t nframes = ctrl->num_frames;
+    if (nframes > inst->max_frames) nframes = inst->max_frames;
+
+    keepsake_debug_log("bridge: process request instance=%u frames=%u midi=%u params=%u state=%u\n",
+                       inst->id, nframes, ctrl->midi_count, ctrl->param_count,
+                       shm_load_acquire(&ctrl->state));
+
+    for (uint32_t p = 0; p < ctrl->param_count && p < 64; p++) {
+        inst->loader->set_param(ctrl->params[p].index, ctrl->params[p].value);
+    }
+    for (uint32_t m = 0; m < ctrl->midi_count && m < SHM_MAX_MIDI_EVENTS; m++) {
+        inst->loader->send_midi(ctrl->midi_events[m].delta_frames,
+                                ctrl->midi_events[m].data);
+    }
+
+    for (int i = 0; i < inst->num_inputs; i++) {
+        in_ptrs[static_cast<size_t>(i)] =
+            shm_audio_inputs(inst->shm.ptr, i, inst->max_frames);
+    }
+    for (int i = 0; i < inst->num_outputs; i++) {
+        out_ptrs[static_cast<size_t>(i)] =
+            shm_audio_outputs(inst->shm.ptr, inst->num_inputs, i, inst->max_frames);
+    }
+
+    inst->loader->process(
+        inst->num_inputs > 0 ? in_ptrs.data() : nullptr,
+        inst->num_inputs,
+        inst->num_outputs > 0 ? out_ptrs.data() : nullptr,
+        inst->num_outputs,
+        nframes);
+
+    shm_store_release(&ctrl->state, SHM_STATE_PROCESS_DONE);
+    keepsake_debug_log("bridge: process done instance=%u state=%u\n",
+                       inst->id, shm_load_acquire(&ctrl->state));
+}
+
+#ifndef _WIN32
+
+static void *audio_thread_func(void *arg) {
+    auto *inst = static_cast<PluginInstance *>(arg);
+    auto *ctrl = shm_control(inst->shm.ptr);
 
     fprintf(stderr, "bridge: audio thread started for instance %u\n", inst->id);
 
@@ -35,34 +80,7 @@ static void *audio_thread_func(void *arg) {
             break;
         }
 
-        uint32_t nframes = ctrl->num_frames;
-        if (nframes > inst->max_frames) nframes = inst->max_frames;
-
-        for (uint32_t p = 0; p < ctrl->param_count && p < 64; p++) {
-            inst->loader->set_param(ctrl->params[p].index, ctrl->params[p].value);
-        }
-        for (uint32_t m = 0; m < ctrl->midi_count && m < SHM_MAX_MIDI_EVENTS; m++) {
-            inst->loader->send_midi(ctrl->midi_events[m].delta_frames,
-                                    ctrl->midi_events[m].data);
-        }
-
-        for (int i = 0; i < inst->num_inputs; i++) {
-            in_ptrs[static_cast<size_t>(i)] =
-                shm_audio_inputs(inst->shm.ptr, i, inst->max_frames);
-        }
-        for (int i = 0; i < inst->num_outputs; i++) {
-            out_ptrs[static_cast<size_t>(i)] =
-                shm_audio_outputs(inst->shm.ptr, inst->num_inputs, i, inst->max_frames);
-        }
-
-        inst->loader->process(
-            inst->num_inputs > 0 ? in_ptrs.data() : nullptr,
-            inst->num_inputs,
-            inst->num_outputs > 0 ? out_ptrs.data() : nullptr,
-            inst->num_outputs,
-            nframes);
-
-        ctrl->state = SHM_STATE_PROCESS_DONE;
+        bridge_process_shm_request(inst);
         pthread_cond_signal(&ctrl->cond);
         pthread_mutex_unlock(&ctrl->mutex);
     }
@@ -87,6 +105,34 @@ void bridge_audio_stop(PluginInstance *inst) {
     inst->audio_thread = 0;
 }
 #else
-void bridge_audio_start(PluginInstance *) {}
-void bridge_audio_stop(PluginInstance *) {}
+static unsigned __stdcall audio_thread_func(void *arg) {
+    auto *inst = static_cast<PluginInstance *>(arg);
+    auto *ctrl = shm_control(inst->shm.ptr);
+
+    fprintf(stderr, "bridge: audio thread started for instance %u\n", inst->id);
+
+    while (inst->active) {
+        if (shm_load_acquire(&ctrl->state) == SHM_STATE_PROCESS_REQUESTED) {
+            bridge_process_shm_request(inst);
+            continue;
+        }
+        Sleep(1);
+    }
+
+    fprintf(stderr, "bridge: audio thread stopped for instance %u\n", inst->id);
+    return 0;
+}
+
+void bridge_audio_start(PluginInstance *inst) {
+    if (!inst->shm.ptr || inst->audio_thread != INVALID_HANDLE_VALUE) return;
+    uintptr_t th = _beginthreadex(nullptr, 0, audio_thread_func, inst, 0, nullptr);
+    if (th != 0) inst->audio_thread = reinterpret_cast<HANDLE>(th);
+}
+
+void bridge_audio_stop(PluginInstance *inst) {
+    if (inst->audio_thread == INVALID_HANDLE_VALUE) return;
+    WaitForSingleObject(inst->audio_thread, 1000);
+    CloseHandle(inst->audio_thread);
+    inst->audio_thread = INVALID_HANDLE_VALUE;
+}
 #endif

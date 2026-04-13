@@ -8,6 +8,8 @@ local ui_timeout_ms = tonumber(os.getenv("KEEPSAKE_REAPER_SMOKE_UI_TIMEOUT_MS") 
 local run_transport = os.getenv("KEEPSAKE_REAPER_SMOKE_RUN_TRANSPORT") == "1"
 local play_timeout_ms = tonumber(os.getenv("KEEPSAKE_REAPER_SMOKE_PLAY_TIMEOUT_MS") or "5000")
 local play_hold_ms = tonumber(os.getenv("KEEPSAKE_REAPER_SMOKE_PLAY_HOLD_MS") or "1000")
+local require_audio = os.getenv("KEEPSAKE_REAPER_SMOKE_REQUIRE_AUDIO") == "1"
+local min_peak = tonumber(os.getenv("KEEPSAKE_REAPER_SMOKE_MIN_PEAK") or "0.00001")
 
 local state = {
   started_at = reaper.time_precise(),
@@ -15,6 +17,8 @@ local state = {
   finished = false,
   track = nil,
   fx_index = -1,
+  saw_audio = false,
+  max_peak = 0.0,
 }
 
 local function elapsed_ms()
@@ -65,6 +69,22 @@ end
 
 local function get_playing()
   return (reaper.GetPlayState() & 1) == 1
+end
+
+local function update_audio_activity()
+  if not state.track then
+    return
+  end
+
+  local left = reaper.Track_GetPeakInfo(state.track, 0) or 0.0
+  local right = reaper.Track_GetPeakInfo(state.track, 1) or 0.0
+  local peak = math.max(left, right)
+  if peak > state.max_peak then
+    state.max_peak = peak
+  end
+  if peak >= min_peak then
+    state.saw_audio = true
+  end
 end
 
 local function prepare_midi_clip()
@@ -224,6 +244,7 @@ local function step()
   end
 
   if state.stage == "hold-play" then
+    update_audio_activity()
     local hold_elapsed = (reaper.time_precise() - state.play_hold_started_at) * 1000.0
     if hold_elapsed >= play_hold_ms then
       log_line("transport-stop-start")
@@ -239,8 +260,15 @@ local function step()
   end
 
   if state.stage == "wait-stop" then
+    update_audio_activity()
     if not get_playing() then
       log_line("transport-stopped")
+      log_line(string.format("audio-peak max=%.6f saw_audio=%d",
+                             state.max_peak, state.saw_audio and 1 or 0))
+      if require_audio and not state.saw_audio then
+        finish(false, "audio-silent")
+        return
+      end
       if open_ui then
         reaper.TrackFX_SetOpen(state.track, state.fx_index, false)
         log_line(string.format("fx-ui-close fx-index=%d", state.fx_index))

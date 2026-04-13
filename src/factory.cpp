@@ -3,6 +3,57 @@
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
+#include <algorithm>
+#include <unordered_set>
+
+namespace {
+
+std::string normalize_path_key(const std::string &path) {
+    if (path.empty()) return {};
+    std::error_code ec;
+    fs::path p(path);
+    fs::path normalized = fs::exists(p, ec) ? fs::weakly_canonical(p, ec)
+                                            : p.lexically_normal();
+    std::string key = normalized.empty() ? p.lexically_normal().string()
+                                         : normalized.string();
+#ifdef _WIN32
+    std::replace(key.begin(), key.end(), '/', '\\');
+    std::transform(key.begin(), key.end(), key.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+#endif
+    return key;
+}
+
+void append_unique_scan_path(std::vector<std::string> &paths,
+                             std::unordered_set<std::string> &seen,
+                             const std::string &path) {
+    if (path.empty()) return;
+    std::string key = normalize_path_key(path);
+    if (key.empty()) key = path;
+    if (!seen.insert(key).second) return;
+    paths.push_back(path);
+}
+
+void dedupe_plugins_by_file_path(std::vector<Vst2PluginInfo> &plugins) {
+    std::unordered_set<std::string> seen;
+    std::vector<Vst2PluginInfo> deduped;
+    deduped.reserve(plugins.size());
+
+    for (auto &plugin : plugins) {
+        std::string key = normalize_path_key(plugin.file_path);
+        if (key.empty()) key = plugin.file_path;
+        if (!seen.insert(key).second) {
+            fprintf(stderr, "keepsake: deduped duplicate scan result '%s'\n",
+                    plugin.file_path.c_str());
+            continue;
+        }
+        deduped.push_back(std::move(plugin));
+    }
+
+    plugins = std::move(deduped);
+}
+
+} // namespace
 
 std::vector<PluginEntry> s_entries;
 std::string s_bridge_path;
@@ -132,9 +183,16 @@ bool keepsake_factory_init(const char *plugin_path) {
     auto vst2_paths = cfg.replace_default_vst2_paths
                     ? std::vector<std::string>{}
                     : get_scan_paths();
-    for (const auto &path : cfg.extra_vst2_paths) {
-        vst2_paths.push_back(path);
+    std::unordered_set<std::string> seen_scan_paths;
+    std::vector<std::string> deduped_vst2_paths;
+    deduped_vst2_paths.reserve(vst2_paths.size() + cfg.extra_vst2_paths.size());
+    for (const auto &path : vst2_paths) {
+        append_unique_scan_path(deduped_vst2_paths, seen_scan_paths, path);
     }
+    for (const auto &path : cfg.extra_vst2_paths) {
+        append_unique_scan_path(deduped_vst2_paths, seen_scan_paths, path);
+    }
+    vst2_paths = std::move(deduped_vst2_paths);
 
     bool allow_cross_arch_vst2_scan =
         targeted_vst2_override || cfg.replace_default_vst2_paths;
@@ -145,6 +203,7 @@ bool keepsake_factory_init(const char *plugin_path) {
         // Cross-arch plugins require keepsake-scan to populate the
         // cache. They're too slow to scan during host init.
     }
+    dedupe_plugins_by_file_path(all_plugins);
     fprintf(stderr, "keepsake: found %zu VST2 plugin(s)\n", all_plugins.size());
 
     // VST3 and AU scanning is deferred — too slow for host init.
@@ -177,6 +236,7 @@ bool keepsake_factory_init(const char *plugin_path) {
             for (const auto &dir : vst3_paths) {
                 scan_vst3_directory(dir, all_plugins);
             }
+            dedupe_plugins_by_file_path(all_plugins);
             fprintf(stderr, "keepsake: found %zu VST3 plugin(s)\n",
                     all_plugins.size() - before);
         }
@@ -186,6 +246,7 @@ bool keepsake_factory_init(const char *plugin_path) {
         {
             size_t before = all_plugins.size();
             scan_au_plugins(all_plugins);
+            dedupe_plugins_by_file_path(all_plugins);
             fprintf(stderr, "keepsake: found %zu AU plugin(s)\n",
                     all_plugins.size() - before);
         }

@@ -30,6 +30,8 @@ bool gui_open_editor_embedded(BridgeLoader * /*loader*/, uint64_t /*native_handl
     return false;
 }
 
+void gui_set_editor_transient(uint64_t) {}
+
 void gui_close_editor(BridgeLoader *loader) {
     if (!g_editor_open) return;
 

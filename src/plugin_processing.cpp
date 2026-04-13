@@ -3,6 +3,7 @@
 //
 
 #include "plugin_internal.h"
+#include "debug_log.h"
 
 static void output_silence(const clap_process_t *process) {
     for (uint32_t i = 0; i < process->audio_outputs_count; i++) {
@@ -114,6 +115,31 @@ clap_process_status plugin_process(const clap_plugin_t *plugin,
     pthread_mutex_unlock(&ctrl->mutex);
 
     if (!done) {
+        output_silence(process);
+        return CLAP_PROCESS_CONTINUE;
+    }
+#else
+    keepsake_debug_log("keepsake: process request frames=%u midi=%u params=%u state=%u\n",
+                       frames, midi_idx, param_idx, shm_load_acquire(&ctrl->state));
+    shm_store_release(&ctrl->state, SHM_STATE_PROCESS_REQUESTED);
+
+    uint64_t deadline = GetTickCount64() + 100;
+    bool done = false;
+    while (GetTickCount64() < deadline) {
+        uint32_t state = shm_load_acquire(&ctrl->state);
+        if (state == SHM_STATE_PROCESS_DONE) {
+            done = true;
+            break;
+        }
+        Sleep(0);
+    }
+
+    keepsake_debug_log("keepsake: process wait done=%d final_state=%u\n",
+                       done ? 1 : 0, shm_load_acquire(&ctrl->state));
+    shm_store_release(&ctrl->state, SHM_STATE_IDLE);
+
+    if (!done) {
+        keepsake_debug_log("keepsake: process timeout -> silence\n");
         output_silence(process);
         return CLAP_PROCESS_CONTINUE;
     }

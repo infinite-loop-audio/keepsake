@@ -13,6 +13,8 @@ param(
   [switch]$OpenUi,
   [int]$UiTimeoutMs = 5000,
   [switch]$RunTransport,
+  [switch]$RequireAudio,
+  [double]$MinPeak = 0.00001,
   [int]$PlayTimeoutMs = 5000,
   [int]$PlayHoldMs = 1000,
   [switch]$KeepTemp,
@@ -218,6 +220,7 @@ clap_path_win64=$clapPath
   Write-Host ("config_mode=" + ($(if ($UseDefaultConfig) { "default" } else { "isolated" })))
   Write-Host ("open_ui=" + ($(if ($OpenUi) { 1 } else { 0 })))
   Write-Host ("run_transport=" + ($(if ($RunTransport) { 1 } else { 0 })))
+  Write-Host ("require_audio=" + ($(if ($RequireAudio) { 1 } else { 0 })))
   if ($SyncDefaultInstall) {
     Write-Host "default_install=$defaultInstallBundle"
   }
@@ -233,6 +236,8 @@ clap_path_win64=$clapPath
     KEEPSAKE_REAPER_SMOKE_OPEN_UI = $env:KEEPSAKE_REAPER_SMOKE_OPEN_UI
     KEEPSAKE_REAPER_SMOKE_UI_TIMEOUT_MS = $env:KEEPSAKE_REAPER_SMOKE_UI_TIMEOUT_MS
     KEEPSAKE_REAPER_SMOKE_RUN_TRANSPORT = $env:KEEPSAKE_REAPER_SMOKE_RUN_TRANSPORT
+    KEEPSAKE_REAPER_SMOKE_REQUIRE_AUDIO = $env:KEEPSAKE_REAPER_SMOKE_REQUIRE_AUDIO
+    KEEPSAKE_REAPER_SMOKE_MIN_PEAK = $env:KEEPSAKE_REAPER_SMOKE_MIN_PEAK
     KEEPSAKE_REAPER_SMOKE_PLAY_TIMEOUT_MS = $env:KEEPSAKE_REAPER_SMOKE_PLAY_TIMEOUT_MS
     KEEPSAKE_REAPER_SMOKE_PLAY_HOLD_MS = $env:KEEPSAKE_REAPER_SMOKE_PLAY_HOLD_MS
   }
@@ -247,6 +252,8 @@ clap_path_win64=$clapPath
   $env:KEEPSAKE_REAPER_SMOKE_OPEN_UI = $(if ($OpenUi) { "1" } else { "0" })
   $env:KEEPSAKE_REAPER_SMOKE_UI_TIMEOUT_MS = "$UiTimeoutMs"
   $env:KEEPSAKE_REAPER_SMOKE_RUN_TRANSPORT = $(if ($RunTransport) { "1" } else { "0" })
+  $env:KEEPSAKE_REAPER_SMOKE_REQUIRE_AUDIO = $(if ($RequireAudio) { "1" } else { "0" })
+  $env:KEEPSAKE_REAPER_SMOKE_MIN_PEAK = "$MinPeak"
   $env:KEEPSAKE_REAPER_SMOKE_PLAY_TIMEOUT_MS = "$PlayTimeoutMs"
   $env:KEEPSAKE_REAPER_SMOKE_PLAY_HOLD_MS = "$PlayHoldMs"
 

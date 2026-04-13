@@ -235,6 +235,19 @@ int main(int argc, char *argv[]) {
                 ipc_write_error(g_pipe_out, "EDITOR_SET_PARENT: not ready");
             }
             break;
+        case IPC_OP_EDITOR_SET_TRANSIENT:
+            if (payload.size() >= 8) {
+                uint64_t handle;
+                memcpy(&handle, payload.data(), 8);
+                keepsake_debug_log("bridge: EDITOR_SET_TRANSIENT handle=%p instance=%u\n",
+                                   reinterpret_cast<void *>(static_cast<uintptr_t>(handle)),
+                                   instance_id);
+                gui_set_editor_transient(handle);
+                ipc_write_ok(g_pipe_out);
+            } else {
+                ipc_write_error(g_pipe_out, "EDITOR_SET_TRANSIENT: bad payload");
+            }
+            break;
         case IPC_OP_STOP_PROC:
             inst->processing = false;
             ipc_write_ok(g_pipe_out);

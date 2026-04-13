@@ -6,6 +6,7 @@
 void gui_init() {}
 bool gui_open_editor(BridgeLoader *, const EditorHeaderInfo &) { return false; }
 bool gui_open_editor_embedded(BridgeLoader *, uint64_t) { return false; }
+void gui_set_editor_transient(uint64_t) {}
 void gui_close_editor(BridgeLoader *) {}
 bool gui_get_editor_rect(BridgeLoader *l, int &w, int &h) {
     return l ? l->get_editor_rect(w, h) : false;

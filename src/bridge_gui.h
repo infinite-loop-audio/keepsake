@@ -27,6 +27,9 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header);
 // On macOS, embedded mode is not supported — returns false (use floating).
 bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle);
 
+// Set the transient/owner window for a floating editor.
+void gui_set_editor_transient(uint64_t native_handle);
+
 // Close the editor window.
 void gui_close_editor(BridgeLoader *loader);
 

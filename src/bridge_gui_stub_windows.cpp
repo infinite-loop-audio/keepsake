@@ -13,7 +13,9 @@
 
 static HWND g_editor_hwnd = nullptr;
 static HWND g_parent_hwnd = nullptr;
+static HWND g_owner_hwnd = nullptr;
 static HWND g_header_hwnd = nullptr;
+static HWND g_editor_panel_hwnd = nullptr;
 static BridgeLoader *g_active_loader = nullptr;
 static bool g_editor_open = false;
 static UINT_PTR g_idle_timer = 0;
@@ -21,6 +23,62 @@ static EditorHeaderInfo g_header_info;
 static const int WIN_HEADER_HEIGHT = 24;
 static int g_last_parent_w = 0;
 static int g_last_parent_h = 0;
+
+static void position_and_show_floating_window(HWND hwnd) {
+    if (!hwnd) return;
+
+    RECT wr = {};
+    if (!GetWindowRect(hwnd, &wr)) return;
+
+    RECT work = {};
+    SystemParametersInfoA(SPI_GETWORKAREA, 0, &work, 0);
+
+    const int w = wr.right - wr.left;
+    const int h = wr.bottom - wr.top;
+    const int x = work.left + ((work.right - work.left) - w) / 2;
+    const int y = work.top + ((work.bottom - work.top) - h) / 2;
+
+    SetWindowPos(hwnd, HWND_TOPMOST, x, y, w, h, SWP_SHOWWINDOW);
+    SetWindowPos(hwnd, HWND_NOTOPMOST, x, y, w, h, SWP_SHOWWINDOW);
+    ShowWindow(hwnd, SW_SHOWNORMAL);
+    UpdateWindow(hwnd);
+
+    keepsake_debug_log("bridge: floating editor window=%p pos=%d,%d size=%dx%d visible=%d\n",
+                       static_cast<void *>(hwnd), x, y, w, h,
+                       IsWindowVisible(hwnd) ? 1 : 0);
+}
+
+static void update_floating_owner() {
+    if (!g_editor_hwnd || g_parent_hwnd) return;
+    HWND owner = IsWindow(g_owner_hwnd) ? g_owner_hwnd : nullptr;
+    SetWindowLongPtrA(g_editor_hwnd, GWLP_HWNDPARENT,
+                      reinterpret_cast<LONG_PTR>(owner));
+    keepsake_debug_log("bridge: floating editor owner=%p valid=%d\n",
+                       static_cast<void *>(owner), owner ? 1 : 0);
+}
+
+static void settle_floating_window(BridgeLoader *loader) {
+    if (!g_editor_hwnd) return;
+    for (int i = 0; i < 12; ++i) {
+        MSG msg;
+        while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageA(&msg);
+        }
+        if (loader) loader->editor_idle();
+        if (g_editor_panel_hwnd) {
+            ShowWindow(g_editor_panel_hwnd, SW_SHOW);
+            UpdateWindow(g_editor_panel_hwnd);
+        }
+        position_and_show_floating_window(g_editor_hwnd);
+        Sleep(16);
+    }
+
+    keepsake_debug_log("bridge: floating settle host_visible=%d panel=%p panel_visible=%d\n",
+                       IsWindowVisible(g_editor_hwnd) ? 1 : 0,
+                       static_cast<void *>(g_editor_panel_hwnd),
+                       (g_editor_panel_hwnd && IsWindowVisible(g_editor_panel_hwnd)) ? 1 : 0);
+}
 
 static void resize_embedded_editor_to_parent() {
     if (!g_parent_hwnd || !g_editor_hwnd) return;
@@ -44,6 +102,7 @@ static LRESULT CALLBACK EditorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
     case WM_CLOSE:
         if (g_active_loader) g_active_loader->close_editor();
         g_editor_open = false;
+        g_editor_panel_hwnd = nullptr;
         DestroyWindow(hwnd);
         g_editor_hwnd = nullptr;
         return 0;
@@ -120,13 +179,18 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     AdjustWindowRect(&wr, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, FALSE);
 
     g_editor_hwnd = CreateWindowExA(
-        WS_EX_TOOLWINDOW, "KeepsakeEditor", title,
+        WS_EX_APPWINDOW, "KeepsakeEditor", title,
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
         CW_USEDEFAULT, CW_USEDEFAULT,
         wr.right - wr.left, wr.bottom - wr.top,
-        nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
+        g_owner_hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
 
     if (!g_editor_hwnd) return false;
+
+    update_floating_owner();
+
+    keepsake_debug_log("bridge: floating host window=%p title='%s'\n",
+                       static_cast<void *>(g_editor_hwnd), title);
 
     g_header_hwnd = CreateWindowExA(
         0, "KeepsakeHeader", nullptr, WS_CHILD | WS_VISIBLE,
@@ -137,6 +201,7 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
         0, "KeepsakeEditor", nullptr, WS_CHILD | WS_VISIBLE,
         0, WIN_HEADER_HEIGHT, w, h,
         g_editor_hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
+    g_editor_panel_hwnd = editor_panel;
 
     if (!loader->open_editor(static_cast<void *>(editor_panel))) {
         keepsake_debug_log("bridge: floating editor open failed\n");
@@ -144,14 +209,19 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
         DestroyWindow(g_header_hwnd);
         DestroyWindow(g_editor_hwnd);
         g_header_hwnd = nullptr;
+        g_editor_panel_hwnd = nullptr;
         g_editor_hwnd = nullptr;
         return false;
     }
     g_active_loader = loader;
     g_editor_open = true;
 
-    ShowWindow(g_editor_hwnd, SW_SHOW);
+    position_and_show_floating_window(g_editor_hwnd);
     g_idle_timer = SetTimer(g_editor_hwnd, 1, 16, nullptr);
+    settle_floating_window(loader);
+    keepsake_debug_log("bridge: floating editor open succeeded panel=%p timer=%u\n",
+                       static_cast<void *>(editor_panel),
+                       static_cast<unsigned>(g_idle_timer));
     return true;
 }
 
@@ -195,6 +265,14 @@ bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
     return true;
 }
 
+void gui_set_editor_transient(uint64_t native_handle) {
+    g_owner_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(native_handle));
+    keepsake_debug_log("bridge: set transient owner=%p valid=%d\n",
+                       static_cast<void *>(g_owner_hwnd),
+                       IsWindow(g_owner_hwnd) ? 1 : 0);
+    update_floating_owner();
+}
+
 void gui_close_editor(BridgeLoader *loader) {
     if (!g_editor_open) return;
     if (g_idle_timer) {
@@ -207,8 +285,10 @@ void gui_close_editor(BridgeLoader *loader) {
         DestroyWindow(g_editor_hwnd);
         g_editor_hwnd = nullptr;
     }
+    g_editor_panel_hwnd = nullptr;
     g_active_loader = nullptr;
     g_parent_hwnd = nullptr;
+    g_owner_hwnd = nullptr;
     g_last_parent_w = 0;
     g_last_parent_h = 0;
     g_editor_open = false;

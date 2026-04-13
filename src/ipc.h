@@ -38,6 +38,7 @@ static constexpr uint32_t IPC_OP_EDITOR_GET_RECT = 0x12; // no payload
 static constexpr uint32_t IPC_OP_EDITOR_SET_PARENT  = 0x13; // payload: uint64_t native_handle
 static constexpr uint32_t IPC_OP_EDITOR_MOUSE       = 0x14; // payload: IpcMouseEvent
 static constexpr uint32_t IPC_OP_EDITOR_KEY          = 0x15; // payload: IpcKeyEvent
+static constexpr uint32_t IPC_OP_EDITOR_SET_TRANSIENT = 0x16; // payload: uint64_t native_handle
 
 // Bridge → Host
 static constexpr uint32_t IPC_OP_OK           = 0x81;
