@@ -133,11 +133,17 @@ static void gui_drain_tasks() {
     std::queue<std::function<void()>> tasks;
     {
         std::lock_guard<std::mutex> lock(g_gui_mutex);
+        keepsake_debug_log("bridge: gui_drain_tasks queued=%zu thread=%lu\n",
+                           g_gui_tasks.size(),
+                           static_cast<unsigned long>(GetCurrentThreadId()));
         tasks.swap(g_gui_tasks);
     }
     while (!tasks.empty()) {
         auto task = std::move(tasks.front());
         tasks.pop();
+        keepsake_debug_log("bridge: gui_drain_tasks run remaining=%zu thread=%lu\n",
+                           tasks.size(),
+                           static_cast<unsigned long>(GetCurrentThreadId()));
         task();
     }
 }
@@ -149,22 +155,33 @@ static auto gui_call_sync(Fn &&fn) -> decltype(fn()) {
 
     auto promise = std::make_shared<std::promise<Result>>();
     auto future = promise->get_future();
+    keepsake_debug_log("bridge: gui_call_sync enqueue gui_thread=%lu caller=%lu\n",
+                       static_cast<unsigned long>(g_gui_thread_id),
+                       static_cast<unsigned long>(GetCurrentThreadId()));
     {
         std::lock_guard<std::mutex> lock(g_gui_mutex);
         g_gui_tasks.push([promise, fn = std::forward<Fn>(fn)]() mutable {
             try {
+                keepsake_debug_log("bridge: gui_call_sync task-begin thread=%lu\n",
+                                   static_cast<unsigned long>(GetCurrentThreadId()));
                 if constexpr (std::is_void_v<Result>) {
                     fn();
                     promise->set_value();
                 } else {
                     promise->set_value(fn());
                 }
+                keepsake_debug_log("bridge: gui_call_sync task-end thread=%lu\n",
+                                   static_cast<unsigned long>(GetCurrentThreadId()));
             } catch (...) {
                 promise->set_exception(std::current_exception());
             }
         });
     }
+    keepsake_debug_log("bridge: gui_call_sync post thread=%lu\n",
+                       static_cast<unsigned long>(g_gui_thread_id));
     PostThreadMessageA(g_gui_thread_id, WM_KEEPSAKE_GUI_TASK, 0, 0);
+    keepsake_debug_log("bridge: gui_call_sync wait-begin caller=%lu\n",
+                       static_cast<unsigned long>(GetCurrentThreadId()));
     return future.get();
 }
 
@@ -300,6 +317,8 @@ void gui_init() {
 
     g_gui_thread = std::thread([]() {
         g_gui_thread_id = GetCurrentThreadId();
+        keepsake_debug_log("bridge: gui thread start id=%lu\n",
+                           static_cast<unsigned long>(g_gui_thread_id));
         MSG msg;
         PeekMessageA(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
         gui_register_classes();
@@ -307,9 +326,14 @@ void gui_init() {
             std::lock_guard<std::mutex> ready_lock(g_gui_mutex);
             g_gui_ready = true;
         }
+        keepsake_debug_log("bridge: gui thread ready id=%lu\n",
+                           static_cast<unsigned long>(g_gui_thread_id));
         g_gui_ready_cv.notify_all();
 
         while (GetMessageA(&msg, nullptr, 0, 0) > 0) {
+            keepsake_debug_log("bridge: gui thread msg=0x%04X thread=%lu\n",
+                               static_cast<unsigned>(msg.message),
+                               static_cast<unsigned long>(GetCurrentThreadId()));
             if (msg.message == WM_KEEPSAKE_GUI_TASK) {
                 gui_drain_tasks();
                 continue;
@@ -388,6 +412,9 @@ static bool gui_open_editor_impl(BridgeLoader *loader, const EditorHeaderInfo &h
 static bool gui_open_editor_embedded_impl(BridgeLoader *loader, uint64_t native_handle) {
     if (!loader || !loader->has_editor()) return false;
     if (g_editor_open) return true;
+    keepsake_debug_log("bridge: gui_open_editor_embedded_impl enter handle=%p thread=%lu\n",
+                       reinterpret_cast<void *>(static_cast<uintptr_t>(native_handle)),
+                       static_cast<unsigned long>(GetCurrentThreadId()));
 
     HWND parent = reinterpret_cast<HWND>(static_cast<uintptr_t>(native_handle));
     if (!IsWindow(parent)) return false;
