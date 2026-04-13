@@ -32,6 +32,9 @@ class Vst2Loader : public BridgeLoader {
     AEffect *effect = nullptr;
     void *lib = nullptr;
     bool active = false;
+    bool editor_rect_cached = false;
+    int cached_editor_w = 0;
+    int cached_editor_h = 0;
 
     // MIDI queue
     static constexpr int MAX_MIDI = 512;
@@ -217,13 +220,47 @@ public:
     }
 
     bool get_editor_rect(int &w, int &h) override {
+        if (editor_rect_cached && cached_editor_w > 0 && cached_editor_h > 0) {
+            w = cached_editor_w;
+            h = cached_editor_h;
+            keepsake_debug_log("bridge/vst2: effEditGetRect cache-hit size=%dx%d thread=%lu\n",
+                               w,
+                               h,
+#ifdef _WIN32
+                               static_cast<unsigned long>(GetCurrentThreadId()));
+#else
+                               0UL);
+#endif
+            return true;
+        }
         struct ERect { int16_t top, left, bottom, right; };
         ERect *rect = nullptr;
+        keepsake_debug_log("bridge/vst2: effEditGetRect begin effect=%p thread=%lu default=%dx%d\n",
+                           static_cast<void *>(effect),
+#ifdef _WIN32
+                           static_cast<unsigned long>(GetCurrentThreadId()),
+#else
+                           0UL,
+#endif
+                           w, h);
         if (effect->dispatcher)
             effect->dispatcher(effect, effEditGetRect, 0, 0, &rect, 0);
+        keepsake_debug_log("bridge/vst2: effEditGetRect end rect=%p\n",
+                           static_cast<void *>(rect));
         if (!rect) return false;
         w = rect->right - rect->left;
         h = rect->bottom - rect->top;
+        keepsake_debug_log("bridge/vst2: effEditGetRect size=%dx%d raw=%d,%d,%d,%d\n",
+                           w, h,
+                           static_cast<int>(rect->left),
+                           static_cast<int>(rect->top),
+                           static_cast<int>(rect->right),
+                           static_cast<int>(rect->bottom));
+        editor_rect_cached = (w > 0 && h > 0);
+        if (editor_rect_cached) {
+            cached_editor_w = w;
+            cached_editor_h = h;
+        }
         return (w > 0 && h > 0);
     }
 
