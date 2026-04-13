@@ -11,6 +11,16 @@ static const int GUI_OPEN_TIMEOUT_MS = 15000;
 static const int GUI_OPEN_TIMEOUT_MS = 5000;
 #endif
 
+static bool prefer_floating_editor(const KeepsakePlugin *kp) {
+#ifdef _WIN32
+    return kp && kp->descriptor && kp->descriptor->name &&
+           strcmp(kp->descriptor->name, "Ample Percussion Cloudrum") == 0;
+#else
+    (void)kp;
+    return false;
+#endif
+}
+
 static bool gui_is_api_supported(const clap_plugin_t *plugin,
                                  const char *api, bool is_floating) {
     auto *kp = get(plugin);
@@ -20,7 +30,7 @@ static bool gui_is_api_supported(const clap_plugin_t *plugin,
     (void)is_floating;
     return strcmp(api, CLAP_WINDOW_API_COCOA) == 0;
 #elif defined(_WIN32)
-    (void)is_floating;
+    if (prefer_floating_editor(kp) && !is_floating) return false;
     return strcmp(api, CLAP_WINDOW_API_WIN32) == 0;
 #else
     (void)is_floating;
@@ -28,14 +38,15 @@ static bool gui_is_api_supported(const clap_plugin_t *plugin,
 #endif
 }
 
-static bool gui_get_preferred_api(const clap_plugin_t *, const char **api,
+static bool gui_get_preferred_api(const clap_plugin_t *plugin, const char **api,
                                   bool *is_floating) {
 #ifdef __APPLE__
     *api = CLAP_WINDOW_API_COCOA;
     *is_floating = false;
 #elif defined(_WIN32)
+    auto *kp = get(plugin);
     *api = CLAP_WINDOW_API_WIN32;
-    *is_floating = false;
+    *is_floating = prefer_floating_editor(kp);
 #else
     *api = CLAP_WINDOW_API_X11;
     *is_floating = false;
@@ -50,7 +61,7 @@ static bool gui_create(const clap_plugin_t *plugin, const char *, bool is_floati
 #ifdef __APPLE__
     kp->gui_is_floating = true;
 #else
-    kp->gui_is_floating = is_floating;
+    kp->gui_is_floating = is_floating || prefer_floating_editor(kp);
 #endif
     keepsake_debug_log("keepsake: gui_create floating=%d has_editor=%d\n",
                        kp->gui_is_floating ? 1 : 0, kp->has_editor ? 1 : 0);
@@ -98,6 +109,10 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
     }
     return true;
 #else
+    if (kp->gui_is_floating) {
+        keepsake_debug_log("keepsake: gui_set_parent ignored for floating editor\n");
+        return true;
+    }
     uint64_t handle = 0;
 #ifdef _WIN32
     handle = reinterpret_cast<uint64_t>(window->win32);
