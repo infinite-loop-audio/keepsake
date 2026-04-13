@@ -11,14 +11,20 @@ static const int GUI_OPEN_TIMEOUT_MS = 15000;
 static const int GUI_OPEN_TIMEOUT_MS = 5000;
 #endif
 
-static bool prefer_floating_editor(const KeepsakePlugin *kp) {
-#ifdef _WIN32
-    return kp && kp->descriptor && kp->descriptor->name &&
-           strcmp(kp->descriptor->name, "Ample Percussion Cloudrum") == 0;
-#else
-    (void)kp;
-    return false;
-#endif
+static bool gui_open_floating(KeepsakePlugin *kp) {
+    kp->gui_is_floating = true;
+    if (kp->editor_open && !kp->crashed) {
+        send_and_wait(kp, IPC_OP_EDITOR_CLOSE, nullptr, 0, nullptr, 1000);
+        kp->editor_open = false;
+    }
+    if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN, nullptr, 0, nullptr,
+                       GUI_OPEN_TIMEOUT_MS)) {
+        keepsake_debug_log("keepsake: floating fallback open failed\n");
+        return false;
+    }
+    kp->editor_open = true;
+    keepsake_debug_log("keepsake: floating fallback open OK\n");
+    return true;
 }
 
 static bool gui_is_api_supported(const clap_plugin_t *plugin,
@@ -30,7 +36,7 @@ static bool gui_is_api_supported(const clap_plugin_t *plugin,
     (void)is_floating;
     return strcmp(api, CLAP_WINDOW_API_COCOA) == 0;
 #elif defined(_WIN32)
-    if (prefer_floating_editor(kp) && !is_floating) return false;
+    (void)is_floating;
     return strcmp(api, CLAP_WINDOW_API_WIN32) == 0;
 #else
     (void)is_floating;
@@ -38,15 +44,14 @@ static bool gui_is_api_supported(const clap_plugin_t *plugin,
 #endif
 }
 
-static bool gui_get_preferred_api(const clap_plugin_t *plugin, const char **api,
+static bool gui_get_preferred_api(const clap_plugin_t *, const char **api,
                                   bool *is_floating) {
 #ifdef __APPLE__
     *api = CLAP_WINDOW_API_COCOA;
     *is_floating = false;
 #elif defined(_WIN32)
-    auto *kp = get(plugin);
     *api = CLAP_WINDOW_API_WIN32;
-    *is_floating = prefer_floating_editor(kp);
+    *is_floating = false;
 #else
     *api = CLAP_WINDOW_API_X11;
     *is_floating = false;
@@ -61,7 +66,7 @@ static bool gui_create(const clap_plugin_t *plugin, const char *, bool is_floati
 #ifdef __APPLE__
     kp->gui_is_floating = true;
 #else
-    kp->gui_is_floating = is_floating || prefer_floating_editor(kp);
+    kp->gui_is_floating = is_floating || kp->gui_embed_failed;
 #endif
     keepsake_debug_log("keepsake: gui_create floating=%d has_editor=%d\n",
                        kp->gui_is_floating ? 1 : 0, kp->has_editor ? 1 : 0);
@@ -109,9 +114,9 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
     }
     return true;
 #else
-    if (kp->gui_is_floating) {
-        keepsake_debug_log("keepsake: gui_set_parent ignored for floating editor\n");
-        return true;
+    if (kp->gui_is_floating || kp->gui_embed_failed) {
+        keepsake_debug_log("keepsake: gui_set_parent switching to floating path\n");
+        return gui_open_floating(kp);
     }
     uint64_t handle = 0;
 #ifdef _WIN32
@@ -125,13 +130,18 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
                        nullptr, GUI_OPEN_TIMEOUT_MS)) {
 #ifdef _WIN32
         if (platform_process_alive(kp->bridge->proc)) {
-            keepsake_debug_log("keepsake: gui_set_parent() timed out, assuming delayed success\n");
-            kp->editor_open = true;
-            return true;
+            keepsake_debug_log("keepsake: gui_set_parent() timed out, falling back to floating\n");
+            kp->gui_embed_failed = true;
+            return gui_open_floating(kp);
         }
 #endif
         keepsake_debug_log("keepsake: gui_set_parent() editor parent failed\n");
+#ifdef _WIN32
+        kp->gui_embed_failed = true;
+        return gui_open_floating(kp);
+#else
         return false;
+#endif
     }
     kp->editor_open = true;
     return true;

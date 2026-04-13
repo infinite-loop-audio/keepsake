@@ -56,6 +56,7 @@ struct KeepsakePlugin {
     bool has_editor = false;
     bool editor_open = false;
     bool gui_is_floating = true;
+    bool gui_embed_failed = false;
     int32_t editor_width = 0;
     int32_t editor_height = 0;
     void *iosurface_layer = nullptr; // CALayer* for IOSurface refresh
