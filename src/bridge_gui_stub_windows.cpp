@@ -8,10 +8,19 @@
 #ifdef _WIN32
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
+#include <future>
+#include <functional>
+#include <mutex>
+#include <queue>
 #include <thread>
+#include <type_traits>
 #include <windows.h>
+
+static LRESULT CALLBACK EditorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+static LRESULT CALLBACK HeaderWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 static HWND g_editor_hwnd = nullptr;
 static HWND g_parent_hwnd = nullptr;
@@ -19,12 +28,12 @@ static HWND g_owner_hwnd = nullptr;
 static HWND g_header_hwnd = nullptr;
 static HWND g_editor_panel_hwnd = nullptr;
 static BridgeLoader *g_active_loader = nullptr;
-static bool g_editor_open = false;
 static UINT_PTR g_idle_timer = 0;
 static EditorHeaderInfo g_header_info;
 static const int WIN_HEADER_HEIGHT = 24;
 static int g_last_parent_w = 0;
 static int g_last_parent_h = 0;
+static std::atomic<bool> g_editor_open{false};
 static const DWORD EMBED_OPEN_TIMEOUT_MS = 1500;
 static constexpr const char *kKeepsakeHostWindowClass = "KeepsakeHostWindow";
 static constexpr const char *kKeepsakeEmbedWrapperClass = "KeepsakeEmbedWrapper";
@@ -32,6 +41,14 @@ static constexpr const char *kKeepsakeEmbedPanelClass = "KeepsakeEmbedPanel";
 static constexpr DWORD kKeepsakeEmbedChildStyle =
     WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
 static constexpr DWORD kKeepsakeEmbedWrapperExStyle = WS_EX_CONTROLPARENT;
+static constexpr UINT WM_KEEPSAKE_GUI_TASK = WM_APP + 41;
+
+static std::thread g_gui_thread;
+static DWORD g_gui_thread_id = 0;
+static std::mutex g_gui_mutex;
+static std::condition_variable g_gui_ready_cv;
+static bool g_gui_ready = false;
+static std::queue<std::function<void()>> g_gui_tasks;
 
 static void log_window_info(const char *label, HWND hwnd) {
     if (!hwnd) {
@@ -83,6 +100,72 @@ static void log_window_tree(const char *phase, HWND parent, HWND wrapper, HWND p
     DWORD tid = GetCurrentThreadId();
     keepsake_debug_log("bridge: window-tree thread=%lu\n", static_cast<unsigned long>(tid));
     EnumThreadWindows(tid, LogThreadWindowsProc, 0);
+}
+
+static void gui_register_classes() {
+    WNDCLASSA wc = {};
+    wc.lpfnWndProc = EditorWndProc;
+    wc.hInstance = GetModuleHandle(nullptr);
+    wc.lpszClassName = kKeepsakeHostWindowClass;
+    RegisterClassA(&wc);
+
+    WNDCLASSA wrapper_wc = {};
+    wrapper_wc.lpfnWndProc = EditorWndProc;
+    wrapper_wc.hInstance = GetModuleHandle(nullptr);
+    wrapper_wc.lpszClassName = kKeepsakeEmbedWrapperClass;
+    RegisterClassA(&wrapper_wc);
+
+    WNDCLASSA panel_wc = {};
+    panel_wc.lpfnWndProc = EditorWndProc;
+    panel_wc.hInstance = GetModuleHandle(nullptr);
+    panel_wc.lpszClassName = kKeepsakeEmbedPanelClass;
+    RegisterClassA(&panel_wc);
+
+    WNDCLASSA header_wc = {};
+    header_wc.lpfnWndProc = HeaderWndProc;
+    header_wc.hInstance = GetModuleHandle(nullptr);
+    header_wc.lpszClassName = "KeepsakeHeader";
+    header_wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    RegisterClassA(&header_wc);
+}
+
+static void gui_drain_tasks() {
+    std::queue<std::function<void()>> tasks;
+    {
+        std::lock_guard<std::mutex> lock(g_gui_mutex);
+        tasks.swap(g_gui_tasks);
+    }
+    while (!tasks.empty()) {
+        auto task = std::move(tasks.front());
+        tasks.pop();
+        task();
+    }
+}
+
+template <typename Fn>
+static auto gui_call_sync(Fn &&fn) -> decltype(fn()) {
+    using Result = decltype(fn());
+    if (GetCurrentThreadId() == g_gui_thread_id) return fn();
+
+    auto promise = std::make_shared<std::promise<Result>>();
+    auto future = promise->get_future();
+    {
+        std::lock_guard<std::mutex> lock(g_gui_mutex);
+        g_gui_tasks.push([promise, fn = std::forward<Fn>(fn)]() mutable {
+            try {
+                if constexpr (std::is_void_v<Result>) {
+                    fn();
+                    promise->set_value();
+                } else {
+                    promise->set_value(fn());
+                }
+            } catch (...) {
+                promise->set_exception(std::current_exception());
+            }
+        });
+    }
+    PostThreadMessageA(g_gui_thread_id, WM_KEEPSAKE_GUI_TASK, 0, 0);
+    return future.get();
 }
 
 static void position_and_show_floating_window(HWND hwnd) {
@@ -212,33 +295,35 @@ static LRESULT CALLBACK HeaderWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
 }
 
 void gui_init() {
-    WNDCLASSA wc = {};
-    wc.lpfnWndProc = EditorWndProc;
-    wc.hInstance = GetModuleHandle(nullptr);
-    wc.lpszClassName = kKeepsakeHostWindowClass;
-    RegisterClassA(&wc);
+    std::unique_lock<std::mutex> lock(g_gui_mutex);
+    if (g_gui_ready) return;
 
-    WNDCLASSA wrapper_wc = {};
-    wrapper_wc.lpfnWndProc = EditorWndProc;
-    wrapper_wc.hInstance = GetModuleHandle(nullptr);
-    wrapper_wc.lpszClassName = kKeepsakeEmbedWrapperClass;
-    RegisterClassA(&wrapper_wc);
+    g_gui_thread = std::thread([]() {
+        g_gui_thread_id = GetCurrentThreadId();
+        MSG msg;
+        PeekMessageA(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+        gui_register_classes();
+        {
+            std::lock_guard<std::mutex> ready_lock(g_gui_mutex);
+            g_gui_ready = true;
+        }
+        g_gui_ready_cv.notify_all();
 
-    WNDCLASSA panel_wc = {};
-    panel_wc.lpfnWndProc = EditorWndProc;
-    panel_wc.hInstance = GetModuleHandle(nullptr);
-    panel_wc.lpszClassName = kKeepsakeEmbedPanelClass;
-    RegisterClassA(&panel_wc);
-
-    WNDCLASSA header_wc = {};
-    header_wc.lpfnWndProc = HeaderWndProc;
-    header_wc.hInstance = GetModuleHandle(nullptr);
-    header_wc.lpszClassName = "KeepsakeHeader";
-    header_wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
-    RegisterClassA(&header_wc);
+        while (GetMessageA(&msg, nullptr, 0, 0) > 0) {
+            if (msg.message == WM_KEEPSAKE_GUI_TASK) {
+                gui_drain_tasks();
+                continue;
+            }
+            TranslateMessage(&msg);
+            DispatchMessageA(&msg);
+            gui_drain_tasks();
+        }
+    });
+    g_gui_thread.detach();
+    g_gui_ready_cv.wait(lock, [] { return g_gui_ready; });
 }
 
-bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
+static bool gui_open_editor_impl(BridgeLoader *loader, const EditorHeaderInfo &header) {
     if (!loader || !loader->has_editor()) return false;
     if (g_editor_open) return true;
 
@@ -300,7 +385,7 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     return true;
 }
 
-bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
+static bool gui_open_editor_embedded_impl(BridgeLoader *loader, uint64_t native_handle) {
     if (!loader || !loader->has_editor()) return false;
     if (g_editor_open) return true;
 
@@ -405,15 +490,26 @@ bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
     return true;
 }
 
+bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
+    return gui_call_sync([=]() { return gui_open_editor_impl(loader, header); });
+}
+
+bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
+    return gui_call_sync([=]() { return gui_open_editor_embedded_impl(loader, native_handle); });
+}
+
 void gui_set_editor_transient(uint64_t native_handle) {
-    g_owner_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(native_handle));
-    keepsake_debug_log("bridge: set transient owner=%p valid=%d\n",
-                       static_cast<void *>(g_owner_hwnd),
-                       IsWindow(g_owner_hwnd) ? 1 : 0);
-    update_floating_owner();
+    gui_call_sync([=]() {
+        g_owner_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(native_handle));
+        keepsake_debug_log("bridge: set transient owner=%p valid=%d\n",
+                           static_cast<void *>(g_owner_hwnd),
+                           IsWindow(g_owner_hwnd) ? 1 : 0);
+        update_floating_owner();
+    });
 }
 
 void gui_close_editor(BridgeLoader *loader) {
+    gui_call_sync([=]() {
     if (!g_editor_open) return;
     if (g_idle_timer) {
         KillTimer(g_editor_hwnd, g_idle_timer);
@@ -432,6 +528,7 @@ void gui_close_editor(BridgeLoader *loader) {
     g_last_parent_w = 0;
     g_last_parent_h = 0;
     g_editor_open = false;
+    });
 }
 
 bool gui_get_editor_rect(BridgeLoader *loader, int &w, int &h) {
@@ -440,11 +537,7 @@ bool gui_get_editor_rect(BridgeLoader *loader, int &w, int &h) {
 
 void gui_idle(BridgeLoader *) {
     if (!g_editor_open) return;
-    MSG msg;
-    while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
-        TranslateMessage(&msg);
-        DispatchMessageA(&msg);
-    }
+    PostThreadMessageA(g_gui_thread_id, WM_NULL, 0, 0);
 }
 
 bool gui_is_open() { return g_editor_open; }
