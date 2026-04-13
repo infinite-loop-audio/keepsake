@@ -53,3 +53,9 @@ depend on Keepsake.
 - Platform targets: macOS (x86_64 + arm64), Windows (x86_64), Linux (x86_64).
 - Legal posture and format-specific rationale live in `docs/project-brief.md`
   and `docs/architecture/`.
+
+## Internal Writing Style
+
+Use the repo-local style reference for internal work and normal replies:
+
+- `docs/policy/internal-writing-style.md`
