@@ -26,6 +26,12 @@ static const int WIN_HEADER_HEIGHT = 24;
 static int g_last_parent_w = 0;
 static int g_last_parent_h = 0;
 static const DWORD EMBED_OPEN_TIMEOUT_MS = 1500;
+static constexpr const char *kKeepsakeHostWindowClass = "KeepsakeHostWindow";
+static constexpr const char *kKeepsakeEmbedWrapperClass = "KeepsakeEmbedWrapper";
+static constexpr const char *kKeepsakeEmbedPanelClass = "KeepsakeEmbedPanel";
+static constexpr DWORD kKeepsakeEmbedChildStyle =
+    WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+static constexpr DWORD kKeepsakeEmbedWrapperExStyle = WS_EX_CONTROLPARENT;
 
 static void log_window_info(const char *label, HWND hwnd) {
     if (!hwnd) {
@@ -209,8 +215,27 @@ void gui_init() {
     WNDCLASSA wc = {};
     wc.lpfnWndProc = EditorWndProc;
     wc.hInstance = GetModuleHandle(nullptr);
-    wc.lpszClassName = "KeepsakeEditor";
+    wc.lpszClassName = kKeepsakeHostWindowClass;
     RegisterClassA(&wc);
+
+    WNDCLASSA wrapper_wc = {};
+    wrapper_wc.lpfnWndProc = EditorWndProc;
+    wrapper_wc.hInstance = GetModuleHandle(nullptr);
+    wrapper_wc.lpszClassName = kKeepsakeEmbedWrapperClass;
+    RegisterClassA(&wrapper_wc);
+
+    WNDCLASSA panel_wc = {};
+    panel_wc.lpfnWndProc = EditorWndProc;
+    panel_wc.hInstance = GetModuleHandle(nullptr);
+    panel_wc.lpszClassName = kKeepsakeEmbedPanelClass;
+    RegisterClassA(&panel_wc);
+
+    WNDCLASSA header_wc = {};
+    header_wc.lpfnWndProc = HeaderWndProc;
+    header_wc.hInstance = GetModuleHandle(nullptr);
+    header_wc.lpszClassName = "KeepsakeHeader";
+    header_wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    RegisterClassA(&header_wc);
 }
 
 bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
@@ -221,17 +246,6 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     int w = 640, h = 480;
     loader->get_editor_rect(w, h);
 
-    static bool header_registered = false;
-    if (!header_registered) {
-        WNDCLASSA wc = {};
-        wc.lpfnWndProc = HeaderWndProc;
-        wc.hInstance = GetModuleHandle(nullptr);
-        wc.lpszClassName = "KeepsakeHeader";
-        wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
-        RegisterClassA(&wc);
-        header_registered = true;
-    }
-
     char title[256];
     snprintf(title, sizeof(title), "Keepsake \xe2\x80\x94 %s", header.plugin_name.c_str());
 
@@ -239,7 +253,7 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     AdjustWindowRect(&wr, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, FALSE);
 
     g_editor_hwnd = CreateWindowExA(
-        WS_EX_APPWINDOW, "KeepsakeEditor", title,
+        WS_EX_APPWINDOW, kKeepsakeHostWindowClass, title,
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
         CW_USEDEFAULT, CW_USEDEFAULT,
         wr.right - wr.left, wr.bottom - wr.top,
@@ -258,7 +272,8 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
         g_editor_hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
 
     HWND editor_panel = CreateWindowExA(
-        0, "KeepsakeEditor", nullptr, WS_CHILD | WS_VISIBLE,
+        kKeepsakeEmbedWrapperExStyle, kKeepsakeEmbedPanelClass, nullptr,
+        kKeepsakeEmbedChildStyle | WS_VISIBLE,
         0, WIN_HEADER_HEIGHT, w, h,
         g_editor_hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
     g_editor_panel_hwnd = editor_panel;
@@ -296,16 +311,16 @@ bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
     loader->get_editor_rect(w, h);
 
     g_editor_hwnd = CreateWindowExA(
-        0, "KeepsakeEditor", nullptr,
-        WS_CHILD,
+        kKeepsakeEmbedWrapperExStyle, kKeepsakeEmbedWrapperClass, nullptr,
+        kKeepsakeEmbedChildStyle,
         0, 0, w, h,
         parent, nullptr, GetModuleHandle(nullptr), nullptr);
 
     if (!g_editor_hwnd) return false;
 
     HWND editor_panel = CreateWindowExA(
-        0, "KeepsakeEditor", nullptr,
-        WS_CHILD,
+        0, kKeepsakeEmbedPanelClass, nullptr,
+        kKeepsakeEmbedChildStyle,
         0, 0, w, h,
         g_editor_hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
 
