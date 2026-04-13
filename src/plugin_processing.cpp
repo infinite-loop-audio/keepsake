@@ -188,6 +188,32 @@ static const clap_plugin_audio_ports_t s_audio_ports = {
     .get = audio_ports_get,
 };
 
+static uint32_t note_ports_count(const clap_plugin_t *plugin, bool is_input) {
+    auto *kp = get(plugin);
+    sync_async_init(kp);
+    if (is_input) return 1;
+    return 0;
+}
+
+static bool note_ports_get(const clap_plugin_t *plugin, uint32_t index,
+                           bool is_input, clap_note_port_info_t *info) {
+    auto *kp = get(plugin);
+    sync_async_init(kp);
+    if (!is_input || index != 0) return false;
+
+    memset(info, 0, sizeof(*info));
+    info->id = 0;
+    info->supported_dialects = CLAP_NOTE_DIALECT_CLAP | CLAP_NOTE_DIALECT_MIDI;
+    info->preferred_dialect = CLAP_NOTE_DIALECT_MIDI;
+    snprintf(info->name, sizeof(info->name), "%s", "Note Input");
+    return true;
+}
+
+static const clap_plugin_note_ports_t s_note_ports = {
+    .count = note_ports_count,
+    .get = note_ports_get,
+};
+
 extern const clap_plugin_params_t keepsake_params_ext;
 extern const clap_plugin_state_t keepsake_state_ext;
 extern const clap_plugin_gui_t keepsake_gui_ext;
@@ -203,6 +229,7 @@ static const clap_plugin_latency_t s_latency = {
 const void *plugin_get_extension(const clap_plugin_t *plugin, const char *id) {
     sync_async_init(get(plugin));
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) return &s_audio_ports;
+    if (strcmp(id, CLAP_EXT_NOTE_PORTS) == 0) return &s_note_ports;
     if (strcmp(id, CLAP_EXT_PARAMS) == 0) return &keepsake_params_ext;
     if (strcmp(id, CLAP_EXT_STATE) == 0) return &keepsake_state_ext;
     if (strcmp(id, CLAP_EXT_LATENCY) == 0) return &s_latency;
