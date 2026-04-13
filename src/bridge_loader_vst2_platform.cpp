@@ -3,6 +3,7 @@
 //
 
 #include "bridge_loader.h"
+#include "debug_log.h"
 
 #include <vestige/vestige.h>
 #include <atomic>
@@ -24,63 +25,128 @@ typedef AEffect *(__cdecl *VstEntry)(audioMasterCallback);
 double s_sample_rate = 44100.0;
 uint32_t s_max_frames = 512;
 std::atomic<uint32_t> s_editor_open_edit_depth{0};
+std::atomic<bool> s_editor_open_in_progress{false};
+
+static const char *vst2_host_opcode_name(int32_t opcode) {
+    switch (opcode) {
+    case audioMasterAutomate: return "audioMasterAutomate";
+    case audioMasterVersion: return "audioMasterVersion";
+    case audioMasterCurrentId: return "audioMasterCurrentId";
+    case audioMasterIdle: return "audioMasterIdle";
+    case audioMasterWantMidi: return "audioMasterWantMidi";
+    case audioMasterGetTime: return "audioMasterGetTime";
+    case audioMasterProcessEvents: return "audioMasterProcessEvents";
+    case audioMasterGetSampleRate: return "audioMasterGetSampleRate";
+    case audioMasterGetBlockSize: return "audioMasterGetBlockSize";
+    case audioMasterGetInputLatency: return "audioMasterGetInputLatency";
+    case audioMasterGetOutputLatency: return "audioMasterGetOutputLatency";
+    case audioMasterGetCurrentProcessLevel: return "audioMasterGetCurrentProcessLevel";
+    case audioMasterGetAutomationState: return "audioMasterGetAutomationState";
+    case audioMasterGetVendorString: return "audioMasterGetVendorString";
+    case audioMasterGetProductString: return "audioMasterGetProductString";
+    case audioMasterGetVendorVersion: return "audioMasterGetVendorVersion";
+    case audioMasterCanDo: return "audioMasterCanDo";
+    case audioMasterGetLanguage: return "audioMasterGetLanguage";
+    case audioMasterSizeWindow: return "audioMasterSizeWindow";
+    case audioMasterUpdateDisplay: return "audioMasterUpdateDisplay";
+    case audioMasterBeginEdit: return "audioMasterBeginEdit";
+    case audioMasterEndEdit: return "audioMasterEndEdit";
+    case audioMasterIOChanged: return "audioMasterIOChanged";
+    default: return "audioMaster?";
+    }
+}
+
+static void trace_editor_open_callback(int32_t opcode,
+                                       int32_t index,
+                                       intptr_t value,
+                                       void *ptr,
+                                       float opt,
+                                       intptr_t result) {
+    if (!s_editor_open_in_progress.load()) return;
+    if (opcode == audioMasterCanDo && ptr) {
+        keepsake_debug_log("bridge/vst2: hostcb %s query='%s' -> %lld\n",
+                           vst2_host_opcode_name(opcode),
+                           static_cast<const char *>(ptr),
+                           static_cast<long long>(result));
+        return;
+    }
+    keepsake_debug_log("bridge/vst2: hostcb %s idx=%d val=%lld ptr=%p opt=%.3f -> %lld\n",
+                       vst2_host_opcode_name(opcode),
+                       opcode == audioMasterSizeWindow ? index : index,
+                       static_cast<long long>(value), ptr, opt,
+                       static_cast<long long>(result));
+}
 
 intptr_t __cdecl vst2_host_callback(
     AEffect *, int32_t opcode, int32_t index, intptr_t value, void *ptr, float opt) {
+    intptr_t result = 0;
     switch (opcode) {
-    case audioMasterAutomate: return 1;
-    case audioMasterVersion: return 2400;
-    case audioMasterCurrentId: return 0;
-    case audioMasterIdle: return 1;
-    case audioMasterWantMidi: return 1;
-    case audioMasterGetTime: return 0;
-    case audioMasterProcessEvents: return 1;
-    case audioMasterGetSampleRate: return static_cast<intptr_t>(s_sample_rate);
-    case audioMasterGetBlockSize: return static_cast<intptr_t>(s_max_frames);
-    case audioMasterGetInputLatency: return 0;
-    case audioMasterGetOutputLatency: return 0;
-    case audioMasterGetCurrentProcessLevel: return 0;
+    case audioMasterAutomate: result = 1; break;
+    case audioMasterVersion: result = 2400; break;
+    case audioMasterCurrentId: result = 0; break;
+    case audioMasterIdle: result = 1; break;
+    case audioMasterWantMidi: result = 1; break;
+    case audioMasterGetTime: result = 0; break;
+    case audioMasterProcessEvents: result = 1; break;
+    case audioMasterGetSampleRate: result = static_cast<intptr_t>(s_sample_rate); break;
+    case audioMasterGetBlockSize: result = static_cast<intptr_t>(s_max_frames); break;
+    case audioMasterGetInputLatency: result = 0; break;
+    case audioMasterGetOutputLatency: result = 0; break;
+    case audioMasterGetCurrentProcessLevel: result = 0; break;
     case audioMasterGetAutomationState:
-        return kVstAutomationReading |
-               (s_editor_open_edit_depth.load() > 0 ? kVstAutomationWriting : 0);
+        result = kVstAutomationReading |
+                 (s_editor_open_edit_depth.load() > 0 ? kVstAutomationWriting : 0);
+        break;
     case audioMasterGetVendorString:
         if (ptr) {
             strncpy(static_cast<char *>(ptr), "Infinite Loop Audio", 64);
             static_cast<char *>(ptr)[63] = '\0';
-            return 1;
+            result = 1;
+            break;
         }
-        return 0;
+        result = 0;
+        break;
     case audioMasterGetProductString:
         if (ptr) {
             strncpy(static_cast<char *>(ptr), "Keepsake", 64);
             static_cast<char *>(ptr)[63] = '\0';
-            return 1;
+            result = 1;
+            break;
         }
-        return 0;
-    case audioMasterGetVendorVersion: return 1;
+        result = 0;
+        break;
+    case audioMasterGetVendorVersion: result = 1; break;
     case audioMasterCanDo:
-        if (!ptr) return 0;
-        if (strcmp(static_cast<const char *>(ptr), "sendVstEvents") == 0) return 1;
-        if (strcmp(static_cast<const char *>(ptr), "sendVstMidiEvent") == 0) return 1;
-        if (strcmp(static_cast<const char *>(ptr), "receiveVstEvents") == 0) return 1;
-        if (strcmp(static_cast<const char *>(ptr), "receiveVstMidiEvent") == 0) return 1;
-        if (strcmp(static_cast<const char *>(ptr), "sizeWindow") == 0) return 1;
-        if (strcmp(static_cast<const char *>(ptr), "supportShell") == 0) return 1;
-        return 0;
-    case audioMasterGetLanguage: return kVstLangEnglish;
-    case audioMasterSizeWindow: return 1;
-    case audioMasterUpdateDisplay: return 1;
+        if (!ptr) {
+            result = 0;
+            break;
+        }
+        if (strcmp(static_cast<const char *>(ptr), "sendVstEvents") == 0) result = 1;
+        else if (strcmp(static_cast<const char *>(ptr), "sendVstMidiEvent") == 0) result = 1;
+        else if (strcmp(static_cast<const char *>(ptr), "receiveVstEvents") == 0) result = 1;
+        else if (strcmp(static_cast<const char *>(ptr), "receiveVstMidiEvent") == 0) result = 1;
+        else if (strcmp(static_cast<const char *>(ptr), "sizeWindow") == 0) result = 1;
+        else if (strcmp(static_cast<const char *>(ptr), "supportShell") == 0) result = 1;
+        else result = 0;
+        break;
+    case audioMasterGetLanguage: result = kVstLangEnglish; break;
+    case audioMasterSizeWindow: result = 1; break;
+    case audioMasterUpdateDisplay: result = 1; break;
     case audioMasterBeginEdit:
         s_editor_open_edit_depth.fetch_add(1);
-        return 1;
+        result = 1;
+        break;
     case audioMasterEndEdit: {
         uint32_t depth = s_editor_open_edit_depth.load();
         if (depth > 0) s_editor_open_edit_depth.fetch_sub(1);
-        return 1;
+        result = 1;
+        break;
     }
-    case audioMasterIOChanged: return 1;
-    default: return 0;
+    case audioMasterIOChanged: result = 1; break;
+    default: result = 0; break;
     }
+    trace_editor_open_callback(opcode, index, value, ptr, opt, result);
+    return result;
 }
 
 #ifdef __APPLE__

@@ -16,6 +16,7 @@ typedef AEffect *(__cdecl *VstEntry)(audioMasterCallback);
 extern double s_sample_rate;
 extern uint32_t s_max_frames;
 extern std::atomic<uint32_t> s_editor_open_edit_depth;
+extern std::atomic<bool> s_editor_open_in_progress;
 intptr_t __cdecl vst2_host_callback(
     AEffect *, int32_t opcode, int32_t index, intptr_t value, void *ptr, float opt);
 void *vst2_open_library(const std::string &path, std::string &load_path);
@@ -172,6 +173,7 @@ public:
     bool open_editor(void *parent) override {
         if (!effect || !effect->dispatcher) return false;
         s_editor_open_edit_depth.store(0);
+        s_editor_open_in_progress.store(true);
 #ifdef _WIN32
         unsigned long thread_id = static_cast<unsigned long>(GetCurrentThreadId());
 #else
@@ -184,6 +186,7 @@ public:
         keepsake_debug_log("bridge/vst2: effEditOpen end result=%lld parent=%p edit_depth=%d\n",
                            static_cast<long long>(result), parent,
                            s_editor_open_edit_depth.load());
+        s_editor_open_in_progress.store(false);
         return result != 0;
     }
 
