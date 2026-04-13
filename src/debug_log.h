@@ -3,6 +3,10 @@
 #include <cstdarg>
 #include <cstdio>
 
+#ifndef KEEPSAKE_BUILD_ID
+#define KEEPSAKE_BUILD_ID "unknown"
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
 
@@ -32,11 +36,25 @@ static inline void keepsake_debug_log(const char *fmt, ...) {
     keepsake_debug_vlog(fmt, args);
     va_end(args);
 }
+
+static inline void keepsake_debug_log_build_once(const char *prefix) {
+    static bool logged = false;
+    if (logged) return;
+    logged = true;
+    keepsake_debug_log("%s build=%s\n", prefix, KEEPSAKE_BUILD_ID);
+}
 #else
 static inline void keepsake_debug_log(const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
     vfprintf(stderr, fmt, args);
     va_end(args);
+}
+
+static inline void keepsake_debug_log_build_once(const char *prefix) {
+    static bool logged = false;
+    if (logged) return;
+    logged = true;
+    keepsake_debug_log("%s build=%s\n", prefix, KEEPSAKE_BUILD_ID);
 }
 #endif

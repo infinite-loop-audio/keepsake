@@ -6,6 +6,17 @@ project(keepsake
     DESCRIPTION "CLAP plugin that bridges legacy plugins into modern hosts"
 )
 
+execute_process(
+    COMMAND git rev-parse --short=12 HEAD
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE KEEPSAKE_GIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT KEEPSAKE_GIT_HASH)
+    set(KEEPSAKE_GIT_HASH "unknown")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
@@ -70,6 +81,9 @@ add_library(keepsake MODULE
 target_include_directories(keepsake PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_compile_definitions(keepsake PRIVATE
+    KEEPSAKE_BUILD_ID="${KEEPSAKE_GIT_HASH}"
 )
 
 target_link_libraries(keepsake PRIVATE clap)
@@ -166,6 +180,9 @@ target_include_directories(keepsake-bridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}/_deps/vst3-include
+)
+target_compile_definitions(keepsake-bridge PRIVATE
+    KEEPSAKE_BUILD_ID="${KEEPSAKE_GIT_HASH}"
 )
 
 target_link_libraries(keepsake-bridge PRIVATE clap)

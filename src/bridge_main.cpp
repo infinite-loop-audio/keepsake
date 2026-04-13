@@ -41,6 +41,7 @@ PlatformPipe g_wake_fd  = 3;
 int main(int argc, char *argv[]) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     gui_init();
+    keepsake_debug_log_build_once("bridge:");
 
     // Wake pipe / IPC handle passed by the host.
     bool has_wake_pipe = false;
@@ -119,6 +120,9 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "bridge: command pipe closed, exiting\n");
             break;
         }
+
+        keepsake_debug_log("bridge: dispatch opcode=0x%02X payload=%zu gui_open=%d\n",
+                           opcode, payload.size(), gui_is_open() ? 1 : 0);
 
         // Extract instance ID from payload (first 4 bytes)
         uint32_t instance_id = ipc_extract_instance_id(payload);

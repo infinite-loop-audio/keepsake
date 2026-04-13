@@ -7,6 +7,7 @@
 
 static bool plugin_init(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
+    keepsake_debug_log_build_once("keepsake:");
     keepsake_debug_log("keepsake: plugin_init desc=%s path=%s format=%u isolation=%d\n",
                        kp->descriptor ? kp->descriptor->id : "(null)",
                        kp->vst2_path.c_str(),
