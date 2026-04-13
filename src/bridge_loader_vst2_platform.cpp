@@ -22,10 +22,19 @@
 
 typedef AEffect *(__cdecl *VstEntry)(audioMasterCallback);
 
+static constexpr intptr_t kKeepsakeVstProcessLevelUser = 1;
+static constexpr intptr_t kKeepsakeVstAutomationReadWrite =
+    kVstAutomationReading | kVstAutomationWriting;
+
 double s_sample_rate = 44100.0;
 uint32_t s_max_frames = 512;
 std::atomic<uint32_t> s_editor_open_edit_depth{0};
 std::atomic<bool> s_editor_open_in_progress{false};
+std::atomic<int32_t> s_last_automated_param{-1};
+std::atomic<uint32_t> s_automate_count{0};
+std::atomic<uint32_t> s_begin_edit_count{0};
+std::atomic<uint32_t> s_end_edit_count{0};
+std::atomic<float> s_last_automated_value{0.0f};
 
 static const char *vst2_host_opcode_name(int32_t opcode) {
     switch (opcode) {
@@ -78,12 +87,19 @@ static void trace_editor_open_callback(int32_t opcode,
 }
 
 intptr_t __cdecl vst2_host_callback(
-    AEffect *, int32_t opcode, int32_t index, intptr_t value, void *ptr, float opt) {
+    AEffect *effect, int32_t opcode, int32_t index, intptr_t value, void *ptr, float opt) {
     intptr_t result = 0;
     switch (opcode) {
-    case audioMasterAutomate: result = 1; break;
+    case audioMasterAutomate:
+        s_last_automated_param.store(index);
+        s_last_automated_value.store(opt);
+        s_automate_count.fetch_add(1);
+        result = 1;
+        break;
     case audioMasterVersion: result = 2400; break;
-    case audioMasterCurrentId: result = 0; break;
+    case audioMasterCurrentId:
+        result = effect ? effect->uniqueID : 0;
+        break;
     case audioMasterIdle: result = 1; break;
     case audioMasterWantMidi: result = 1; break;
     case audioMasterGetTime: result = 0; break;
@@ -92,10 +108,10 @@ intptr_t __cdecl vst2_host_callback(
     case audioMasterGetBlockSize: result = static_cast<intptr_t>(s_max_frames); break;
     case audioMasterGetInputLatency: result = 0; break;
     case audioMasterGetOutputLatency: result = 0; break;
-    case audioMasterGetCurrentProcessLevel: result = 0; break;
+    case audioMasterGetCurrentProcessLevel: result = kKeepsakeVstProcessLevelUser; break;
     case audioMasterGetAutomationState:
-        result = kVstAutomationReading |
-                 (s_editor_open_edit_depth.load() > 0 ? kVstAutomationWriting : 0);
+        if (s_editor_open_in_progress.load()) result = kKeepsakeVstAutomationReadWrite;
+        else result = kVstAutomationReading;
         break;
     case audioMasterGetVendorString:
         if (ptr) {
@@ -134,11 +150,13 @@ intptr_t __cdecl vst2_host_callback(
     case audioMasterUpdateDisplay: result = 1; break;
     case audioMasterBeginEdit:
         s_editor_open_edit_depth.fetch_add(1);
+        s_begin_edit_count.fetch_add(1);
         result = 1;
         break;
     case audioMasterEndEdit: {
         uint32_t depth = s_editor_open_edit_depth.load();
         if (depth > 0) s_editor_open_edit_depth.fetch_sub(1);
+        s_end_edit_count.fetch_add(1);
         result = 1;
         break;
     }

@@ -17,6 +17,11 @@ extern double s_sample_rate;
 extern uint32_t s_max_frames;
 extern std::atomic<uint32_t> s_editor_open_edit_depth;
 extern std::atomic<bool> s_editor_open_in_progress;
+extern std::atomic<int32_t> s_last_automated_param;
+extern std::atomic<uint32_t> s_automate_count;
+extern std::atomic<uint32_t> s_begin_edit_count;
+extern std::atomic<uint32_t> s_end_edit_count;
+extern std::atomic<float> s_last_automated_value;
 intptr_t __cdecl vst2_host_callback(
     AEffect *, int32_t opcode, int32_t index, intptr_t value, void *ptr, float opt);
 void *vst2_open_library(const std::string &path, std::string &load_path);
@@ -174,6 +179,11 @@ public:
         if (!effect || !effect->dispatcher) return false;
         s_editor_open_edit_depth.store(0);
         s_editor_open_in_progress.store(true);
+        s_last_automated_param.store(-1);
+        s_last_automated_value.store(0.0f);
+        s_automate_count.store(0);
+        s_begin_edit_count.store(0);
+        s_end_edit_count.store(0);
 #ifdef _WIN32
         unsigned long thread_id = static_cast<unsigned long>(GetCurrentThreadId());
 #else
@@ -186,6 +196,12 @@ public:
         keepsake_debug_log("bridge/vst2: effEditOpen end result=%lld parent=%p edit_depth=%d\n",
                            static_cast<long long>(result), parent,
                            s_editor_open_edit_depth.load());
+        keepsake_debug_log("bridge/vst2: effEditOpen summary begin=%u automate=%u end=%u last_param=%d last_value=%.3f\n",
+                           s_begin_edit_count.load(),
+                           s_automate_count.load(),
+                           s_end_edit_count.load(),
+                           s_last_automated_param.load(),
+                           s_last_automated_value.load());
         s_editor_open_in_progress.store(false);
         return result != 0;
     }
