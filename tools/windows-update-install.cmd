@@ -6,6 +6,8 @@ for %%I in ("%REPO%") do set "REPO=%%~fI"
 
 set "CONFIG=Debug"
 set "BUILD_DIR=%REPO%\build-win"
+set "GENERATOR=Visual Studio 17 2022"
+set "PLATFORM=x64"
 set "SOURCE_CLAP=%BUILD_DIR%\%CONFIG%\keepsake.clap"
 set "SOURCE_BRIDGE=%BUILD_DIR%\%CONFIG%\keepsake-bridge.exe"
 set "CLAP_TARGET=%CommonProgramFiles%\CLAP\keepsake.clap"
@@ -16,6 +18,7 @@ echo [keepsake] repo=%REPO%
 cd /d "%REPO%" || exit /b 1
 
 git pull --ff-only || exit /b 1
+cmake -S "%REPO%" -B "%BUILD_DIR%" -G "%GENERATOR%" -A %PLATFORM% || exit /b 1
 cmake --build "%BUILD_DIR%" --config %CONFIG% || exit /b 1
 
 taskkill /IM reaper.exe /F >NUL 2>&1
