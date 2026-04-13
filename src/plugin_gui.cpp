@@ -6,7 +6,7 @@
 #include "debug_log.h"
 
 #ifdef _WIN32
-static const int GUI_OPEN_TIMEOUT_MS = 15000;
+static const int GUI_OPEN_TIMEOUT_MS = 45000;
 #else
 static const int GUI_OPEN_TIMEOUT_MS = 5000;
 #endif
@@ -36,8 +36,7 @@ static bool gui_is_api_supported(const clap_plugin_t *plugin,
     (void)is_floating;
     return strcmp(api, CLAP_WINDOW_API_COCOA) == 0;
 #elif defined(_WIN32)
-    (void)is_floating;
-    return strcmp(api, CLAP_WINDOW_API_WIN32) == 0;
+    return strcmp(api, CLAP_WINDOW_API_WIN32) == 0 && is_floating;
 #else
     (void)is_floating;
     return strcmp(api, CLAP_WINDOW_API_X11) == 0;
@@ -51,7 +50,7 @@ static bool gui_get_preferred_api(const clap_plugin_t *, const char **api,
     *is_floating = false;
 #elif defined(_WIN32)
     *api = CLAP_WINDOW_API_WIN32;
-    *is_floating = false;
+    *is_floating = true;
 #else
     *api = CLAP_WINDOW_API_X11;
     *is_floating = false;
@@ -75,6 +74,8 @@ static bool gui_create(const clap_plugin_t *plugin, const char *, bool is_floati
 
 static void gui_destroy(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
+    keepsake_debug_log("keepsake: gui_destroy open=%d floating=%d\n",
+                       kp->editor_open ? 1 : 0, kp->gui_is_floating ? 1 : 0);
     if (kp->editor_open && !kp->crashed) {
         send_and_wait(kp, IPC_OP_EDITOR_CLOSE);
         kp->editor_open = false;
@@ -88,15 +89,30 @@ static bool gui_get_size(const clap_plugin_t *plugin, uint32_t *w, uint32_t *h) 
     if (kp->editor_width > 0 && kp->editor_height > 0) {
         *w = static_cast<uint32_t>(kp->editor_width);
         *h = static_cast<uint32_t>(kp->editor_height);
+        keepsake_debug_log("keepsake: gui_get_size %ux%u\n", *w, *h);
         return true;
     }
+    keepsake_debug_log("keepsake: gui_get_size unavailable\n");
     return false;
 }
 
-static bool gui_can_resize(const clap_plugin_t *) { return false; }
-static bool gui_get_resize_hints(const clap_plugin_t *, clap_gui_resize_hints_t *) { return false; }
-static bool gui_adjust_size(const clap_plugin_t *, uint32_t *, uint32_t *) { return false; }
-static bool gui_set_size(const clap_plugin_t *, uint32_t, uint32_t) { return false; }
+static bool gui_can_resize(const clap_plugin_t *) {
+    keepsake_debug_log("keepsake: gui_can_resize -> 0\n");
+    return false;
+}
+static bool gui_get_resize_hints(const clap_plugin_t *, clap_gui_resize_hints_t *) {
+    keepsake_debug_log("keepsake: gui_get_resize_hints -> 0\n");
+    return false;
+}
+static bool gui_adjust_size(const clap_plugin_t *, uint32_t *w, uint32_t *h) {
+    keepsake_debug_log("keepsake: gui_adjust_size requested=%ux%u -> 0\n",
+                       w ? *w : 0, h ? *h : 0);
+    return false;
+}
+static bool gui_set_size(const clap_plugin_t *, uint32_t w, uint32_t h) {
+    keepsake_debug_log("keepsake: gui_set_size %ux%u -> 0\n", w, h);
+    return false;
+}
 
 static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *window) {
     auto *kp = get(plugin);
@@ -144,6 +160,8 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
 #endif
     }
     kp->editor_open = true;
+    keepsake_debug_log("keepsake: gui_set_parent success floating=%d\n",
+                       kp->gui_is_floating ? 1 : 0);
     return true;
 #endif
 }
@@ -165,11 +183,14 @@ static bool gui_show(const clap_plugin_t *plugin) {
         }
         kp->editor_open = true;
     }
+    keepsake_debug_log("keepsake: gui_show success floating=%d open=%d\n",
+                       kp->gui_is_floating ? 1 : 0, kp->editor_open ? 1 : 0);
     return true;
 }
 
 static bool gui_hide(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
+    keepsake_debug_log("keepsake: gui_hide open=%d\n", kp->editor_open ? 1 : 0);
     if (kp->editor_open && !kp->crashed) {
         send_and_wait(kp, IPC_OP_EDITOR_CLOSE);
         kp->editor_open = false;

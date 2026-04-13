@@ -25,10 +25,10 @@
 #define getpid _getpid
 #endif
 
-// Bridge I/O: command pipe (stdin/stdout) + wake pipe (fd 3)
+// Bridge I/O: command pipe on stdin + dedicated IPC out handle/pipe.
 #ifdef _WIN32
 PlatformPipe g_pipe_in  = GetStdHandle(STD_INPUT_HANDLE);
-PlatformPipe g_pipe_out = GetStdHandle(STD_OUTPUT_HANDLE);
+PlatformPipe g_pipe_out = PLATFORM_INVALID_PIPE;
 PlatformPipe g_wake_fd  = PLATFORM_INVALID_PIPE;
 #else
 PlatformPipe g_pipe_in  = STDIN_FILENO;
@@ -42,9 +42,19 @@ int main(int argc, char *argv[]) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     gui_init();
 
-    // Wake pipe fd passed as argv[1] by the host
+    // Wake pipe / IPC handle passed by the host.
     bool has_wake_pipe = false;
-#ifndef _WIN32
+#ifdef _WIN32
+    if (argc > 1) {
+        uintptr_t ipc_handle = static_cast<uintptr_t>(_strtoui64(argv[1], nullptr, 10));
+        if (ipc_handle != 0) {
+            g_pipe_out = reinterpret_cast<HANDLE>(ipc_handle);
+        }
+    }
+    if (g_pipe_out == PLATFORM_INVALID_PIPE) {
+        g_pipe_out = GetStdHandle(STD_OUTPUT_HANDLE);
+    }
+#else
     g_wake_fd = -1;
     if (argc > 1) {
         int fd = atoi(argv[1]);

@@ -174,16 +174,21 @@ std::vector<std::string> get_scan_paths() {
     if (home) paths.push_back(std::string(home) + "/Library/Audio/Plug-Ins/VST");
     paths.push_back("/Library/Audio/Plug-Ins/VST");
 #elif defined(_WIN32)
+    auto append_windows_paths = [&](const char *base) {
+        if (!base || base[0] == '\0') return;
+        paths.push_back(std::string(base) + "\\VST2");
+        paths.push_back(std::string(base) + "\\VSTPlugins");
+        paths.push_back(std::string(base) + "\\Steinberg\\VSTPlugins");
+    };
+
     const char *pf = getenv("PROGRAMFILES");
-    if (pf) {
-        paths.push_back(std::string(pf) + "\\VSTPlugins");
-        paths.push_back(std::string(pf) + "\\Steinberg\\VSTPlugins");
-    }
+    append_windows_paths(pf);
     const char *pf86 = getenv("PROGRAMFILES(X86)");
-    if (pf86) {
-        paths.push_back(std::string(pf86) + "\\VSTPlugins");
-        paths.push_back(std::string(pf86) + "\\Steinberg\\VSTPlugins");
-    }
+    append_windows_paths(pf86);
+    const char *common = getenv("COMMONPROGRAMFILES");
+    append_windows_paths(common);
+    const char *common86 = getenv("COMMONPROGRAMFILES(X86)");
+    append_windows_paths(common86);
 #else
     const char *home = getenv("HOME");
     if (home) paths.push_back(std::string(home) + "/.vst");

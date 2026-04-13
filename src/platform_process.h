@@ -12,46 +12,47 @@ static inline bool platform_spawn(const std::string &binary,
     sa.bInheritHandle = TRUE;
 
     HANDLE child_stdin_rd, child_stdin_wr;
-    HANDLE child_stdout_rd, child_stdout_wr;
+    HANDLE ipc_rd, ipc_wr;
 
     if (!CreatePipe(&child_stdin_rd, &child_stdin_wr, &sa, 0)) return false;
     SetHandleInformation(child_stdin_wr, HANDLE_FLAG_INHERIT, 0);
 
-    if (!CreatePipe(&child_stdout_rd, &child_stdout_wr, &sa, 0)) {
+    if (!CreatePipe(&ipc_rd, &ipc_wr, &sa, 0)) {
         CloseHandle(child_stdin_rd);
         CloseHandle(child_stdin_wr);
         return false;
     }
-    SetHandleInformation(child_stdout_rd, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(ipc_rd, HANDLE_FLAG_INHERIT, 0);
 
     STARTUPINFOA si = {};
     si.cb = sizeof(si);
     si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
     si.wShowWindow = SW_HIDE;
     si.hStdInput = child_stdin_rd;
-    si.hStdOutput = child_stdout_wr;
+    si.hStdOutput = GetStdHandle(STD_ERROR_HANDLE);
     si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
 
     PROCESS_INFORMATION pi = {};
     char cmd[4096];
-    snprintf(cmd, sizeof(cmd), "\"%s\"", binary.c_str());
+    snprintf(cmd, sizeof(cmd), "\"%s\" %llu", binary.c_str(),
+             static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(ipc_wr)));
 
     if (!CreateProcessA(nullptr, cmd, nullptr, nullptr, TRUE,
                         CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
         CloseHandle(child_stdin_rd);
         CloseHandle(child_stdin_wr);
-        CloseHandle(child_stdout_rd);
-        CloseHandle(child_stdout_wr);
+        CloseHandle(ipc_rd);
+        CloseHandle(ipc_wr);
         return false;
     }
 
     CloseHandle(child_stdin_rd);
-    CloseHandle(child_stdout_wr);
+    CloseHandle(ipc_wr);
     CloseHandle(pi.hThread);
 
     proc.pid = pi.dwProcessId;
     proc.pipe_to = child_stdin_wr;
-    proc.pipe_from = child_stdout_rd;
+    proc.pipe_from = ipc_rd;
     proc.process_handle = pi.hProcess;
     return true;
 }
