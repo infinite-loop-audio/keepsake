@@ -18,8 +18,11 @@ param(
   [int]$PlayTimeoutMs = 5000,
   [int]$PlayHoldMs = 1000,
   [switch]$KeepTemp,
+  [switch]$KeepTempOnFailure,
   [switch]$UseDefaultConfig,
-  [switch]$SyncDefaultInstall
+  [switch]$SyncDefaultInstall,
+  [string[]]$DebugPattern = @(),
+  [string[]]$RequireDebugPattern = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -152,6 +155,41 @@ function Sync-DefaultInstallBundle {
   Get-Item -LiteralPath $targetDir | ForEach-Object { $_.LastWriteTime = $stamp }
 }
 
+function Copy-DebugLogSnapshot {
+  param(
+    [string]$SourcePath,
+    [string]$TargetPath
+  )
+
+  if (-not (Test-Path $SourcePath)) { return $false }
+  Copy-Item -LiteralPath $SourcePath -Destination $TargetPath -Force
+  return $true
+}
+
+function Get-DebugMatches {
+  param(
+    [string]$Path,
+    [string[]]$Patterns
+  )
+
+  if (-not (Test-Path $Path)) { return @() }
+  if (-not $Patterns -or $Patterns.Count -eq 0) {
+    return @(Get-Content -LiteralPath $Path)
+  }
+
+  $lines = Get-Content -LiteralPath $Path
+  $matches = [System.Collections.Generic.List[string]]::new()
+  foreach ($line in $lines) {
+    foreach ($pattern in $Patterns) {
+      if ($line.Contains($pattern)) {
+        $matches.Add($line)
+        break
+      }
+    }
+  }
+  return @($matches.ToArray())
+}
+
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptDir
 if ([string]::IsNullOrWhiteSpace($ClapBundle)) {
@@ -177,10 +215,13 @@ $statusFile = Join-Path $tmpDir "status.txt"
 $logFile = Join-Path $tmpDir "reaper-smoke.log"
 $stdoutFile = Join-Path $tmpDir "reaper.stdout.log"
 $stderrFile = Join-Path $tmpDir "reaper.stderr.log"
+$debugLogCopy = Join-Path $tmpDir "keepsake-debug.log"
 $vstScanDir = Join-Path $tmpDir "vst-targets"
 $emptyVstDir = Join-Path $tmpDir "empty-vst"
 $reaperClapBackup = Join-Path $tmpDir "reaper-clap.backup.ini"
 $cfgArgs = @()
+$debugLogSource = Join-Path $env:TEMP "keepsake-debug.log"
+$preserveTemp = $KeepTemp
 
 $null = New-Item -ItemType Directory -Path $vstScanDir -Force
 $null = New-Item -ItemType Directory -Path $emptyVstDir -Force
@@ -217,6 +258,7 @@ clap_path_win64=$clapPath
   Write-Host "clap_bundle=$ClapBundle"
   Write-Host "temp_dir=$tmpDir"
   Write-Host "log_file=$logFile"
+  Write-Host "debug_log=$debugLogCopy"
   Write-Host ("config_mode=" + ($(if ($UseDefaultConfig) { "default" } else { "isolated" })))
   Write-Host ("open_ui=" + ($(if ($OpenUi) { 1 } else { 0 })))
   Write-Host ("run_transport=" + ($(if ($RunTransport) { 1 } else { 0 })))
@@ -258,6 +300,7 @@ clap_path_win64=$clapPath
   $env:KEEPSAKE_REAPER_SMOKE_PLAY_HOLD_MS = "$PlayHoldMs"
 
   try {
+    Remove-Item -LiteralPath $debugLogSource -Force -ErrorAction SilentlyContinue
     $reaperArgs = @("-newinst", "-nosplash", "-new") + $cfgArgs + @($scriptPath)
     $proc = Start-Process -FilePath $Reaper `
       -ArgumentList $reaperArgs `
@@ -300,6 +343,8 @@ clap_path_win64=$clapPath
     Stop-Process -Id $procId -ErrorAction SilentlyContinue
   } catch {}
 
+  $null = Copy-DebugLogSnapshot -SourcePath $debugLogSource -TargetPath $debugLogCopy
+
   Write-Host ""
   if (Test-Path $logFile) {
     Get-Content -LiteralPath $logFile
@@ -309,6 +354,54 @@ clap_path_win64=$clapPath
   Write-Host ""
   Write-Host "reaper_stdout=$stdoutFile"
   Write-Host "reaper_stderr=$stderrFile"
+  Write-Host "debug_log=$debugLogCopy"
+
+  $debugPatternsToPrint = $DebugPattern
+  if (($debugPatternsToPrint.Count -eq 0) -and $OpenUi) {
+    $debugPatternsToPrint = @(
+      "build=",
+      "gui thread",
+      "gui_call_sync",
+      "gui_drain_tasks",
+      "gui_open_editor_embedded_impl",
+      "EDITOR_SET_PARENT",
+      "window-tree phase=",
+      "editor embed",
+      "effEditOpen begin",
+      "effEditOpen end",
+      "hostcb"
+    )
+  }
+  $debugMatches = Get-DebugMatches -Path $debugLogCopy -Patterns $debugPatternsToPrint
+  if ($debugMatches.Count -gt 0) {
+    Write-Host ""
+    Write-Host "debug_extract_begin"
+    foreach ($line in $debugMatches) { Write-Host $line }
+    Write-Host "debug_extract_end"
+  } elseif (Test-Path $debugLogCopy) {
+    Write-Host ""
+    Write-Host "debug_extract_begin"
+    Get-Content -LiteralPath $debugLogCopy | Select-Object -Last 60
+    Write-Host "debug_extract_end"
+  } else {
+    Write-Host "debug_extract=missing"
+  }
+
+  $missingDebugPattern = $null
+  foreach ($pattern in $RequireDebugPattern) {
+    if (-not ($debugMatches | Where-Object { $_.Contains($pattern) } | Select-Object -First 1)) {
+      $missingDebugPattern = $pattern
+      break
+    }
+  }
+  if ($null -ne $missingDebugPattern) {
+    Write-Host "debug_required_missing=$missingDebugPattern"
+    $result = "FAIL"
+  }
+
+  if (($result -ne "PASS") -and $KeepTempOnFailure) {
+    $preserveTemp = $true
+  }
 
   switch ($result) {
     "PASS" { Write-Host "result=PASS"; exit 0 }
@@ -329,7 +422,7 @@ finally {
     Restore-ReaperClapCache -BackupPath $reaperClapBackup -TargetPath $defaultReaperClapIni
   }
 
-  if (-not $KeepTemp) {
+  if (-not $preserveTemp) {
     Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
   } else {
     Write-Host "temp dir preserved at $tmpDir"

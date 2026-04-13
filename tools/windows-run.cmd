@@ -22,6 +22,11 @@ if /I "%CMD%"=="smoke-apc" (
   exit /b %ERRORLEVEL%
 )
 
+if /I "%CMD%"=="smoke-apc-embed" (
+  call "%SCRIPT_DIR%windows-reaper-smoke.cmd" keepsake.vst2.41706364 --vst-path "C:\Program Files\Ample Sound\APC.dll" --use-default-config --sync-default-install --open-ui --keep-temp-on-failure --require-debug-pattern "build=" --require-debug-pattern "gui_open_editor_embedded_impl enter" --require-debug-pattern "EDITOR_SET_PARENT" %*
+  exit /b %ERRORLEVEL%
+)
+
 if /I "%CMD%"=="smoke-serum" (
   call "%SCRIPT_DIR%windows-reaper-smoke.cmd" keepsake.vst2.58667358 --vst-path "%CommonProgramFiles%\VST2\Serum_x64.dll" %*
   exit /b %ERRORLEVEL%
@@ -36,5 +41,6 @@ echo verbs:
 echo   update-install
 echo   dump-debug
 echo   smoke-apc [extra reaper-smoke args]
+echo   smoke-apc-embed [extra reaper-smoke args]
 echo   smoke-serum [extra reaper-smoke args]
 exit /b 1
