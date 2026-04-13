@@ -245,7 +245,7 @@ bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
 
     g_editor_hwnd = CreateWindowExA(
         0, "KeepsakeEditor", nullptr,
-        WS_CHILD | WS_VISIBLE,
+        WS_CHILD,
         0, 0, w, h,
         parent, nullptr, GetModuleHandle(nullptr), nullptr);
 
@@ -253,7 +253,7 @@ bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
 
     HWND editor_panel = CreateWindowExA(
         0, "KeepsakeEditor", nullptr,
-        WS_CHILD | WS_VISIBLE,
+        WS_CHILD,
         0, 0, w, h,
         g_editor_hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
 
@@ -268,7 +268,6 @@ bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
     g_parent_hwnd = parent;
     g_last_parent_w = 0;
     g_last_parent_h = 0;
-    resize_embedded_editor_to_parent();
     g_idle_timer = SetTimer(g_editor_hwnd, 1, 16, nullptr);
 
     keepsake_debug_log("bridge: editor embed parent=%p child=%p\n",
@@ -327,6 +326,7 @@ bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
 
     g_editor_open = true;
 
+    resize_embedded_editor_to_parent();
     ShowWindow(g_editor_hwnd, SW_SHOW);
     ShowWindow(editor_panel, SW_SHOW);
     resize_embedded_editor_to_parent();
