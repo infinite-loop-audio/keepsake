@@ -105,7 +105,7 @@ static bool gui_create(const clap_plugin_t *plugin, const char *, bool is_floati
 #ifdef __APPLE__
     kp->gui_is_floating = true;
 #elif defined(_WIN32)
-    kp->gui_is_floating = true;
+    kp->gui_is_floating = is_floating || kp->gui_embed_failed;
 #else
     kp->gui_is_floating = is_floating || kp->gui_embed_failed;
 #endif
@@ -175,8 +175,33 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
     }
     return true;
 #elif defined(_WIN32)
-    keepsake_debug_log("keepsake: gui_set_parent floating=%d open=%d deferred\n",
+    uint64_t handle = 0;
+    handle = reinterpret_cast<uint64_t>(window->win32);
+    kp->gui_transient_handle = handle;
+    keepsake_debug_log("keepsake: gui_set_parent handle=%p floating=%d open=%d\n",
+                       reinterpret_cast<void *>(static_cast<uintptr_t>(handle)),
                        kp->gui_is_floating ? 1 : 0, kp->editor_open ? 1 : 0);
+
+    if (kp->gui_embed_failed) {
+        keepsake_debug_log("keepsake: gui_set_parent embed previously failed, keep floating fallback\n");
+        return true;
+    }
+
+    if (!send_and_wait(kp, IPC_OP_EDITOR_SET_PARENT, &handle, sizeof(handle),
+                       nullptr, GUI_OPEN_TIMEOUT_MS)) {
+        if (platform_process_alive(kp->bridge->proc)) {
+            keepsake_debug_log("keepsake: gui_set_parent embed failed, switching to floating fallback\n");
+            kp->gui_embed_failed = true;
+            kp->gui_is_floating = true;
+            return true;
+        }
+        keepsake_debug_log("keepsake: gui_set_parent embed hard failure\n");
+        return false;
+    }
+
+    kp->editor_open = true;
+    kp->gui_is_floating = false;
+    keepsake_debug_log("keepsake: gui_set_parent embed success\n");
     return true;
 #else
     if (kp->gui_is_floating || kp->gui_embed_failed) {
@@ -240,7 +265,7 @@ static bool gui_show(const clap_plugin_t *plugin) {
     if (kp->crashed || !kp->has_editor) return false;
     keepsake_debug_log("keepsake: gui_show floating=%d open=%d\n",
                        kp->gui_is_floating ? 1 : 0, kp->editor_open ? 1 : 0);
-    if (kp->gui_is_floating && !kp->editor_open) {
+    if ((kp->gui_is_floating || kp->gui_embed_failed) && !kp->editor_open) {
         if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN, nullptr, 0, nullptr,
                            GUI_OPEN_TIMEOUT_MS)) {
             keepsake_debug_log("keepsake: gui_show() editor open failed\n");
