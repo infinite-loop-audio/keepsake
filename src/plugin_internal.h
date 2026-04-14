@@ -98,3 +98,6 @@ void plugin_on_main_thread(const clap_plugin_t *plugin);
 
 // Shared bridge pool accessor for plugin implementation files.
 BridgePool *keepsake_plugin_pool();
+
+// Treat the current bridge as unusable and dispose of it immediately.
+void abandon_bridge(KeepsakePlugin *kp, const char *reason);

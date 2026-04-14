@@ -3,6 +3,7 @@
 //
 
 #include "bridge_runtime.h"
+#include "bridge_gui.h"
 #include "debug_log.h"
 
 #include <cstdio>

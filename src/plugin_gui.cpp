@@ -59,6 +59,9 @@ static bool gui_open_floating(KeepsakePlugin *kp) {
     if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN, nullptr, 0, nullptr,
                        GUI_OPEN_TIMEOUT_MS)) {
         keepsake_debug_log("keepsake: floating fallback open failed\n");
+        if (kp->bridge && platform_process_alive(kp->bridge->proc)) {
+            abandon_bridge(kp, "EDITOR_OPEN failed while bridge still alive");
+        }
         return false;
     }
     kp->editor_open = true;
@@ -191,10 +194,9 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
     if (!send_and_wait(kp, IPC_OP_EDITOR_SET_PARENT, &handle, sizeof(handle),
                        nullptr, GUI_EMBED_TIMEOUT_MS)) {
         if (platform_process_alive(kp->bridge->proc)) {
-            keepsake_debug_log("keepsake: gui_set_parent embed failed, switching to floating fallback\n");
-            kp->gui_embed_failed = true;
-            kp->gui_is_floating = true;
-            return true;
+            keepsake_debug_log("keepsake: gui_set_parent embed timed out, abandoning live bridge\n");
+            abandon_bridge(kp, "EDITOR_SET_PARENT failed while bridge still alive");
+            return false;
         }
         keepsake_debug_log("keepsake: gui_set_parent embed hard failure\n");
         return false;
@@ -266,10 +268,17 @@ static bool gui_show(const clap_plugin_t *plugin) {
     if (kp->crashed || !kp->has_editor) return false;
     keepsake_debug_log("keepsake: gui_show floating=%d open=%d\n",
                        kp->gui_is_floating ? 1 : 0, kp->editor_open ? 1 : 0);
-    if ((kp->gui_is_floating || kp->gui_embed_failed) && !kp->editor_open) {
+    if (kp->gui_embed_failed && !kp->gui_is_floating) {
+        keepsake_debug_log("keepsake: gui_show blocked after embed timeout on current bridge instance\n");
+        return false;
+    }
+    if (kp->gui_is_floating && !kp->editor_open) {
         if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN, nullptr, 0, nullptr,
                            GUI_OPEN_TIMEOUT_MS)) {
             keepsake_debug_log("keepsake: gui_show() editor open failed\n");
+            if (kp->bridge && platform_process_alive(kp->bridge->proc)) {
+                abandon_bridge(kp, "GUI show editor open failed while bridge still alive");
+            }
             return false;
         }
         kp->editor_open = true;

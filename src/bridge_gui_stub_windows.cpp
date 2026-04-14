@@ -34,7 +34,6 @@ static const int WIN_HEADER_HEIGHT = 24;
 static int g_last_parent_w = 0;
 static int g_last_parent_h = 0;
 static std::atomic<bool> g_editor_open{false};
-static const DWORD EMBED_OPEN_TIMEOUT_MS = 1500;
 static constexpr const char *kKeepsakeHostWindowClass = "KeepsakeHostWindow";
 static constexpr const char *kKeepsakeEmbedWrapperClass = "KeepsakeEmbedWrapper";
 static constexpr const char *kKeepsakeEmbedPanelClass = "KeepsakeEmbedPanel";
@@ -430,73 +429,52 @@ static bool gui_open_editor_embedded_impl(BridgeLoader *loader, uint64_t native_
     loader->get_editor_rect(w, h);
     keepsake_debug_log("bridge: gui_open_editor_embedded_impl after get_editor_rect size=%dx%d\n", w, h);
 
-    keepsake_debug_log("bridge: gui_open_editor_embedded_impl before CreateWindowExA wrapper parent=%p size=%dx%d\n",
+    keepsake_debug_log("bridge: gui_open_editor_embedded_impl before CreateWindowExA host-child parent=%p size=%dx%d\n",
                        static_cast<void *>(parent), w, h);
     g_editor_hwnd = CreateWindowExA(
-        kKeepsakeEmbedWrapperExStyle, kKeepsakeEmbedWrapperClass, nullptr,
-        kKeepsakeEmbedChildStyle,
+        0, "STATIC", nullptr,
+        kKeepsakeEmbedChildStyle | WS_VISIBLE,
         0, 0, w, h,
         parent, nullptr, GetModuleHandle(nullptr), nullptr);
-    keepsake_debug_log("bridge: gui_open_editor_embedded_impl after CreateWindowExA wrapper hwnd=%p err=%lu\n",
+    keepsake_debug_log("bridge: gui_open_editor_embedded_impl after CreateWindowExA host-child hwnd=%p err=%lu\n",
                        static_cast<void *>(g_editor_hwnd),
                        static_cast<unsigned long>(GetLastError()));
-
-    if (!g_editor_hwnd) return false;
-
-    keepsake_debug_log("bridge: gui_open_editor_embedded_impl before CreateWindowExA panel parent=%p size=%dx%d\n",
-                       static_cast<void *>(g_editor_hwnd), w, h);
-    HWND editor_panel = CreateWindowExA(
-        0, kKeepsakeEmbedPanelClass, nullptr,
-        kKeepsakeEmbedChildStyle,
-        0, 0, w, h,
-        g_editor_hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
-    keepsake_debug_log("bridge: gui_open_editor_embedded_impl after CreateWindowExA panel hwnd=%p err=%lu\n",
-                       static_cast<void *>(editor_panel),
-                       static_cast<unsigned long>(GetLastError()));
-
-    if (!editor_panel) {
-        keepsake_debug_log("bridge: embedded panel create failed, trying STATIC fallback\n");
-        editor_panel = CreateWindowExA(
-            0, "STATIC", nullptr,
-            kKeepsakeEmbedChildStyle,
-            0, 0, w, h,
-            g_editor_hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
-        keepsake_debug_log("bridge: embedded STATIC panel fallback hwnd=%p err=%lu\n",
-                           static_cast<void *>(editor_panel),
-                           static_cast<unsigned long>(GetLastError()));
+    HWND editor_parent = g_editor_hwnd ? g_editor_hwnd : parent;
+    if (!g_editor_hwnd) {
+        keepsake_debug_log("bridge: embedded host-child create failed, reusing host parent directly\n");
     }
-
-    if (!editor_panel) {
-        keepsake_debug_log("bridge: embedded panel fallback missing, reusing wrapper as editor parent\n");
-    }
-
-    HWND editor_parent = editor_panel ? editor_panel : g_editor_hwnd;
-    g_editor_panel_hwnd = editor_panel;
+    g_editor_panel_hwnd = nullptr;
     g_active_loader = loader;
     g_parent_hwnd = parent;
     g_last_parent_w = 0;
     g_last_parent_h = 0;
-    g_idle_timer = SetTimer(g_editor_hwnd, 1, 16, nullptr);
-    log_window_tree("before-embed-open", parent, g_editor_hwnd, editor_panel);
+    if (g_editor_hwnd) {
+        g_idle_timer = SetTimer(g_editor_hwnd, 1, 16, nullptr);
+    } else {
+        g_idle_timer = 0;
+    }
+    log_window_tree("before-embed-open", parent, g_editor_hwnd, nullptr);
 
     keepsake_debug_log("bridge: editor embed parent=%p child=%p\n",
                        static_cast<void *>(parent), static_cast<void *>(g_editor_hwnd));
 
-    keepsake_debug_log("bridge: embedded editor open on gui thread parent=%p thread=%lu\n",
+    keepsake_debug_log("bridge: embedded editor open begin parent=%p thread=%lu\n",
                        static_cast<void *>(editor_parent),
                        static_cast<unsigned long>(GetCurrentThreadId()));
     bool open_ok = loader->open_editor(static_cast<void *>(editor_parent));
-    keepsake_debug_log("bridge: embedded editor open returned ok=%d thread=%lu\n",
+    keepsake_debug_log("bridge: embedded editor open end ok=%d thread=%lu\n",
                        open_ok ? 1 : 0,
                        static_cast<unsigned long>(GetCurrentThreadId()));
+
     if (!open_ok) {
         keepsake_debug_log("bridge: embedded editor open failed\n");
         if (g_idle_timer) {
             KillTimer(g_editor_hwnd, g_idle_timer);
             g_idle_timer = 0;
         }
-        if (editor_panel) DestroyWindow(editor_panel);
-        DestroyWindow(g_editor_hwnd);
+        if (g_editor_hwnd) {
+            DestroyWindow(g_editor_hwnd);
+        }
         g_editor_panel_hwnd = nullptr;
         g_editor_hwnd = nullptr;
         g_active_loader = nullptr;
@@ -507,10 +485,9 @@ static bool gui_open_editor_embedded_impl(BridgeLoader *loader, uint64_t native_
     g_editor_open = true;
 
     resize_embedded_editor_to_parent();
-    ShowWindow(g_editor_hwnd, SW_SHOW);
-    if (editor_panel) ShowWindow(editor_panel, SW_SHOW);
+    if (g_editor_hwnd) ShowWindow(g_editor_hwnd, SW_SHOW);
     resize_embedded_editor_to_parent();
-    log_window_tree("after-embed-open", parent, g_editor_hwnd, editor_panel);
+    log_window_tree("after-embed-open", parent, g_editor_hwnd, nullptr);
     keepsake_debug_log("bridge: editor embedded in host window %p\n",
                        static_cast<void *>(parent));
     return true;

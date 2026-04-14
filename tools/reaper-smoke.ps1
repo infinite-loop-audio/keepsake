@@ -387,6 +387,15 @@ clap_path_win64=$clapPath
     Write-Host "debug_extract=missing"
   }
 
+  $scriptStarted = Test-Path $logFile
+  if ((-not $scriptStarted) -and ($result -eq "TIMEOUT")) {
+    Write-Host "smoke_script_status=not_started"
+    Write-Host "smoke_inference=REAPER likely hung before the startup script began running (often during scan/load)"
+  } elseif (-not $scriptStarted) {
+    Write-Host "smoke_script_status=missing"
+    Write-Host "smoke_inference=REAPER exited or was stopped before the startup script produced a log"
+  }
+
   $missingDebugPattern = $null
   foreach ($pattern in $RequireDebugPattern) {
     if (-not ($debugMatches | Where-Object { $_.Contains($pattern) } | Select-Object -First 1)) {
