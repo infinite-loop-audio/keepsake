@@ -44,6 +44,7 @@
 build/
 build-*/
 dist/
+.effigy/
 
 # CMake
 CMakeFiles/
@@ -60,3 +61,4 @@ compile_commands.json
 # OS
 .DS_Store
 Thumbs.db
+.dsp_cache

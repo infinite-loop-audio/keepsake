@@ -1,0 +1,11 @@
+# Release posture — Keepsake ships binary artifacts. Version is tracked via
+# the project's C/C++ build system; update version-file when a build manifest
+# is added.
+[release]
+changelog = "CHANGELOG.md"
+tag-format = "v{version}"
+
+[release.gates]
+qa = "effigy qa"
+build = "cmake --build build -j4"
+smoke = "./build/host-test-threaded ./build/keepsake.clap keepsake.vst2.41706364 --timeout-ms 500 --entry-timeout-ms 5000 --max-memory-mb 2048 --vst-path /Library/Audio/Plug-Ins/VST/APC.vst"

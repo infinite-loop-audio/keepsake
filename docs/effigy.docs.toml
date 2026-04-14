@@ -1,0 +1,10 @@
+[docs_policy.indexes.vision]
+file = "docs/vision/README.md"
+dir = "docs/vision"
+section = "Vision Artifacts"
+exclude = ["history/**"]
+
+[docs_policy.next_actions.vision]
+index = "vision"
+heading = "## Next Task"
+allowlist_file = "docs/policy/vision-next-task-verbs.txt"
