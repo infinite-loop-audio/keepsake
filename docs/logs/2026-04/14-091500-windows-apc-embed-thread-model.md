@@ -543,3 +543,279 @@ wrapper-parent run one level higher than raw window visibility, focusing on
 what REAPER/host state differs before `effEditOpen begin`, because both the
 visibility-force and process-quiesce local fixes regressed without solving the
 underlying mismatch.
+
+## Follow-up: CLAP-Side Parent-Ready Wait Result
+
+The next focused check on `2026-04-14` used a forced fresh workspace build on
+the moved Windows VM:
+
+- `tools/reaper-smoke.ps1` was run with:
+  - `-ClapPathOverride C:\Users\betterthanclay\keepsake-win\build-win\Debug`
+  - `-BridgePathOverride C:\Users\betterthanclay\keepsake-win\build-win\Debug\keepsake-bridge.exe`
+- Preserved temp dir:
+  - `C:\Users\betterthanclay\AppData\Local\Temp\keepsake-reaper-smoke.fad4315cdeb341b6a1d3014ad7f03002`
+
+Targeted host-side instrumentation:
+
+- `plugin_gui.cpp` now waits up to `750 ms` in `gui_set_parent()` before
+  sending `EDITOR_SET_PARENT`.
+- During that wait it logs:
+  - `IsWindowVisible(hwnd)`
+  - whether `WS_VISIBLE` is already set on the REAPER wrapper
+  - the raw style value
+
+Result:
+
+- The CLAP side now independently confirms the same state we were seeing from
+  inside the bridge.
+- From:
+  - `keepsake: gui_wait_for_win32_parent_ready start hwnd=... timeout=750`
+- Through:
+  - repeated `keepsake: gui_set_parent wait parent=... visible=0 style_visible=0 style=0x40000000`
+- To:
+  - `keepsake: gui_wait_for_win32_parent_ready timeout hwnd=...`
+- the REAPER wrapper never becomes visible and never gains `WS_VISIBLE` before
+  `EDITOR_SET_PARENT` is sent.
+- Only after that timeout does the plugin send:
+  - `keepsake: send_and_wait begin opcode=EDITOR_SET_PARENT ...`
+- and the bridge later reaches:
+  - `bridge/vst2: effEditOpen begin ...`
+  - followed by the same repeated `audioMasterGetTime` loop and bridge
+    abandonment.
+
+Interpretation:
+
+- This is stronger evidence that the failing APC path is a host-lifecycle
+  mismatch, not just a local embed-window bug.
+- The bad REAPER wrapper state is already present on the CLAP side before the
+  bridge is even asked to embed.
+- A short "wait until parent looks ready" delay does not reproduce the earlier
+  successful context.
+
+Practical consequence:
+
+- Stop trying to coerce the current wrapper into a good state with more local
+  Win32 tweaks or short waits.
+- The next productive comparison should move earlier in the lifecycle and
+  identify what host-side call/order difference produced the one successful
+  wrapper-visible run before `gui_set_parent()` was even entered.
+
+Next task: instrument the higher-level CLAP GUI lifecycle on Windows,
+especially the ordering of `gui_set_scale()`, `gui_set_size()`, `gui_show()`,
+and `gui_set_parent()`, and compare that against the successful wrapper-visible
+run to find the first point where the REAPER host path diverges.
+
+## Follow-up: CLAP GUI Lifecycle Ordering Result
+
+The next forced workspace-binary smoke run on `2026-04-14` added sequence IDs
+to the CLAP GUI callbacks in `plugin_gui.cpp`.
+
+Preserved temp dir:
+
+- `C:\Users\betterthanclay\AppData\Local\Temp\keepsake-reaper-smoke.3abb9fbc1e7e4371bfe14e883dcd9b46`
+
+Observed callback order on the failing APC embedded-open path:
+
+1. `keepsake: gui_create seq=1 floating=0 has_editor=1`
+2. `keepsake: gui_set_scale seq=2 scale=2.000 -> 0`
+3. `keepsake: gui_get_size 960x580`
+4. `keepsake: gui_can_resize seq=3 -> 0`
+5. `keepsake: gui_set_parent seq=4 handle=... floating=0 open=0`
+6. repeated `gui_set_parent wait ... visible=0 style_visible=0 style=0x40000000`
+7. `gui_wait_for_win32_parent_ready timeout hwnd=...`
+8. `send_and_wait begin opcode=EDITOR_SET_PARENT ...`
+9. bridge reaches `effEditOpen begin ...`
+10. APC falls into the same repeated `audioMasterGetTime` loop
+
+Important negative result:
+
+- There is still no `gui_show()` callback before `gui_set_parent()` on this
+  failing path.
+- So the wrapper-visible successful run is not explained by a simple local
+  omission inside `gui_set_parent()` itself.
+- At least in this REAPER path, embed is being attempted before any CLAP-side
+  `show` callback is observed.
+
+Interpretation:
+
+- The strongest remaining hypothesis is now a higher-level host lifecycle
+  difference: either the successful run came from a different REAPER callback
+  ordering/state transition, or the wrapper-visible state was established by
+  REAPER outside the CLAP `gui_show()` call path we are seeing here.
+
+Next task: compare this failing callback order against the earlier successful
+wrapper-visible APC run and determine whether REAPER ever issued `gui_show()`
+or a materially different GUI callback order there, because that is now the
+clearest upstream divergence to verify.
+
+## Follow-up: Staged Parent + `gui_show()` Open Result
+
+The next experiment on `2026-04-14` changed Windows embedded open sequencing to
+match the earlier successful APC run more closely:
+
+- `EDITOR_SET_PARENT` now only stages the REAPER wrapper handle in the bridge
+  and returns quickly.
+- The actual embedded `EDITOR_OPEN` is then triggered from CLAP
+  `gui_show()` instead of being executed synchronously inside
+  `gui_set_parent()`.
+
+Primary result:
+
+- The call order now matches the earlier good run in the important way:
+  1. `gui_set_parent ...`
+  2. `gui_set_parent embed staged`
+  3. `gui_show seq=... floating=0 open=0`
+  4. `send_and_wait begin opcode=EDITOR_OPEN ...`
+  5. bridge `gui_open_editor using staged embed parent=...`
+- This confirms the old successful run was not a logging illusion: REAPER was
+  able to reach `gui_show()` before the bridge attempted embedded
+  `effEditOpen()`.
+
+Forced fresh-workspace smoke with the staged-parent path:
+
+- temp dir:
+  - `C:\Users\betterthanclay\AppData\Local\Temp\keepsake-reaper-smoke.60a180cba1a643a69148f6084ed80e70`
+- Short-timeout result:
+  - `gui_show()` reached `EDITOR_OPEN`
+  - bridge entered embedded `effEditOpen()`
+  - APC still fell into the long `audioMasterGetTime` loop
+  - the CLAP side eventually logged:
+    - `gui_show() editor open failed`
+    - `abandoning bridge ... reason=GUI show editor open failed while bridge still alive`
+
+Long-timeout follow-up:
+
+- temp dir:
+  - `C:\Users\betterthanclay\AppData\Local\Temp\keepsake-reaper-smoke.af7615b632444ab4a9d7bfd1395e2335`
+- harness result:
+  - `fx-ui-open-finish` at about `83.6 s`
+  - `fx-ui-close`
+  - overall smoke `PASS`
+- But the bridge-side pre-open state was still bad:
+  - `host-parent ... style=0x40000000 ... visible=0`
+  - wrapper/panel also `visible=0`
+- So the sequencing change alone did not reproduce the earlier
+  wrapper-visible/`WS_VISIBLE` host state before `effEditOpen()`.
+
+Interpretation:
+
+- This is still a meaningful architectural step:
+  - the "open during `gui_set_parent()`" path was indeed wrong
+  - deferring the real open until `gui_show()` is closer to the host behavior
+    that previously worked
+- But it is not sufficient by itself.
+- The remaining difference now appears to be *when* the bridge performs the
+  staged `EDITOR_OPEN` after `gui_show()`:
+  - in the current experiment, the bridge still opens immediately from inside
+    the `gui_show()` RPC
+  - the successful run appears to have allowed more host-side promotion of the
+    REAPER wrapper before embedded `effEditOpen()` actually began
+
+Practical consequence:
+
+- Keep pursuing the staged-parent model.
+- The next likely improvement is to decouple staged embedded `EDITOR_OPEN`
+  from the synchronous `gui_show()` RPC itself, so REAPER can return from
+  `gui_show()` and finish promoting the wrapper before APC `effEditOpen()`
+  starts.
+
+Next task: prototype a deferred staged embedded open that is requested by
+`gui_show()` but executed on the bridge GUI loop after the `EDITOR_OPEN` RPC
+returns, then check whether the REAPER wrapper finally reaches the visible
+`0x50000000` state before `effEditOpen()`.
+
+## Follow-up: Deferred GUI-Loop Open Result
+
+The next Windows experiment on `2026-04-14` kept the staged-parent model but
+stopped opening embedded immediately inside the synchronous `EDITOR_OPEN` /
+`gui_show()` RPC:
+
+- `gui_show()` still sends `EDITOR_OPEN`
+- but the bridge now only queues the staged embedded open
+- the actual `gui_open_editor_embedded_impl()` runs on the next bridge
+  `gui_idle()` pass
+
+This was the first clear end-to-end improvement.
+
+Preserved smoke run:
+
+- `C:\Users\betterthanclay\AppData\Local\Temp\keepsake-reaper-smoke.5cdccb099ea445a3ac834877ca0f0c6f`
+
+Observed sequence:
+
+1. `gui_set_parent seq=4 ...`
+2. `gui_set_parent embed staged`
+3. `gui_show seq=5 floating=0 open=0`
+4. bridge `gui_open_editor queued staged embed parent=...`
+5. host receives `send_and_wait OK opcode=EDITOR_OPEN`
+6. `gui_show success seq=6 floating=0 open=1`
+7. bridge `gui_idle opening staged embed parent=...`
+8. bridge `pre-open visibility ... parent_visible=1 ... wrapper_visible=1 ... panel_visible=1`
+9. bridge `host-parent ... style=0x50000000 ... visible=1`
+10. `effEditOpen begin ...`
+11. `effEditOpen end result=1 ...`
+12. `embedded editor open end ok=1`
+13. `editor embedded in host window ...`
+14. `gui_idle staged embed result=1`
+
+Harness result:
+
+- `fx-ui-open-finish` at about `9.9 s`
+- `fx-ui-close`
+- overall smoke `PASS`
+
+Important interpretation:
+
+- Deferring the real embedded open until *after* the synchronous
+  `gui_show()` RPC returns was the missing host-lifecycle step.
+- This is the first run where the bridge itself observed the REAPER wrapper in
+  the same good state as the earlier historical success:
+  - `style=0x50000000`
+  - `visible=1`
+- The previous staged-parent-but-synchronous-open experiment improved
+  sequencing but still opened too early; the wrapper remained
+  `style=0x40000000`, `visible=0` there.
+
+Practical consequence:
+
+- The Windows VST2 APC embedded-open path should keep this deferred staged-open
+  architecture.
+- The next work should be stabilization and cleanup rather than more blind
+  host-window experiments.
+
+Next task: validate the deferred staged-open architecture against Serum and the
+existing Windows smoke lanes, then reduce the temporary investigation logging
+once the cross-plugin checks stay stable.
+
+## Follow-up: Serum Validation Result
+
+The deferred staged-open architecture also held up on Serum in REAPER.
+
+Standalone probe sanity check:
+
+- `tools/windows-vst2-probe.ps1 "C:\Program Files\Common Files\VST2\Serum_x64.dll" -OpenEditor -Parent child -LoadThread current -RectThread current -OpenThread current`
+- Serum still behaves in the tiny host on the known-good
+  current-thread/current-thread/current-thread path.
+
+REAPER smoke validation:
+
+- command used the existing Serum plugin ID:
+  - `keepsake.vst2.58667358`
+- preserved temp dir:
+  - `C:\Users\betterthanclay\AppData\Local\Temp\keepsake-reaper-smoke.3583d6a1900b421bb9f4c715a744b7ae`
+- harness result:
+  - `fx-add-finish`
+  - `fx-ui-open-finish` at about `10.5 s`
+  - `fx-ui-close`
+  - overall `PASS`
+
+Meaning:
+
+- The deferred staged-open path is no longer just an APC-specific win.
+- It survives the second main regression plugin from the Windows handoff lane.
+- That makes the core lifecycle fix much more credible as the right
+  architecture, not just a plugin-specific workaround.
+
+Next task: keep APC + Serum as the primary Windows GUI regressions, then trim
+the temporary investigation logging to a smaller persistent set while
+preserving the new staged/deferred embedded-open architecture.

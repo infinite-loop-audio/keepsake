@@ -28,6 +28,9 @@ static HWND g_owner_hwnd = nullptr;
 static HWND g_header_hwnd = nullptr;
 static HWND g_editor_panel_hwnd = nullptr;
 static BridgeLoader *g_active_loader = nullptr;
+static uint64_t g_staged_embed_parent_handle = 0;
+static BridgeLoader *g_pending_embed_loader = nullptr;
+static std::atomic<bool> g_pending_embed_open{false};
 static UINT_PTR g_idle_timer = 0;
 static EditorHeaderInfo g_header_info;
 static const int WIN_HEADER_HEIGHT = 24;
@@ -85,8 +88,16 @@ static void log_window_info(const char *label, HWND hwnd) {
     LONG_PTR exstyle = GetWindowLongPtrA(hwnd, GWL_EXSTYLE);
     HWND parent = GetParent(hwnd);
     HWND owner = GetWindow(hwnd, GW_OWNER);
+    HWND root = GetAncestor(hwnd, GA_ROOT);
+    HWND foreground = GetForegroundWindow();
+    HWND focus = GetFocus();
+    DWORD window_pid = 0;
+    DWORD window_tid = GetWindowThreadProcessId(hwnd, &window_pid);
+    WINDOWPLACEMENT placement = {};
+    placement.length = sizeof(placement);
+    bool have_placement = GetWindowPlacement(hwnd, &placement) != FALSE;
     keepsake_debug_log(
-        "bridge: %s hwnd=%p class='%s' style=0x%llx exstyle=0x%llx parent=%p owner=%p visible=%d rect=%ld,%ld,%ld,%ld\n",
+        "bridge: %s hwnd=%p class='%s' style=0x%llx exstyle=0x%llx parent=%p owner=%p root=%p visible=%d enabled=%d iconic=%d zoomed=%d fg=%d focus=%d tid=%lu pid=%lu show=%u rect=%ld,%ld,%ld,%ld\n",
         label,
         static_cast<void *>(hwnd),
         klass,
@@ -94,7 +105,16 @@ static void log_window_info(const char *label, HWND hwnd) {
         static_cast<long long>(exstyle),
         static_cast<void *>(parent),
         static_cast<void *>(owner),
+        static_cast<void *>(root),
         IsWindowVisible(hwnd) ? 1 : 0,
+        IsWindowEnabled(hwnd) ? 1 : 0,
+        IsIconic(hwnd) ? 1 : 0,
+        IsZoomed(hwnd) ? 1 : 0,
+        foreground == hwnd ? 1 : 0,
+        focus == hwnd ? 1 : 0,
+        static_cast<unsigned long>(window_tid),
+        static_cast<unsigned long>(window_pid),
+        have_placement ? static_cast<unsigned>(placement.showCmd) : 0U,
         static_cast<long>(rc.left),
         static_cast<long>(rc.top),
         static_cast<long>(rc.right),
@@ -118,10 +138,6 @@ static void log_window_tree(const char *phase, HWND parent, HWND wrapper, HWND p
     log_window_info("host-parent", parent);
     log_window_info("wrapper", wrapper);
     log_window_info("panel", panel);
-    if (parent) EnumChildWindows(parent, LogChildWindowsProc, reinterpret_cast<LPARAM>("host-child"));
-    DWORD tid = GetCurrentThreadId();
-    keepsake_debug_log("bridge: window-tree thread=%lu\n", static_cast<unsigned long>(tid));
-    EnumThreadWindows(tid, LogThreadWindowsProc, 0);
 }
 
 static void gui_register_classes() {
@@ -155,17 +171,11 @@ static void gui_drain_tasks() {
     std::queue<std::function<void()>> tasks;
     {
         std::lock_guard<std::mutex> lock(g_gui_mutex);
-        keepsake_debug_log("bridge: gui_drain_tasks queued=%zu thread=%lu\n",
-                           g_gui_tasks.size(),
-                           static_cast<unsigned long>(GetCurrentThreadId()));
         tasks.swap(g_gui_tasks);
     }
     while (!tasks.empty()) {
         auto task = std::move(tasks.front());
         tasks.pop();
-        keepsake_debug_log("bridge: gui_drain_tasks run remaining=%zu thread=%lu\n",
-                           tasks.size(),
-                           static_cast<unsigned long>(GetCurrentThreadId()));
         task();
     }
 }
@@ -174,17 +184,11 @@ static void window_drain_tasks() {
     std::queue<std::function<void()>> tasks;
     {
         std::lock_guard<std::mutex> lock(g_window_mutex);
-        keepsake_debug_log("bridge: window_drain_tasks queued=%zu thread=%lu\n",
-                           g_window_tasks.size(),
-                           static_cast<unsigned long>(GetCurrentThreadId()));
         tasks.swap(g_window_tasks);
     }
     while (!tasks.empty()) {
         auto task = std::move(tasks.front());
         tasks.pop();
-        keepsake_debug_log("bridge: window_drain_tasks run remaining=%zu thread=%lu\n",
-                           tasks.size(),
-                           static_cast<unsigned long>(GetCurrentThreadId()));
         task();
     }
 }
@@ -563,11 +567,6 @@ static void wait_for_embed_parent_visibility(HWND parent, int timeout_ms) {
         HWND root = GetAncestor(parent, GA_ROOT);
         const bool parent_visible = IsWindowVisible(parent) != FALSE;
         const bool root_visible = root ? (IsWindowVisible(root) != FALSE) : false;
-        keepsake_debug_log("bridge: wait_for_embed_parent_visibility parent=%p visible=%d root=%p root_visible=%d\n",
-                           static_cast<void *>(parent),
-                           parent_visible ? 1 : 0,
-                           static_cast<void *>(root),
-                           root_visible ? 1 : 0);
         if (parent_visible || root_visible) return;
 
         MSG msg;
@@ -825,9 +824,6 @@ static bool gui_open_editor_embedded_impl(BridgeLoader *loader,
     }
     log_window_tree("before-embed-open", attach_parent, g_editor_hwnd, g_editor_panel_hwnd);
 
-    keepsake_debug_log("bridge: editor embed parent=%p child=%p\n",
-                       static_cast<void *>(attach_parent), static_cast<void *>(g_editor_hwnd));
-
     keepsake_debug_log("bridge: embedded editor open begin parent=%p thread=%lu\n",
                        static_cast<void *>(editor_parent),
                        static_cast<unsigned long>(GetCurrentThreadId()));
@@ -883,6 +879,13 @@ static bool gui_open_editor_embedded_impl(BridgeLoader *loader,
 }
 
 bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
+    if (g_staged_embed_parent_handle != 0) {
+        g_pending_embed_loader = loader;
+        g_pending_embed_open.store(true);
+        keepsake_debug_log("bridge: gui_open_editor queued staged embed parent=%p\n",
+                           reinterpret_cast<void *>(static_cast<uintptr_t>(g_staged_embed_parent_handle)));
+        return true;
+    }
     return gui_call_sync([=]() { return gui_open_editor_impl(loader, header); });
 }
 
@@ -898,6 +901,19 @@ bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
     });
 }
 
+bool gui_stage_editor_parent(BridgeLoader *loader, uint64_t native_handle) {
+    if (!loader || !loader->has_editor()) return false;
+    g_staged_embed_parent_handle = native_handle;
+    g_pending_embed_loader = loader;
+    keepsake_debug_log("bridge: staged embed parent=%p\n",
+                       reinterpret_cast<void *>(static_cast<uintptr_t>(native_handle)));
+    return true;
+}
+
+bool gui_has_pending_work() {
+    return g_pending_embed_open.load();
+}
+
 void gui_set_editor_transient(uint64_t native_handle) {
     gui_call_sync([=]() {
         g_owner_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(native_handle));
@@ -910,7 +926,12 @@ void gui_set_editor_transient(uint64_t native_handle) {
 
 void gui_close_editor(BridgeLoader *loader) {
     auto close_impl = [=]() {
-    if (!g_editor_open) return;
+    if (!g_editor_open) {
+        g_staged_embed_parent_handle = 0;
+        g_pending_embed_loader = nullptr;
+        g_pending_embed_open.store(false);
+        return;
+    }
     if (g_idle_timer) {
         if (g_editor_hwnd_on_window_thread) {
             window_call_sync([=]() { KillTimer(g_editor_hwnd, g_idle_timer); });
@@ -933,6 +954,9 @@ void gui_close_editor(BridgeLoader *loader) {
     g_active_loader = nullptr;
     g_parent_hwnd = nullptr;
     g_owner_hwnd = nullptr;
+    g_staged_embed_parent_handle = 0;
+    g_pending_embed_loader = nullptr;
+    g_pending_embed_open.store(false);
     g_editor_hwnd_on_window_thread = false;
     reset_embedded_surface_state();
     g_last_parent_w = 0;
@@ -951,12 +975,21 @@ bool gui_get_editor_rect(BridgeLoader *loader, int &w, int &h) {
 }
 
 void gui_idle(BridgeLoader *) {
+    if (!g_editor_open && g_pending_embed_open.load() &&
+        g_pending_embed_loader && g_staged_embed_parent_handle != 0) {
+        keepsake_debug_log("bridge: gui_idle opening staged embed parent=%p\n",
+                           reinterpret_cast<void *>(static_cast<uintptr_t>(g_staged_embed_parent_handle)));
+        bool ok = gui_open_editor_embedded(g_pending_embed_loader, g_staged_embed_parent_handle);
+        keepsake_debug_log("bridge: gui_idle staged embed result=%d\n", ok ? 1 : 0);
+        g_pending_embed_open.store(false);
+        if (!ok) {
+            g_pending_embed_loader = nullptr;
+            g_staged_embed_parent_handle = 0;
+        }
+    }
     if (!g_editor_open) return;
     MSG msg;
     while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
-        keepsake_debug_log("bridge: gui owner msg=0x%04X thread=%lu\n",
-                           static_cast<unsigned>(msg.message),
-                           static_cast<unsigned long>(GetCurrentThreadId()));
         if (msg.message == WM_KEEPSAKE_GUI_TASK) {
             gui_drain_tasks();
             continue;

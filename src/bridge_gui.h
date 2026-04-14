@@ -26,6 +26,8 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header);
 // native_handle is platform-specific: HWND on Windows, X11 Window on Linux.
 // On macOS, embedded mode is not supported — returns false (use floating).
 bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle);
+bool gui_stage_editor_parent(BridgeLoader *loader, uint64_t native_handle);
+bool gui_has_pending_work();
 
 // Set the transient/owner window for a floating editor.
 void gui_set_editor_transient(uint64_t native_handle);

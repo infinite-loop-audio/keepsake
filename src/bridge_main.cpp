@@ -93,7 +93,7 @@ int main(int argc, char *argv[]) {
 
     while (true) {
         // GUI throttle
-        if (gui_is_open()) {
+        if (gui_is_open() || gui_has_pending_work()) {
             uint64_t now = now_us();
             if (now - last_gui_idle_us >= 16000) {
                 gui_idle(nullptr);
@@ -102,7 +102,7 @@ int main(int argc, char *argv[]) {
         }
 
         // Command pipe (blocking when idle, short timeout when GUI open)
-        int pipe_timeout = gui_is_open() ? 16 : -1;
+        int pipe_timeout = (gui_is_open() || gui_has_pending_work()) ? 16 : -1;
 
 #ifndef _WIN32
         struct pollfd pfd = { g_pipe_in, POLLIN, 0 };
@@ -231,7 +231,7 @@ int main(int argc, char *argv[]) {
                 keepsake_debug_log("bridge: EDITOR_SET_PARENT handle=%p instance=%u\n",
                                    reinterpret_cast<void *>(static_cast<uintptr_t>(handle)),
                                    instance_id);
-                if (gui_open_editor_embedded(inst->loader, handle))
+                if (gui_stage_editor_parent(inst->loader, handle))
                     ipc_write_ok(g_pipe_out);
                 else
                     ipc_write_error(g_pipe_out, "EDITOR_SET_PARENT: failed");
