@@ -9,9 +9,12 @@ param(
   [ValidateSet("current", "worker")]
   [string]$LoadThread = "current",
   [ValidateSet("current", "worker")]
-  [string]$Thread = "current",
+  [string]$RectThread = "current",
+  [ValidateSet("current", "worker")]
+  [string]$OpenThread = "current",
   [int]$IdleMs = 1000,
   [int]$LoadTimeoutMs = 5000,
+  [int]$RectTimeoutMs = 5000,
   [int]$OpenTimeoutMs = 2000
 )
 
@@ -31,16 +34,19 @@ if ($OpenEditor) { $args += "--open-editor" }
 if ($RectTwice) { $args += "--rect-twice" }
 $args += @("--parent", $Parent,
   "--load-thread", $LoadThread,
-  "--thread", $Thread,
+  "--rect-thread", $RectThread,
+  "--open-thread", $OpenThread,
   "--idle-ms", "$IdleMs",
   "--load-timeout-ms", "$LoadTimeoutMs",
+  "--rect-timeout-ms", "$RectTimeoutMs",
   "--open-timeout-ms", "$OpenTimeoutMs")
 
 Write-Host "probe_exe=$probeExe"
 Write-Host "vst_path=$VstPath"
 Write-Host "parent_mode=$Parent"
 Write-Host "load_thread_mode=$LoadThread"
-Write-Host "thread_mode=$Thread"
+Write-Host "rect_thread_mode=$RectThread"
+Write-Host "open_thread_mode=$OpenThread"
 Write-Host "open_editor=" + ($(if ($OpenEditor) { 1 } else { 0 }))
 
 & $probeExe @args

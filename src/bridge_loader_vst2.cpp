@@ -43,6 +43,13 @@ class Vst2Loader : public BridgeLoader {
 
 public:
     bool load(const std::string &path) override {
+#ifdef _WIN32
+        keepsake_debug_log("bridge/vst2: load begin path=%s thread=%lu\n",
+                           path.c_str(),
+                           static_cast<unsigned long>(GetCurrentThreadId()));
+#else
+        keepsake_debug_log("bridge/vst2: load begin path=%s\n", path.c_str());
+#endif
         std::string load_path = path;
         lib = vst2_open_library(path, load_path);
         if (!lib) {
@@ -64,6 +71,14 @@ public:
 
         fprintf(stderr, "bridge/vst2: loaded — in=%d out=%d params=%d\n",
                 effect->numInputs, effect->numOutputs, effect->numParams);
+#ifdef _WIN32
+        keepsake_debug_log("bridge/vst2: effOpen/load complete effect=%p thread=%lu\n",
+                           static_cast<void *>(effect),
+                           static_cast<unsigned long>(GetCurrentThreadId()));
+#else
+        keepsake_debug_log("bridge/vst2: effOpen/load complete effect=%p\n",
+                           static_cast<void *>(effect));
+#endif
         return true;
     }
 

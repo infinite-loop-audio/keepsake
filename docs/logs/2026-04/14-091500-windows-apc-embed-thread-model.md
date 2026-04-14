@@ -158,6 +158,222 @@ Further probe and REAPER validation after that:
   - host-side safety remains intact because Keepsake can still abandon the live
     bridge instance rather than retrying risky GUI work on a poisoned bridge
 
+More granular standalone probe results after extending the probe again:
+
+- The probe now supports independently selecting
+  - `--load-thread`
+  - `--rect-thread`
+  - `--open-thread`
+- APC matrix results from that probe:
+  - load=current, rect=current, open=current: succeeds
+  - load=current, rect=worker, open=current: succeeds
+  - load=current, rect=current, open=worker: hangs badly enough to require an
+    external kill in this VM lane
+  - load=worker, rect=current: also hangs badly enough to require an external
+    kill in this VM lane
+- The important interpretation is narrower and more useful than before:
+  - APC does not appear to require `effEditGetRect` to stay on the main thread
+  - APC does appear highly sensitive to moving either plugin load/init or
+    `effEditOpen` off the process main thread
+
+First bridge-architecture experiment after that probe evidence:
+
+- Windows GUI ownership in `bridge_gui_stub_windows.cpp` was changed so the
+  bridge main thread becomes the Win32 GUI owner instead of spinning up a
+  separate dedicated GUI thread.
+- This is architecturally closer to the standalone probe's known-good APC path,
+  because the bridge process main thread already owns IPC and GUI while audio
+  work happens on separate instance worker threads.
+- Build/test status from this first pass is mixed:
+  - the code builds successfully
+  - default-install validation was temporarily obscured by a stale locked
+    `Program Files\Common Files\CLAP\keepsake-bridge.exe`
+  - isolated-config REAPER smoke against a staged local CLAP path still hung
+    before the startup script, so this change is not yet validated as an
+    improvement in REAPER
+- So the architectural direction is still plausible, but not proven yet in the
+  full REAPER lane
+
+Fresh validation after updating the installed `keepsake.clap` and forcing
+`KEEPSAKE_BRIDGE_PATH` to the freshly built workspace bridge:
+
+- REAPER did run the new bridge build path:
+  - the preserved debug log contains
+    - `bridge: gui owner thread init ...`
+    - `bridge: gui owner thread ready ...`
+- The APC embedded-open failure boundary moved earlier than before:
+  - under the older "dedicated GUI helper thread" path, Keepsake got past
+    `CreateWindowExA` and then APC hung inside `effEditOpen`
+  - under the new "bridge main thread owns Win32 GUI" path, Keepsake gets to
+    `gui_open_editor_embedded_impl`, validates the host parent, and gets a
+    cached `effEditGetRect`, but then stops at
+    `before CreateWindowExA host-child ...`
+  - the `after CreateWindowExA host-child ...` line never appears
+- Interpretation:
+  - "main thread owns all GUI work" is not a complete fix by itself
+  - there is likely a second constraint around how/where the embedded host
+    child window is created when targeting REAPER's parent HWND
+  - that means the likely end state is not "move everything to the main thread",
+    but rather "find the exact ownership split that matches a working host
+    model" and prove it incrementally
+
+Follow-up hybrid experiment after that:
+
+- A helper window thread was reintroduced only for embedded host-child window
+  creation and timer/message pumping.
+- APC-facing calls (`effEditGetRect`, `effEditOpen`) still stayed on the bridge
+  main thread.
+- Result:
+  - the helper window thread came up successfully
+  - `window_call_sync` reached `task-begin` on that helper thread
+  - the log still stopped before `after CreateWindowExA host-child ...`
+- Interpretation:
+  - the problem is not merely "which thread later calls APC `effEditOpen`"
+  - REAPER-parent child-window creation itself is hanging even when delegated to
+    a helper window thread inside the new hybrid design
+  - notably, that is still different from the older all-helper-thread design,
+    which got through `CreateWindowExA` and then died later in `effEditOpen`
+  - so there is likely some additional state/ordering requirement from the old
+    model that this hybrid split does not preserve
+
+One more targeted follow-up after that:
+
+- The hybrid design was changed so the helper window thread created the older
+  wrapper/panel window shape instead of a single `"STATIC"` child, while
+  `effEditOpen` still remained on the bridge main thread.
+- That regressed much harder:
+  - REAPER never reached the startup script
+  - no Keepsake debug log was produced for the run
+- That makes the conclusion stronger:
+  - recreating only the old window shape is not enough
+  - the older successful `CreateWindowExA` behavior depended on more of the old
+    all-helper-thread flow than just wrapper/panel HWND structure
+  - partial reconstruction of that flow appears to make the whole lane less
+    stable rather than more stable
+
+Latest continuation after that:
+
+- `bridge_gui_stub_windows.cpp` now supports a runtime-selected embedded-open
+  mode via `KEEPSAKE_WIN_EMBED_MODE`:
+  - `main`: create the embedded host child on the bridge GUI-owner thread
+  - `hybrid`: create the host child on the helper window thread but keep APC
+    `effEditOpen` on the bridge GUI-owner thread
+  - `window`/`legacy`/`all-helper`: run the full embedded-open path on the
+    helper window thread, which is the closest approximation of the older
+    all-helper-thread model without rewriting the file again
+- The purpose of this switch is not to ship three architectures; it is to let
+  the REAPER lane compare call-stack ownership models directly while keeping the
+  newer host-safety behavior intact.
+- Clean serial REAPER smoke runs against APC with
+  `-BridgePathOverride build-win\\Debug\\keepsake-bridge.exe` now show:
+  - all three modes keep REAPER responsive enough for the smoke script to reach
+    `fx-ui-open-finish` and `fx-ui-close`
+  - in every mode, the host-side `EDITOR_SET_PARENT` request still times out
+    and Keepsake abandons the live bridge instance instead of retrying another
+    risky GUI path on the same instance
+  - this is a meaningful safety win even though embedded open is still failing,
+    because the host does not lock up
+- The visible bridge boundary from those runs is still the same:
+  - `gui_open_editor_embedded_impl` enters
+  - `IsWindow(parent)` succeeds
+  - `get_editor_rect` succeeds
+  - the log reaches `before CreateWindowExA host-child ...`
+  - then the host-side timeout fires and the bridge is abandoned
+- Interpretation:
+  - the runtime mode switch is useful because it removes "edit the file again"
+    friction from the next comparison step
+  - but it also shows that simply choosing between `main`, `hybrid`, and
+    restored all-helper-style ownership is not enough to fix APC inside the
+    current bridge structure
+  - the safety behavior is now doing the right thing: failure to embed no longer
+    implies a host lockup
+
+Primary-source follow-up after adding the runtime switch:
+
+- JUCE source confirms two Windows-specific expectations that line up with the
+  probe evidence:
+  - VST initialization is asserted to happen on the Windows message thread
+    because many plugins need to create HWNDs there during init
+  - the host's embedded-editor path opens the plugin against an already-owned
+    embedded HWND and then immediately performs the usual
+    `effEditGetRect -> effEditOpen -> effEditGetRect` sequence on that same
+    path
+- yabridge's editor architecture points in the same direction at a higher level:
+  - it creates an owned editor/windowing surface up front
+  - then embeds that owned surface into the host-facing hierarchy
+  - then passes the resulting owned Win32 handle to the plugin editor open call
+- The important takeaway is not that Keepsake should copy yabridge literally,
+  but that both references avoid the "create an ad hoc host-child window at
+  `set_parent` time and hope the thread split works out" pattern that Keepsake
+  is currently fighting.
+- As a small harness improvement, `tools/reaper-smoke.ps1` now accepts
+  `-EmbedModeOverride` and forwards it to `KEEPSAKE_WIN_EMBED_MODE`, so mode
+  comparisons no longer need an outer environment wrapper command.
+
+First owned-surface redesign result after that:
+
+- The Windows bridge now pre-creates an owned embedded wrapper/panel surface
+  before attempting plugin editor open, and only then attaches that surface to
+  the host parent with `SetParent()`.
+- This directly tests the hypothesis from the JUCE/yabridge research that the
+  bridge should own a stable Win32 editor surface before `effEditOpen()` rather
+  than trying to create a child window directly under REAPER's parent during
+  `EDITOR_SET_PARENT`.
+- The first attempt failed for a clean Win32 reason:
+  - the pre-created wrapper was mistakenly created with `WS_CHILD` and no
+    parent, which returned Win32 error `1406`
+  - after switching the pre-created wrapper to start life as a popup/tool
+    window and only converting it to a child on attach, the experiment worked
+- With that fix in place:
+  - `ensure_embedded_surface()` succeeds
+  - `attach_embedded_surface()` succeeds
+  - REAPER remains responsive
+  - `main` mode and `hybrid` mode both now reach
+    `effEditOpen begin parent=<owned panel hwnd>`
+- This is the clearest architectural progress so far:
+  - the old dead zone around creating a host child directly under REAPER's HWND
+    is no longer the active blocker
+  - the remaining blocker is APC inside `effEditOpen()` after being given the
+    bridge-owned embedded panel HWND
+- Interpretation:
+  - the "owned surface before open" change was worth doing and is closer to the
+    structure used by working hosts
+  - but it is not sufficient by itself, because APC still wedges in
+    `effEditOpen()` even after the parent surface ownership model is improved
+  - the next remaining variable is the lifecycle/thread context of the plugin
+    instance itself rather than raw host-child window creation
+
+Follow-up proof after instrumenting the current `main` path:
+
+- The bridge now logs the thread ID for:
+  - `INIT`
+  - direct VST2 load
+  - VST2 `effOpen`
+  - VST2 `effEditOpen`
+- In the current Windows `main` embed path, those are all the same thread for
+  APC:
+  - `bridge: INIT thread=...`
+  - `bridge: INIT load direct thread=...`
+  - `bridge/vst2: load begin ... thread=...`
+  - `bridge/vst2: effOpen/load complete ... thread=...`
+  - `bridge/vst2: effEditOpen begin ... thread=...`
+- That is an important negative result:
+  - the current `main` path is no longer violating the "load/open on the same
+    process thread" expectation suggested by the standalone probe
+  - APC still wedges anyway when opened inside the full bridge/REAPER context
+- Another targeted comparison also ruled out one more easy explanation:
+  - attaching the owned surface to REAPER's root ancestor instead of the direct
+    provided wrapper still reaches `effEditOpen begin`
+  - so the remaining blocker does not look like a simple "wrong ancestor HWND"
+    issue either
+- Interpretation:
+  - the remaining mismatch is now likely about the full host/context around the
+    editor open rather than the narrow thread-affinity or child-window-creation
+    seam
+  - likely candidates are message-loop expectations during `effEditOpen`,
+    visibility/activation/state of the host window hierarchy, or assumptions APC
+    makes about being opened from a conventional in-process host window stack
+
 ## Recommended Next Move
 
 Do not keep iterating on random `CreateWindowEx` variants in the current
@@ -179,7 +395,8 @@ Practical continuation target:
    - current-thread load + current-thread open is the known-good APC/Serum
      baseline
    - worker-thread open is known-bad
-   - APC worker-thread load is now a prime suspect too
+   - APC worker-thread load is now strongly suspect too
+   - APC worker-thread `effEditGetRect` alone is not the main problem
 4. Design a consistent per-instance GUI ownership model:
    - either the bridge process main thread becomes the coherent Windows VST2
      GUI owner for that instance
@@ -187,8 +404,142 @@ Practical continuation target:
      owning GUI thread must be allowed to wedge
 5. Use JUCE and yabridge source as architectural references, not as copy-paste
    implementations.
+6. Treat host-child window creation as a separate variable from `effEditOpen`
+   thread affinity:
+   - the latest bridge experiment suggests those may have different constraints
+7. Treat "window creation thread" and "full embedded-open call stack thread" as
+   different variables too:
+   - the latest hybrid experiment suggests partial delegation is not equivalent
+     to the old all-helper-thread flow
+8. Avoid keeping partially reconstructed helper-thread/window-shape experiments
+   once they regress scan/load:
+   - revert them quickly and preserve only the evidence
 
-Next task: use the standalone probe to prove whether APC specifically requires
-"load + `effEditGetRect` + `effEditOpen`" to stay on the process main thread,
-then reshape the bridge around that ownership model instead of continuing
-secondary GUI-thread experiments.
+Next task: use the new `KEEPSAKE_WIN_EMBED_MODE` switch plus preserved debug-log
+runs to compare the full last successful line for `main`, `hybrid`, and
+`window` modes without launching REAPER in parallel, then decide whether the
+next move should be:
+- a stronger disposable-GUI-boundary design in the bridge
+- or a redesign where the bridge creates and owns a stable Win32 editor surface
+  before `EDITOR_SET_PARENT`, closer to the ownership model used by working
+  hosts/reference implementations
+
+## Follow-up: Visibility Control Result
+
+Latest focused APC wrapper-parent runs on `2026-04-14` tightened the visibility
+story further:
+
+- The owned wrapper/panel path remains host-safe in `main` mode:
+  - REAPER stays responsive
+  - the smoke script reaches `fx-ui-open-finish`
+  - on timeout, Keepsake abandons the live bridge instead of wedging the host
+- In the stable wrapper-parent control run, the bridge now logs:
+  - `attach_embedded_surface visible wrapper=0 panel=0 parent=0`
+  - `pre-open visibility ... parent_visible=0 ... wrapper_visible=0 panel_visible=0`
+  - `effEditOpen begin ...`
+- That means APC can still enter `effEditOpen()` even when REAPER's wrapper,
+  the bridge-owned wrapper, and the panel are all still `visible=0`.
+- A targeted `KEEPSAKE_WIN_FORCE_SHOW_PARENT=1` experiment ruled out one more
+  visibility theory:
+  - after `wait_for_embed_parent_visibility()` times out, the bridge logs
+    `force showing embed parent=...`
+  - the next line never appears
+  - `send_and_wait(EDITOR_SET_PARENT)` later times out and the host abandons
+    the bridge
+- Interpretation:
+  - forcing `ShowWindow()`/`UpdateWindow()` on REAPER's wrapper is itself a bad
+    idea in this context and can block before APC `effEditOpen()` even starts
+  - the remaining APC wedge is not simply "the parent must be visible first"
+  - host-window visibility is likely owned by REAPER's UI lifecycle and should
+    not be forced by Keepsake
+
+Practical consequence:
+
+- Keep the host-safe owned-surface path.
+- Do not keep the forced-host-parent-show experiment enabled by default.
+- Treat REAPER wrapper visibility as an observation, not a control knob.
+
+Next task: compare the one successful wrapper-parent APC run against the
+current stable wrapper-parent timeout run at the host-callback level inside
+`effEditOpen()`, because the bridge now reaches APC open again without touching
+REAPER's visibility state.
+
+## Follow-up: `audioMasterGetTime` Loop Result
+
+The next focused comparison on `2026-04-14` moved the mystery inside APC's
+host-callback behavior during `effEditOpen()`:
+
+- The earlier successful wrapper-parent APC run shows:
+  - `effEditOpen begin ...`
+  - the expected burst of `BeginEdit` / `Automate` / `EndEdit`
+  - `effEditOpen end result=1`
+- The current stable timeout run shows:
+  - the same `BeginEdit` / `Automate` / `EndEdit` burst
+  - then a long repeated loop of `audioMasterGetTime`
+  - no `effEditOpen end`
+- Important contrast with the standalone probe:
+  - the probe host also does not implement `audioMasterGetTime`
+  - APC still opens there and never asks for `audioMasterGetTime` during the
+    successful current-thread open path
+- Targeted negative experiment:
+  - temporarily returning a non-null `VstTimeInfo*` from the bridge host
+    callback, including a fuller set of requested timing flags, did not change
+    the APC outcome
+  - APC still wedged after entering the same `audioMasterGetTime` loop
+- Interpretation:
+  - the bridge-only `audioMasterGetTime` loop is real and useful evidence
+  - but it does not appear to be caused by the host merely returning `0` or by
+    missing obvious timing fields
+  - it is more likely a symptom of the broader embedded-open host context than
+    the primary defect itself
+
+Practical consequence:
+
+- Do not keep speculative `audioMasterGetTime` behavior changes unless they
+  demonstrate a concrete win.
+- Treat the `audioMasterGetTime` loop as a discriminator between the successful
+  and failing APC contexts.
+
+Next task: compare the full pre-open host context for the successful
+wrapper-parent APC run against the failing wrapper-parent run, especially
+window-tree ownership, style/state, and any host callback differences before
+the first `audioMasterGetTime`, because that loop now looks like a downstream
+symptom rather than the root cause.
+
+## Follow-up: Process Interleaving Result
+
+One more focused comparison on `2026-04-14` exposed a likely contextual
+difference, but the first mitigation attempt did not hold up:
+
+- In the successful wrapper-parent APC run:
+  - `effEditOpen begin` is followed directly by APC editor callbacks
+  - no CLAP/bridge process traffic is visible before `effEditOpen end`
+- In the failing wrapper-parent APC run:
+  - `effEditOpen begin` is immediately interleaved with:
+    - `keepsake: process request ...`
+    - `bridge: process request ...`
+    - repeated `audioMasterGetTime`
+  - APC never returns from `effEditOpen`
+- That suggests process/audio activity during embedded open may be part of the
+  failing context.
+
+Targeted negative experiment:
+
+- A narrow Windows-only guard was added temporarily to suppress CLAP processing
+  while `gui_set_parent()` waited on `EDITOR_SET_PARENT`.
+- That experiment regressed the lane badly enough that REAPER could hang before
+  the smoke script/debug logs were established.
+- The change was reverted completely.
+
+Practical consequence:
+
+- Keep process interleaving in mind as a possible contributor.
+- Do not suppress processing from the CLAP side during GUI embed open unless a
+  future design makes that coordination explicit and safe.
+- The simple "silence while embedding" guard is not robust enough.
+
+Next task: compare the successful wrapper-parent APC run against the failing
+wrapper-parent run one level higher than raw window visibility, focusing on
+what REAPER/host state differs before `effEditOpen begin`, because both the
+visibility-force and process-quiesce local fixes regressed without solving the
+underlying mismatch.

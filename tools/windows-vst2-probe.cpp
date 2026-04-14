@@ -11,8 +11,9 @@
 //   windows-vst2-probe <plugin.dll> [--open-editor]
 //       [--parent child|top|none]
 //       [--load-thread current|worker] [--load-timeout-ms N]
-//       [--thread current|worker]
-//       [--idle-ms N] [--open-timeout-ms N] [--rect-twice]
+//       [--rect-thread current|worker] [--rect-timeout-ms N]
+//       [--open-thread current|worker] [--idle-ms N] [--open-timeout-ms N]
+//       [--rect-twice]
 
 #include <vestige/vestige.h>
 
@@ -38,12 +39,7 @@ enum class ParentMode {
     Top,
 };
 
-enum class OpenThreadMode {
-    Current,
-    Worker,
-};
-
-enum class LoadThreadMode {
+enum class ThreadMode {
     Current,
     Worker,
 };
@@ -53,10 +49,12 @@ struct ProbeOptions {
     bool open_editor = false;
     bool rect_twice = false;
     ParentMode parent_mode = ParentMode::Child;
-    LoadThreadMode load_thread_mode = LoadThreadMode::Current;
-    OpenThreadMode open_thread_mode = OpenThreadMode::Current;
+    ThreadMode load_thread_mode = ThreadMode::Current;
+    ThreadMode rect_thread_mode = ThreadMode::Current;
+    ThreadMode open_thread_mode = ThreadMode::Current;
     int idle_ms = 1500;
     int load_timeout_ms = 5000;
+    int rect_timeout_ms = 5000;
     int open_timeout_ms = 2000;
 };
 
@@ -264,6 +262,55 @@ void pump_messages_and_idle(ProbeState &state, int duration_ms) {
     }
 }
 
+const char *thread_mode_name(ThreadMode mode) {
+    return mode == ThreadMode::Current ? "current" : "worker";
+}
+
+template <typename Fn, typename Result>
+bool run_with_optional_worker(const char *label,
+                              ThreadMode mode,
+                              int timeout_ms,
+                              Fn &&fn,
+                              Result &result,
+                              unsigned exit_code) {
+    std::atomic<bool> done{false};
+
+    auto run = [&]() {
+        result = fn();
+        done.store(true, std::memory_order_release);
+    };
+
+    if (mode == ThreadMode::Current) {
+        run();
+        return true;
+    }
+
+    std::thread worker(run);
+    auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(timeout_ms);
+    while (!done.load(std::memory_order_acquire)) {
+        MSG msg;
+        while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageA(&msg);
+        }
+
+        if (std::chrono::steady_clock::now() >= deadline) {
+            std::printf("[%s] TIMEOUT after %d ms on worker thread\n",
+                        label,
+                        timeout_ms);
+            std::fflush(stdout);
+            worker.detach();
+            ExitProcess(exit_code);
+        }
+
+        Sleep(16);
+    }
+
+    worker.join();
+    return true;
+}
+
 bool parse_args(int argc, char **argv, ProbeOptions &opts) {
     if (argc < 2) return false;
     opts.plugin_path = argv[1];
@@ -281,18 +328,25 @@ bool parse_args(int argc, char **argv, ProbeOptions &opts) {
             else return false;
         } else if (strcmp(argv[i], "--load-thread") == 0 && i + 1 < argc) {
             const char *value = argv[++i];
-            if (strcmp(value, "current") == 0) opts.load_thread_mode = LoadThreadMode::Current;
-            else if (strcmp(value, "worker") == 0) opts.load_thread_mode = LoadThreadMode::Worker;
+            if (strcmp(value, "current") == 0) opts.load_thread_mode = ThreadMode::Current;
+            else if (strcmp(value, "worker") == 0) opts.load_thread_mode = ThreadMode::Worker;
             else return false;
-        } else if (strcmp(argv[i], "--thread") == 0 && i + 1 < argc) {
+        } else if (strcmp(argv[i], "--rect-thread") == 0 && i + 1 < argc) {
             const char *value = argv[++i];
-            if (strcmp(value, "current") == 0) opts.open_thread_mode = OpenThreadMode::Current;
-            else if (strcmp(value, "worker") == 0) opts.open_thread_mode = OpenThreadMode::Worker;
+            if (strcmp(value, "current") == 0) opts.rect_thread_mode = ThreadMode::Current;
+            else if (strcmp(value, "worker") == 0) opts.rect_thread_mode = ThreadMode::Worker;
+            else return false;
+        } else if (strcmp(argv[i], "--open-thread") == 0 && i + 1 < argc) {
+            const char *value = argv[++i];
+            if (strcmp(value, "current") == 0) opts.open_thread_mode = ThreadMode::Current;
+            else if (strcmp(value, "worker") == 0) opts.open_thread_mode = ThreadMode::Worker;
             else return false;
         } else if (strcmp(argv[i], "--idle-ms") == 0 && i + 1 < argc) {
             opts.idle_ms = std::atoi(argv[++i]);
         } else if (strcmp(argv[i], "--load-timeout-ms") == 0 && i + 1 < argc) {
             opts.load_timeout_ms = std::atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--rect-timeout-ms") == 0 && i + 1 < argc) {
+            opts.rect_timeout_ms = std::atoi(argv[++i]);
         } else if (strcmp(argv[i], "--open-timeout-ms") == 0 && i + 1 < argc) {
             opts.open_timeout_ms = std::atoi(argv[++i]);
         } else {
@@ -308,7 +362,8 @@ void print_usage(const char *argv0) {
                  "usage: %s <plugin.dll> [--open-editor] [--rect-twice]\n"
                  "       [--parent child|top|none]\n"
                  "       [--load-thread current|worker] [--load-timeout-ms N]\n"
-                 "       [--thread current|worker] [--idle-ms N] [--open-timeout-ms N]\n",
+                 "       [--rect-thread current|worker] [--rect-timeout-ms N]\n"
+                 "       [--open-thread current|worker] [--idle-ms N] [--open-timeout-ms N]\n",
                  argv0);
 }
 
@@ -346,39 +401,14 @@ bool load_plugin_on_current_thread(const ProbeOptions &opts, ProbeState &state) 
 }
 
 bool load_plugin(const ProbeOptions &opts, ProbeState &state) {
-    if (opts.load_thread_mode == LoadThreadMode::Current) {
-        return load_plugin_on_current_thread(opts, state);
-    }
-
-    std::atomic<bool> done{false};
-    std::atomic<bool> ok{false};
-    std::thread worker([&]() {
-        ok.store(load_plugin_on_current_thread(opts, state), std::memory_order_release);
-        done.store(true, std::memory_order_release);
-    });
-
-    auto deadline = std::chrono::steady_clock::now() +
-                    std::chrono::milliseconds(opts.load_timeout_ms);
-    while (!done.load(std::memory_order_acquire)) {
-        MSG msg;
-        while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            TranslateMessage(&msg);
-            DispatchMessageA(&msg);
-        }
-
-        if (std::chrono::steady_clock::now() >= deadline) {
-            std::printf("[load] TIMEOUT after %d ms on worker thread\n",
-                        opts.load_timeout_ms);
-            std::fflush(stdout);
-            worker.detach();
-            ExitProcess(125);
-        }
-
-        Sleep(16);
-    }
-
-    worker.join();
-    return ok.load(std::memory_order_acquire);
+    bool ok = false;
+    run_with_optional_worker("load",
+                             opts.load_thread_mode,
+                             opts.load_timeout_ms,
+                             [&]() { return load_plugin_on_current_thread(opts, state); },
+                             ok,
+                             125);
+    return ok;
 }
 
 void unload_plugin(ProbeState &state) {
@@ -418,11 +448,25 @@ bool query_editor_rect(ProbeState &state, const char *label, int &width, int &he
     return width > 0 && height > 0;
 }
 
+bool query_editor_rect(const ProbeOptions &opts,
+                       ProbeState &state,
+                       const char *label,
+                       int &width,
+                       int &height) {
+    bool ok = false;
+    run_with_optional_worker(label,
+                             opts.rect_thread_mode,
+                             opts.rect_timeout_ms,
+                             [&]() { return query_editor_rect(state, label, width, height); },
+                             ok,
+                             126);
+    return ok;
+}
+
 bool open_editor(ProbeState &state, HWND parent, const ProbeOptions &opts) {
     if (!state.effect || !state.effect->dispatcher) return false;
 
-    std::atomic<bool> done{false};
-    std::atomic<intptr_t> result{0};
+    intptr_t result = 0;
 
     auto run_open = [&]() {
         double t0 = now_ms();
@@ -438,38 +482,16 @@ bool open_editor(ProbeState &state, HWND parent, const ProbeOptions &opts) {
                     static_cast<long long>(open_result),
                     parent,
                     static_cast<unsigned long>(GetCurrentThreadId()));
-        result.store(open_result, std::memory_order_release);
-        done.store(true, std::memory_order_release);
+        return open_result;
     };
 
-    if (opts.open_thread_mode == OpenThreadMode::Current) {
-        run_open();
-        return result.load(std::memory_order_acquire) != 0;
-    }
-
-    std::thread worker(run_open);
-    auto deadline = std::chrono::steady_clock::now() +
-                    std::chrono::milliseconds(opts.open_timeout_ms);
-    while (!done.load(std::memory_order_acquire)) {
-        MSG msg;
-        while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            TranslateMessage(&msg);
-            DispatchMessageA(&msg);
-        }
-
-        if (std::chrono::steady_clock::now() >= deadline) {
-            std::printf("[open] TIMEOUT after %d ms on worker thread\n",
-                        opts.open_timeout_ms);
-            std::fflush(stdout);
-            worker.detach();
-            ExitProcess(124);
-        }
-
-        Sleep(16);
-    }
-
-    worker.join();
-    return result.load(std::memory_order_acquire) != 0;
+    run_with_optional_worker("open",
+                             opts.open_thread_mode,
+                             opts.open_timeout_ms,
+                             run_open,
+                             result,
+                             124);
+    return result != 0;
 }
 
 void print_plugin_info(ProbeState &state) {
@@ -513,9 +535,11 @@ int main(int argc, char **argv) {
                 opts.parent_mode == ParentMode::Child ? "child" :
                 opts.parent_mode == ParentMode::Top ? "top" : "none");
     std::printf("load_thread_mode=%s\n",
-                opts.load_thread_mode == LoadThreadMode::Current ? "current" : "worker");
-    std::printf("thread_mode=%s\n",
-                opts.open_thread_mode == OpenThreadMode::Current ? "current" : "worker");
+                thread_mode_name(opts.load_thread_mode));
+    std::printf("rect_thread_mode=%s\n",
+                thread_mode_name(opts.rect_thread_mode));
+    std::printf("open_thread_mode=%s\n",
+                thread_mode_name(opts.open_thread_mode));
 
     ProbeState state;
     if (!load_plugin(opts, state)) {
@@ -527,11 +551,11 @@ int main(int argc, char **argv) {
 
     int width = 640;
     int height = 480;
-    bool rect_ok = query_editor_rect(state, "rect-1", width, height);
+    bool rect_ok = query_editor_rect(opts, state, "rect-1", width, height);
     if (opts.rect_twice) {
         int rect2w = width;
         int rect2h = height;
-        query_editor_rect(state, "rect-2", rect2w, rect2h);
+        query_editor_rect(opts, state, "rect-2", rect2w, rect2h);
     }
 
     if (opts.open_editor) {

@@ -6,6 +6,9 @@ param(
   [string]$VstPath,
 
   [string]$ClapBundle = "",
+  [string]$ClapPathOverride = "",
+  [string]$BridgePathOverride = "",
+  [string]$EmbedModeOverride = "",
   [string]$Reaper = "C:\Program Files\REAPER (x64)\reaper.exe",
   [int]$TimeoutSec = 45,
   [int]$ScanTimeoutMs = 15000,
@@ -256,6 +259,15 @@ clap_path_win64=$clapPath
   Write-Host "plugin_id=$PluginId"
   Write-Host "vst_path=$VstPath"
   Write-Host "clap_bundle=$ClapBundle"
+  if (-not [string]::IsNullOrWhiteSpace($ClapPathOverride)) {
+    Write-Host "clap_path_override=$ClapPathOverride"
+  }
+  if (-not [string]::IsNullOrWhiteSpace($BridgePathOverride)) {
+    Write-Host "bridge_path_override=$BridgePathOverride"
+  }
+  if (-not [string]::IsNullOrWhiteSpace($EmbedModeOverride)) {
+    Write-Host "embed_mode_override=$EmbedModeOverride"
+  }
   Write-Host "temp_dir=$tmpDir"
   Write-Host "log_file=$logFile"
   Write-Host "debug_log=$debugLogCopy"
@@ -269,6 +281,8 @@ clap_path_win64=$clapPath
 
   $old = @{
     CLAP_PATH = $env:CLAP_PATH
+    KEEPSAKE_BRIDGE_PATH = $env:KEEPSAKE_BRIDGE_PATH
+    KEEPSAKE_WIN_EMBED_MODE = $env:KEEPSAKE_WIN_EMBED_MODE
     KEEPSAKE_VST2_PATH = $env:KEEPSAKE_VST2_PATH
     KEEPSAKE_REAPER_SMOKE_PLUGIN_ID = $env:KEEPSAKE_REAPER_SMOKE_PLUGIN_ID
     KEEPSAKE_REAPER_SMOKE_LOG = $env:KEEPSAKE_REAPER_SMOKE_LOG
@@ -284,7 +298,9 @@ clap_path_win64=$clapPath
     KEEPSAKE_REAPER_SMOKE_PLAY_HOLD_MS = $env:KEEPSAKE_REAPER_SMOKE_PLAY_HOLD_MS
   }
 
-  $env:CLAP_PATH = ""
+  $env:CLAP_PATH = $(if ([string]::IsNullOrWhiteSpace($ClapPathOverride)) { "" } else { $ClapPathOverride })
+  $env:KEEPSAKE_BRIDGE_PATH = $(if ([string]::IsNullOrWhiteSpace($BridgePathOverride)) { "" } else { $BridgePathOverride })
+  $env:KEEPSAKE_WIN_EMBED_MODE = $(if ([string]::IsNullOrWhiteSpace($EmbedModeOverride)) { "" } else { $EmbedModeOverride })
   $env:KEEPSAKE_VST2_PATH = $vstScanDir
   $env:KEEPSAKE_REAPER_SMOKE_PLUGIN_ID = $PluginId
   $env:KEEPSAKE_REAPER_SMOKE_LOG = $logFile
