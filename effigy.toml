@@ -5,58 +5,9 @@
 [catalog]
 alias = "keepsake"
 
-[docs_policy.indexes.vision]
-file = "docs/vision/README.md"
-dir = "docs/vision"
-section = "Vision Artifacts"
-exclude = ["history/**"]
-
-[docs_policy.next_actions.vision]
-index = "vision"
-heading = "## Next Task"
-allowlist_file = "docs/policy/vision-next-task-verbs.txt"
-
-[tasks]
-"qa:docs:links" = "effigy docs check-links"
-"qa:docs:index:vision" = "effigy docs check-index --policy-index vision"
-"qa:docs:next-action:vision" = "effigy docs check-next-action --policy vision"
-"qa:docs:agent-defaults" = "effigy docs check-forbidden AGENTS.md README.md docs/README.md --forbid '--repo .'"
-"qa:docs" = [
-  { task = "qa:docs:links" },
-  { task = "qa:docs:index:vision" },
-  { task = "qa:docs:next-action:vision" },
-  { task = "qa:docs:agent-defaults" },
+[manifest]
+include = [
+  "tasks/effigy.tasks.toml",
+  "docs/effigy.docs.toml",
+  "release/effigy.release.toml",
 ]
-"qa:northstar:spine" = "effigy docs check-paths README.md AGENTS.md docs/README.md docs/vision/README.md docs/roadmaps/README.md docs/logs/README.md docs/policy/vision-next-task-verbs.txt"
-"qa:northstar:agent-contract" = "effigy docs check-contains AGENTS.md --require 'effigy tasks' --require 'effigy test --plan' --require 'docs/README.md' --require 'docs/vision/README.md' --require 'docs/roadmaps/README.md' --require 'docs/logs/README.md'"
-"qa:northstar:readme" = "effigy docs check-contains README.md --require 'docs/README.md'"
-"qa:northstar:docs-front-door" = "effigy docs check-contains docs/README.md --require 'vision/README.md' --require 'roadmaps/README.md' --require 'logs/README.md'"
-"qa:northstar:headings" = "effigy docs check-headings docs/vision/README.md --require-heading '## Current Vision'"
-"qa:northstar:indexes" = "effigy docs check-index --policy-index vision"
-"qa:northstar:next-action" = "effigy docs check-next-action --policy vision"
-"qa:northstar:agent-defaults" = "effigy docs check-forbidden AGENTS.md README.md docs/README.md --forbid '--repo .'"
-"qa:northstar" = [
-  { task = "qa:northstar:spine" },
-  { task = "qa:northstar:agent-contract" },
-  { task = "qa:northstar:readme" },
-  { task = "qa:northstar:docs-front-door" },
-  { task = "qa:northstar:indexes" },
-  { task = "qa:northstar:next-action" },
-  { task = "qa:northstar:headings" },
-  { task = "qa:northstar:agent-defaults" },
-]
-qa = [{ task = "qa:docs" }, { task = "qa:northstar" }]
-health = [{ task = "qa" }]
-"release:candidate:alpha" = "./tools/release-candidate.sh --version v0.1-alpha"
-
-# Release posture — Keepsake ships binary artifacts. Version is tracked via
-# the project's C/C++ build system; update version-file when a build manifest
-# is added.
-[release]
-changelog = "CHANGELOG.md"
-tag-format = "v{version}"
-
-[release.gates]
-qa = "effigy qa"
-build = "cmake --build build -j4"
-smoke = "./build/host-test-threaded ./build/keepsake.clap keepsake.vst2.41706364 --timeout-ms 500 --entry-timeout-ms 5000 --max-memory-mb 2048 --vst-path /Library/Audio/Plug-Ins/VST/APC.vst"
