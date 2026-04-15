@@ -211,7 +211,7 @@ static const char *embed_open_mode_name(EmbedOpenMode mode) {
 
 static EmbedOpenMode get_embed_open_mode() {
     static std::once_flag once;
-    static EmbedOpenMode mode = EmbedOpenMode::Hybrid;
+    static EmbedOpenMode mode = EmbedOpenMode::MainThread;
     std::call_once(once, []() {
         char value[64] = {};
         DWORD len = GetEnvironmentVariableA("KEEPSAKE_WIN_EMBED_MODE",

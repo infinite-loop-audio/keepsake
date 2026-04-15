@@ -248,6 +248,7 @@ static inline uint32_t ipc_extract_instance_id(std::vector<uint8_t> &payload) {
 static constexpr uint32_t SHM_STATE_IDLE              = 0;
 static constexpr uint32_t SHM_STATE_PROCESS_REQUESTED = 1;
 static constexpr uint32_t SHM_STATE_PROCESS_DONE      = 2;
+static constexpr uint32_t SHM_STATE_PROCESSING        = 3;
 
 static constexpr uint32_t SHM_EDITOR_CLOSED  = 0;
 static constexpr uint32_t SHM_EDITOR_OPENING = 1;

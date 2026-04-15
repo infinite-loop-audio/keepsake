@@ -29,6 +29,7 @@ namespace fs = std::filesystem;
 namespace {
 
 constexpr const char *kWindowClass = "KeepsakeClapHostWindow";
+constexpr const char *kReaperWrapClass = "reaperPluginHostWrapProc";
 
 struct Options {
     std::string clap_path;
@@ -39,6 +40,9 @@ struct Options {
     bool run_transport = false;
     bool activate_before_ui = false;
     bool show_parent_before_set_parent = false;
+    bool reaper_parent_shape = false;
+    bool process_off_main_thread = false;
+    bool promote_parent_after_show = false;
     bool query_reaper_extensions = false;
     bool restart_processing_after_ui = false;
     int state_saves_before_ui = 0;
@@ -52,6 +56,7 @@ struct Options {
     int process_blocks = 96;
     int block_size = 512;
     int sample_rate = 44100;
+    int parent_promote_delay_ms = 50;
     double scale = 2.0;
 };
 
@@ -129,8 +134,28 @@ bool parse_args(int argc, char *argv[], Options &opts) {
             opts.activate_before_ui = true;
         } else if (strcmp(arg, "--show-parent-before-set-parent") == 0) {
             opts.show_parent_before_set_parent = true;
+        } else if (strcmp(arg, "--reaper-parent-shape") == 0) {
+            opts.reaper_parent_shape = true;
+        } else if (strcmp(arg, "--process-off-main-thread") == 0) {
+            opts.process_off_main_thread = true;
+        } else if (strcmp(arg, "--promote-parent-after-show") == 0) {
+            opts.promote_parent_after_show = true;
         } else if (strcmp(arg, "--activate-delay-ms") == 0 && i + 1 < argc) {
             opts.activate_delay_ms = std::atoi(argv[++i]);
+        } else if (strcmp(arg, "--parent-promote-delay-ms") == 0 && i + 1 < argc) {
+            opts.parent_promote_delay_ms = std::atoi(argv[++i]);
+        } else if (strcmp(arg, "--query-reaper-extensions") == 0) {
+            opts.query_reaper_extensions = true;
+        } else if (strcmp(arg, "--restart-processing-after-ui") == 0) {
+            opts.restart_processing_after_ui = true;
+        } else if (strcmp(arg, "--state-saves-before-ui") == 0 && i + 1 < argc) {
+            opts.state_saves_before_ui = std::atoi(argv[++i]);
+        } else if (strcmp(arg, "--state-saves-after-ui") == 0 && i + 1 < argc) {
+            opts.state_saves_after_ui = std::atoi(argv[++i]);
+        } else if (strcmp(arg, "--process-thread-count") == 0 && i + 1 < argc) {
+            opts.process_thread_count = std::atoi(argv[++i]);
+        } else if (strcmp(arg, "--restart-process-blocks") == 0 && i + 1 < argc) {
+            opts.restart_process_blocks = std::atoi(argv[++i]);
         } else if (strcmp(arg, "--ui-timeout-ms") == 0 && i + 1 < argc) {
             opts.ui_timeout_ms = std::atoi(argv[++i]);
         } else if (strcmp(arg, "--process-blocks") == 0 && i + 1 < argc) {
@@ -179,6 +204,8 @@ void apply_mode_defaults(Options &opts) {
     }
     if (opts.mode == "reaper-ish") {
         opts.activate_before_ui = true;
+        opts.reaper_parent_shape = true;
+        opts.process_off_main_thread = true;
         opts.query_reaper_extensions = true;
         opts.state_saves_before_ui = 2;
         opts.state_saves_after_ui = 1;
@@ -197,13 +224,16 @@ bool ensure_window_class() {
     static bool registered = false;
     if (registered) return true;
 
-    WNDCLASSA wc = {};
-    wc.lpfnWndProc = host_wnd_proc;
-    wc.hInstance = GetModuleHandleA(nullptr);
-    wc.lpszClassName = kWindowClass;
-    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    if (!RegisterClassA(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-        return false;
+    const char *class_names[] = { kWindowClass, kReaperWrapClass };
+    for (const char *class_name : class_names) {
+        WNDCLASSA wc = {};
+        wc.lpfnWndProc = host_wnd_proc;
+        wc.hInstance = GetModuleHandleA(nullptr);
+        wc.lpszClassName = class_name;
+        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+        if (!RegisterClassA(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+            return false;
+        }
     }
     registered = true;
     return true;
@@ -418,7 +448,19 @@ float process_audio(const clap_plugin_t *plugin, const Options &opts, HostState 
 
         const double t0 = now_ms();
         clap_process_status status = CLAP_PROCESS_SLEEP;
-        if (opts.process_thread_count <= 1) {
+        if (opts.process_off_main_thread) {
+            std::atomic<bool> done{false};
+            std::thread worker([&]() {
+                status = plugin->process(plugin, &process);
+                done.store(true, std::memory_order_release);
+            });
+            while (!done.load(std::memory_order_acquire)) {
+                pump_messages();
+                run_main_thread_callback(plugin, host);
+                Sleep(1);
+            }
+            worker.join();
+        } else if (opts.process_thread_count <= 1) {
             status = plugin->process(plugin, &process);
         } else {
             std::thread worker([&]() {
@@ -463,7 +505,7 @@ int main(int argc, char *argv[]) {
     Options opts;
     if (!parse_args(argc, argv, opts)) {
         std::fprintf(stderr,
-                     "usage: %s <clap-path> <plugin-id> [--mode gui-first|activate-first|gui-first-parent-visible|activate-first-parent-visible|gui-first-delayed-activate|reaper-ish] [--vst-path PATH] [--open-ui] [--run-transport]\n",
+                     "usage: %s <clap-path> <plugin-id> [--mode gui-first|activate-first|gui-first-parent-visible|activate-first-parent-visible|gui-first-delayed-activate|reaper-ish] [--vst-path PATH] [--open-ui] [--run-transport] [--reaper-parent-shape] [--process-off-main-thread] [--promote-parent-after-show] [--parent-promote-delay-ms N] [--query-reaper-extensions] [--state-saves-before-ui N] [--state-saves-after-ui N] [--process-thread-count N] [--restart-processing-after-ui]\n",
                      argv[0]);
         return 1;
     }
@@ -491,11 +533,21 @@ int main(int argc, char *argv[]) {
     log_line("=== Windows CLAP Host ===\n");
     log_line("clap=%s\nplugin_id=%s\n", opts.clap_path.c_str(), opts.plugin_id.c_str());
     if (!opts.vst_path.empty()) log_line("vst_path=%s\n", opts.vst_path.c_str());
-    log_line("mode=%s activate_before_ui=%d parent_visible_before_set_parent=%d activate_delay_ms=%d\n",
+    log_line("mode=%s activate_before_ui=%d parent_visible_before_set_parent=%d reaper_parent_shape=%d process_off_main_thread=%d promote_parent_after_show=%d parent_promote_delay_ms=%d activate_delay_ms=%d query_reaper_extensions=%d state_saves_before_ui=%d state_saves_after_ui=%d process_thread_count=%d restart_processing_after_ui=%d restart_process_blocks=%d\n",
              opts.mode.c_str(),
              opts.activate_before_ui ? 1 : 0,
              opts.show_parent_before_set_parent ? 1 : 0,
-             opts.activate_delay_ms);
+             opts.reaper_parent_shape ? 1 : 0,
+             opts.process_off_main_thread ? 1 : 0,
+             opts.promote_parent_after_show ? 1 : 0,
+             opts.parent_promote_delay_ms,
+             opts.activate_delay_ms,
+             opts.query_reaper_extensions ? 1 : 0,
+             opts.state_saves_before_ui,
+             opts.state_saves_after_ui,
+             opts.process_thread_count,
+             opts.restart_processing_after_ui ? 1 : 0,
+             opts.restart_process_blocks);
 
     double t0 = now_ms();
     if (!entry->init(opts.clap_path.c_str())) {
@@ -645,9 +697,14 @@ int main(int argc, char *argv[]) {
             plugin->destroy(plugin);
             return 1;
         }
-        parent = CreateWindowExA(0, "STATIC", "",
-                                 WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS |
-                                     (opts.show_parent_before_set_parent ? WS_VISIBLE : 0),
+        const DWORD parent_exstyle = opts.reaper_parent_shape ? WS_EX_CONTROLPARENT : 0;
+        const char *parent_class = opts.reaper_parent_shape ? kReaperWrapClass : "STATIC";
+        const DWORD parent_style = opts.reaper_parent_shape
+            ? (WS_CHILD | (opts.show_parent_before_set_parent ? WS_VISIBLE : 0))
+            : (WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS |
+               (opts.show_parent_before_set_parent ? WS_VISIBLE : 0));
+        parent = CreateWindowExA(parent_exstyle, parent_class, "",
+                                 parent_style,
                                  0, 0, static_cast<int>(ui_w), static_cast<int>(ui_h),
                                  frame, nullptr, GetModuleHandleA(nullptr), nullptr);
         if (!parent) {
@@ -658,6 +715,7 @@ int main(int argc, char *argv[]) {
             return 1;
         }
         if (opts.show_parent_before_set_parent) {
+            ShowWindow(parent, SW_SHOW);
             ShowWindow(frame, SW_SHOW);
             UpdateWindow(frame);
         }
@@ -678,7 +736,7 @@ int main(int argc, char *argv[]) {
         log_line("[gui.set_parent] %.1f ms hwnd=%p\n", now_ms() - t0, parent);
 
         if (!opts.show_parent_before_set_parent) {
-            ShowWindow(parent, SW_SHOW);
+            if (!opts.reaper_parent_shape) ShowWindow(parent, SW_SHOW);
             ShowWindow(frame, SW_SHOW);
             UpdateWindow(frame);
         }
@@ -693,6 +751,25 @@ int main(int argc, char *argv[]) {
             return 1;
         }
         log_line("[gui.show] %.1f ms\n", now_ms() - t0);
+
+        if (opts.promote_parent_after_show && parent) {
+            if (opts.parent_promote_delay_ms > 0) {
+                const double deadline = now_ms() + opts.parent_promote_delay_ms;
+                while (now_ms() < deadline) {
+                    pump_messages();
+                    run_main_thread_callback(plugin, host_state);
+                    Sleep(1);
+                }
+            }
+            const LONG_PTR style = GetWindowLongPtrA(parent, GWL_STYLE);
+            SetWindowLongPtrA(parent, GWL_STYLE, style | WS_VISIBLE);
+            ShowWindow(parent, SW_SHOW);
+            UpdateWindow(parent);
+            log_line("[parent.promote] hwnd=%p style=0x%llx delay_ms=%d\n",
+                     parent,
+                     static_cast<long long>(GetWindowLongPtrA(parent, GWL_STYLE)),
+                     opts.parent_promote_delay_ms);
+        }
 
         pump_callbacks_for(plugin, host_state, opts.ui_timeout_ms);
     }

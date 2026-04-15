@@ -75,6 +75,41 @@ void log_line(const char *fmt, ...) {
     std::fflush(g_log_file);
 }
 
+void log_window_info(const char *label, HWND hwnd) {
+    if (!hwnd) {
+        log_line("%s hwnd=(null)\n", label);
+        return;
+    }
+    char klass[128] = {};
+    GetClassNameA(hwnd, klass, sizeof(klass));
+    RECT rc = {};
+    GetWindowRect(hwnd, &rc);
+    LONG_PTR style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+    LONG_PTR exstyle = GetWindowLongPtrA(hwnd, GWL_EXSTYLE);
+    HWND parent = GetParent(hwnd);
+    HWND owner = GetWindow(hwnd, GW_OWNER);
+    HWND root = GetAncestor(hwnd, GA_ROOT);
+    DWORD pid = 0;
+    DWORD tid = GetWindowThreadProcessId(hwnd, &pid);
+    log_line("%s hwnd=%p class='%s' style=0x%llx exstyle=0x%llx parent=%p owner=%p root=%p visible=%d enabled=%d tid=%lu pid=%lu rect=%ld,%ld,%ld,%ld\n",
+             label,
+             hwnd,
+             klass,
+             static_cast<long long>(style),
+             static_cast<long long>(exstyle),
+             parent,
+             owner,
+             root,
+             IsWindowVisible(hwnd) ? 1 : 0,
+             IsWindowEnabled(hwnd) ? 1 : 0,
+             static_cast<unsigned long>(tid),
+             static_cast<unsigned long>(pid),
+             static_cast<long>(rc.left),
+             static_cast<long>(rc.top),
+             static_cast<long>(rc.right),
+             static_cast<long>(rc.bottom));
+}
+
 void ensure_window_class() {
     static bool registered = false;
     if (registered) return;
@@ -272,6 +307,7 @@ bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *window) {
     ensure_window_class();
     log_line("gui.set_parent parent=%p api=%s\n",
              pp->parent, window && window->api ? window->api : "(null)");
+    log_window_info("gui.parent", pp->parent);
     if (pp->child) {
         DestroyWindow(pp->child);
         pp->child = nullptr;
@@ -286,6 +322,7 @@ bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *window) {
                                     rect.bottom - rect.top,
                                     pp->parent, nullptr,
                                     GetModuleHandleA(nullptr), nullptr);
+        log_window_info("gui.child", pp->child);
     }
     return true;
 }
@@ -306,6 +343,8 @@ bool gui_show(const clap_plugin_t *plugin) {
     pp->gui_visible = true;
     if (pp->child) ShowWindow(pp->child, SW_SHOW);
     log_line("gui.show parent=%p child=%p\n", pp->parent, pp->child);
+    log_window_info("gui.parent.show", pp->parent);
+    log_window_info("gui.child.show", pp->child);
     return true;
 }
 
@@ -314,6 +353,8 @@ bool gui_hide(const clap_plugin_t *plugin) {
     pp->gui_visible = false;
     if (pp->child) ShowWindow(pp->child, SW_HIDE);
     log_line("gui.hide parent=%p child=%p\n", pp->parent, pp->child);
+    log_window_info("gui.parent.hide", pp->parent);
+    log_window_info("gui.child.hide", pp->child);
     return true;
 }
 

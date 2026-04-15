@@ -30,6 +30,17 @@ clap_process_status plugin_process(const clap_plugin_t *plugin,
     if (frames > kp->max_frames) frames = kp->max_frames;
 
     auto *ctrl = shm_control(kp->shm.ptr);
+    const uint32_t pre_state = shm_load_acquire(&ctrl->state);
+    if (pre_state == SHM_STATE_PROCESS_REQUESTED || pre_state == SHM_STATE_PROCESSING) {
+        keepsake_debug_log("keepsake: process skipped while prior request still active state=%u\n",
+                           pre_state);
+        output_silence(process);
+        return CLAP_PROCESS_CONTINUE;
+    }
+    if (pre_state == SHM_STATE_PROCESS_DONE) {
+        // Drop late completions from an earlier timed-out block before posting fresh work.
+        shm_store_release(&ctrl->state, SHM_STATE_IDLE);
+    }
 
     for (int ch = 0; ch < kp->num_inputs; ch++) {
         float *dst = shm_audio_inputs(kp->shm.ptr, ch, kp->max_frames);
@@ -111,7 +122,7 @@ clap_process_status plugin_process(const clap_plugin_t *plugin,
     }
 
     bool done = (ctrl->state == SHM_STATE_PROCESS_DONE);
-    ctrl->state = SHM_STATE_IDLE;
+    if (done) ctrl->state = SHM_STATE_IDLE;
     pthread_mutex_unlock(&ctrl->mutex);
 
     if (!done) {
@@ -136,7 +147,9 @@ clap_process_status plugin_process(const clap_plugin_t *plugin,
 
     keepsake_debug_log("keepsake: process wait done=%d final_state=%u\n",
                        done ? 1 : 0, shm_load_acquire(&ctrl->state));
-    shm_store_release(&ctrl->state, SHM_STATE_IDLE);
+    if (done) {
+        shm_store_release(&ctrl->state, SHM_STATE_IDLE);
+    }
 
     if (!done) {
         keepsake_debug_log("keepsake: process timeout -> silence\n");

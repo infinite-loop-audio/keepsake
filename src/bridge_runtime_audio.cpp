@@ -13,6 +13,7 @@
 
 static void bridge_process_shm_request(PluginInstance *inst) {
     auto *ctrl = shm_control(inst->shm.ptr);
+    shm_store_release(&ctrl->state, SHM_STATE_PROCESSING);
 
     std::vector<float *> in_ptrs(static_cast<size_t>(inst->num_inputs));
     std::vector<float *> out_ptrs(static_cast<size_t>(inst->num_outputs));

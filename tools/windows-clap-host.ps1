@@ -9,7 +9,17 @@ param(
   [switch]$RunTransport,
   [switch]$ActivateBeforeUi,
   [switch]$ShowParentBeforeSetParent,
+  [switch]$ReaperParentShape,
+  [switch]$ProcessOffMainThread,
+  [switch]$PromoteParentAfterShow,
+  [switch]$QueryReaperExtensions,
+  [switch]$RestartProcessingAfterUi,
+  [int]$StateSavesBeforeUi = -1,
+  [int]$StateSavesAfterUi = -1,
+  [int]$ProcessThreadCount = -1,
+  [int]$RestartProcessBlocks = -1,
   [int]$ActivateDelayMs = 0,
+  [int]$ParentPromoteDelayMs = 50,
   [int]$UiTimeoutMs = 5000,
   [int]$ProcessBlocks = 96,
   [double]$Scale = 2.0
@@ -36,6 +46,24 @@ if (-not [string]::IsNullOrWhiteSpace($VstPath)) {
 if ($ActivateDelayMs -gt 0) {
   $args += @("--activate-delay-ms", "$ActivateDelayMs")
 }
+if ($QueryReaperExtensions) {
+  $args += "--query-reaper-extensions"
+}
+if ($RestartProcessingAfterUi) {
+  $args += "--restart-processing-after-ui"
+}
+if ($StateSavesBeforeUi -ge 0) {
+  $args += @("--state-saves-before-ui", "$StateSavesBeforeUi")
+}
+if ($StateSavesAfterUi -ge 0) {
+  $args += @("--state-saves-after-ui", "$StateSavesAfterUi")
+}
+if ($ProcessThreadCount -ge 0) {
+  $args += @("--process-thread-count", "$ProcessThreadCount")
+}
+if ($RestartProcessBlocks -ge 0) {
+  $args += @("--restart-process-blocks", "$RestartProcessBlocks")
+}
 if ($OpenUi) {
   $args += "--open-ui"
 }
@@ -47,6 +75,16 @@ if ($ActivateBeforeUi) {
 }
 if ($ShowParentBeforeSetParent) {
   $args += "--show-parent-before-set-parent"
+}
+if ($ReaperParentShape) {
+  $args += "--reaper-parent-shape"
+}
+if ($ProcessOffMainThread) {
+  $args += "--process-off-main-thread"
+}
+if ($PromoteParentAfterShow) {
+  $args += "--promote-parent-after-show"
+  $args += @("--parent-promote-delay-ms", "$ParentPromoteDelayMs")
 }
 
 & $exe @args
