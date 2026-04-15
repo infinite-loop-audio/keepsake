@@ -35,13 +35,24 @@ void scan_vst2_entry(const std::string &entry_path,
             results.push_back(std::move(info));
             return;
         }
-        if (targeted_vst2_override && !s_bridge_x86_64_path.empty()) {
+        std::string binary_arch = vst2_detect_binary_arch(plugin_path.string());
+        std::string bridge_binary;
+#ifdef _WIN32
+        if (binary_arch == "x86" && !s_bridge_32_path.empty()) {
+            bridge_binary = s_bridge_32_path;
+        }
+#endif
+        if (bridge_binary.empty() &&
+            targeted_vst2_override && !s_bridge_x86_64_path.empty()) {
+            bridge_binary = s_bridge_x86_64_path;
+        }
+        if (!bridge_binary.empty()) {
             Vst2PluginInfo cross_info;
             cross_info.format = FORMAT_VST2;
             if (vst2_load_metadata_via_bridge(plugin_path.string(),
-                                              s_bridge_x86_64_path,
+                                              bridge_binary,
                                               cross_info)) {
-                cross_info.needs_cross_arch = true;
+                if (cross_info.binary_arch.empty()) cross_info.binary_arch = binary_arch;
                 results.push_back(std::move(cross_info));
             }
         }

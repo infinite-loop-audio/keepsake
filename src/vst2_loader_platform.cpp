@@ -202,6 +202,19 @@ static const char *check_binary_arch(const char *path) {
 }
 #endif
 
+std::string vst2_detect_binary_arch(const std::string &path) {
+#ifdef __APPLE__
+    std::string load_path;
+    vst2_resolve_load_path(path, load_path);
+    const char *arch = check_macho_arch(load_path.c_str());
+#else
+    std::string load_path;
+    vst2_resolve_load_path(path, load_path);
+    const char *arch = check_binary_arch(load_path.c_str());
+#endif
+    return arch ? std::string(arch) : std::string();
+}
+
 bool vst2_resolve_load_path(const std::string &path, std::string &load_path) {
     load_path = path;
 #ifdef __APPLE__
@@ -215,12 +228,8 @@ bool vst2_try_load_library(const std::string &path, std::string &load_path, void
     lib = reinterpret_cast<void *>(lib_open(load_path.c_str()));
     if (lib) return true;
 
-    const char *arch = nullptr;
-#ifdef __APPLE__
-    arch = check_macho_arch(load_path.c_str());
-#else
-    arch = check_binary_arch(load_path.c_str());
-#endif
+    std::string detected_arch = vst2_detect_binary_arch(path);
+    const char *arch = detected_arch.empty() ? nullptr : detected_arch.c_str();
 
     if (arch && strcmp(arch, "native") != 0) {
         fprintf(stderr, "keepsake: skipping '%s' — %s binary "

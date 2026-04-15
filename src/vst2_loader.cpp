@@ -86,6 +86,7 @@ bool vst2_bridge_info_is_sane(const Vst2PluginInfo &info) {
 
 bool vst2_load_metadata(const std::string &path, Vst2PluginInfo &info) {
     info.file_path = path;
+    info.binary_arch = vst2_detect_binary_arch(path);
 
     std::string load_path;
     void *lib_void = nullptr;

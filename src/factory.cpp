@@ -68,6 +68,8 @@ KeepsakeConfig s_config;
 static uint32_t factory_get_plugin_count(
     const clap_plugin_factory_t * /*factory*/)
 {
+    keepsake_debug_log("keepsake: factory_get_plugin_count count=%u\n",
+                       static_cast<unsigned>(s_entries.size()));
     return static_cast<uint32_t>(s_entries.size());
 }
 
@@ -75,6 +77,9 @@ static const clap_plugin_descriptor_t *factory_get_plugin_descriptor(
     const clap_plugin_factory_t * /*factory*/, uint32_t index)
 {
     if (index >= s_entries.size()) return nullptr;
+    keepsake_debug_log("keepsake: factory_get_plugin_descriptor index=%u id=%s\n",
+                       static_cast<unsigned>(index),
+                       s_entries[index].id.c_str());
     return &s_entries[index].descriptor;
 }
 
@@ -84,6 +89,7 @@ static const clap_plugin_t *factory_create_plugin(
     const char *plugin_id)
 {
     if (!plugin_id || !host) return nullptr;
+    keepsake_debug_log("keepsake: factory_create_plugin id=%s\n", plugin_id);
 
     for (auto &e : s_entries) {
         if (e.id == plugin_id) {
@@ -224,13 +230,19 @@ bool keepsake_factory_init(const char *plugin_path) {
         targeted_vst2_override || cfg.replace_default_vst2_paths;
 
     fprintf(stderr, "keepsake: scanning %zu VST2 path(s)\n", vst2_paths.size());
+    keepsake_debug_log("keepsake: scanning %zu VST2 path(s)\n", vst2_paths.size());
     for (const auto &path : vst2_paths) {
+        keepsake_debug_log("keepsake: scan_vst2_entry begin path=%s\n", path.c_str());
         scan_vst2_entry(path, all_plugins, allow_cross_arch_vst2_scan);
+        keepsake_debug_log("keepsake: scan_vst2_entry end path=%s total=%u\n",
+                           path.c_str(),
+                           static_cast<unsigned>(all_plugins.size()));
         // Cross-arch plugins require keepsake-scan to populate the
         // cache. They're too slow to scan during host init.
     }
     dedupe_plugins_by_file_path(all_plugins);
     fprintf(stderr, "keepsake: found %zu VST2 plugin(s)\n", all_plugins.size());
+    keepsake_debug_log("keepsake: found %zu VST2 plugin(s)\n", all_plugins.size());
 
     // VST3 and AU scanning is deferred — too slow for host init.
     // These formats are scanned via bridge subprocesses which spawn
@@ -294,6 +306,8 @@ bool keepsake_factory_init(const char *plugin_path) {
     }
 
     build_descriptors(all_plugins);
+    keepsake_debug_log("keepsake: build_descriptors complete count=%u\n",
+                       static_cast<unsigned>(s_entries.size()));
     return true;
 }
 

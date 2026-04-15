@@ -28,6 +28,7 @@ struct PluginEntry {
     int32_t num_params = 0;
     bool has_editor = false;
     uint32_t format = 0;
+    std::string binary_arch;
     bool needs_x86_64_bridge = false;
     bool needs_32bit_bridge = false;
 };

@@ -23,6 +23,13 @@
             }
         },
         {
+            "name": "windows-x86",
+            "displayName": "Windows x86",
+            "binaryDir": "${sourceDir}/build-win32",
+            "generator": "Visual Studio 17 2022",
+            "architecture": "Win32"
+        },
+        {
             "name": "linux-x86",
             "displayName": "Linux 32-bit (i686)",
             "binaryDir": "${sourceDir}/build-linux-x86",
@@ -40,6 +47,10 @@
         {
             "name": "release",
             "configurePreset": "release"
+        },
+        {
+            "name": "windows-x86",
+            "configurePreset": "windows-x86"
         }
     ]
 }

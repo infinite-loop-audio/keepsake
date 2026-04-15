@@ -12,3 +12,4 @@ bool vst2_parse_init_response(const std::vector<uint8_t> &payload,
                               Vst2PluginInfo &info);
 bool vst2_resolve_load_path(const std::string &path, std::string &load_path);
 bool vst2_try_load_library(const std::string &path, std::string &load_path, void *&lib);
+std::string vst2_detect_binary_arch(const std::string &path);

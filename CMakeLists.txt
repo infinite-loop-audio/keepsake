@@ -187,6 +187,12 @@ target_compile_definitions(keepsake-bridge PRIVATE
 
 target_link_libraries(keepsake-bridge PRIVATE clap)
 
+if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+    set_target_properties(keepsake-bridge PROPERTIES
+        OUTPUT_NAME "keepsake-bridge-32"
+    )
+endif()
+
 if(APPLE)
     target_link_libraries(keepsake-bridge PRIVATE
         "-framework CoreFoundation"

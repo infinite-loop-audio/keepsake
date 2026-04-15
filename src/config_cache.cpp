@@ -70,6 +70,7 @@ void cache_save(const std::vector<Vst2PluginInfo> &plugins) {
           << "\t" << p.num_outputs
           << "\t" << p.num_params
           << "\t" << p.format
+          << "\t" << config_escape(p.binary_arch)
           << "\t" << (p.needs_cross_arch ? 1 : 0)
           << "\t" << file_mtime(p.file_path)
           << "\n";
@@ -108,13 +109,23 @@ std::vector<Vst2PluginInfo> cache_load() {
         p.num_outputs = static_cast<int32_t>(std::stol(fields[8]));
         size_t needs_cross_arch_idx = 9;
         size_t mtime_idx = 10;
-        if (fields.size() >= 13) {
+        size_t arch_idx = std::string::npos;
+        if (fields.size() >= 14) {
+            p.num_params = static_cast<int32_t>(std::stol(fields[9]));
+            p.format = static_cast<uint32_t>(std::stoul(fields[10]));
+            arch_idx = 11;
+            needs_cross_arch_idx = 12;
+            mtime_idx = 13;
+        } else if (fields.size() >= 13) {
             p.num_params = static_cast<int32_t>(std::stol(fields[9]));
             p.format = static_cast<uint32_t>(std::stoul(fields[10]));
             needs_cross_arch_idx = 11;
             mtime_idx = 12;
         } else {
             p.format = FORMAT_VST2;
+        }
+        if (arch_idx != std::string::npos && arch_idx < fields.size()) {
+            p.binary_arch = config_unescape(fields[arch_idx]);
         }
         p.needs_cross_arch = (fields[needs_cross_arch_idx] == "1");
         int64_t cached_mtime = std::stoll(fields[mtime_idx]);

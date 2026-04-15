@@ -23,6 +23,9 @@ cd /d "%REPO%" || exit /b 1
 git pull --ff-only || exit /b 1
 cmake -S "%REPO%" -B "%BUILD_DIR%" -G "%GENERATOR%" -A %PLATFORM% || exit /b 1
 cmake --build "%BUILD_DIR%" --config %CONFIG% || exit /b 1
+if exist "%REPO%\tools\windows-build-bridge32.cmd" (
+  call "%REPO%\tools\windows-build-bridge32.cmd"
+)
 
 taskkill /IM reaper.exe /F >NUL 2>&1
 taskkill /IM keepsake-bridge.exe /F >NUL 2>&1

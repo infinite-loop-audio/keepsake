@@ -30,8 +30,7 @@ bool vst2_load_metadata_via_bridge(const std::string &path,
     std::vector<uint8_t> payload;
     if (!ipc_read_msg(proc.pipe_from, op, payload, 15000) || op != IPC_OP_OK) {
         fprintf(stderr, "keepsake: bridge scan failed for '%s'\n", path.c_str());
-        ipc_write_instance_msg(proc.pipe_to, IPC_OP_SHUTDOWN, 0);
-        platform_kill(proc);
+        platform_force_kill(proc);
         return false;
     }
 
@@ -66,20 +65,17 @@ bool vst2_load_metadata_via_bridge(const std::string &path,
                 "keepsake: rejecting corrupt bridge scan metadata for '%s' (category=%d in=%d out=%d params=%d)\n",
                 path.c_str(), info.category, info.num_inputs,
                 info.num_outputs, info.num_params);
-        ipc_write_msg(proc.pipe_to, IPC_OP_SHUTDOWN);
-        ipc_read_msg(proc.pipe_from, op, payload, 5000);
-        platform_kill(proc);
+        platform_force_kill(proc);
         return false;
     }
 
     info.file_path = path;
     info.needs_cross_arch = true;
+    info.binary_arch = vst2_detect_binary_arch(path);
     if (info.name.empty()) info.name = vst2_filename_stem(path);
     if (info.vendor.empty()) info.vendor = "Unknown";
 
-    ipc_write_msg(proc.pipe_to, IPC_OP_SHUTDOWN);
-    ipc_read_msg(proc.pipe_from, op, payload, 5000);
-    platform_kill(proc);
+    platform_force_kill(proc);
 
     fprintf(stderr, "keepsake: scanned via bridge '%s' — name='%s' in=%d out=%d\n",
             path.c_str(), info.name.c_str(), info.num_inputs, info.num_outputs);
@@ -109,7 +105,7 @@ bool scan_plugin_via_bridge(const std::string &path,
     std::vector<uint8_t> payload;
     if (!ipc_read_msg(proc.pipe_from, op, payload, 15000)) {
         fprintf(stderr, "keepsake: scan timeout for '%s'\n", path.c_str());
-        platform_kill(proc);
+        platform_force_kill(proc);
         return false;
     }
 
@@ -117,14 +113,14 @@ bool scan_plugin_via_bridge(const std::string &path,
         std::string msg(payload.begin(), payload.end());
         fprintf(stderr, "keepsake: scan error for '%s': %s\n",
                 path.c_str(), msg.c_str());
-        platform_kill(proc);
+        platform_force_kill(proc);
         return false;
     }
 
     if (op != IPC_OP_OK || !vst2_parse_init_response(payload, info)) {
         fprintf(stderr, "keepsake: scan failed for '%s' (op=0x%02X)\n",
                 path.c_str(), op);
-        platform_kill(proc);
+        platform_force_kill(proc);
         return false;
     }
 
@@ -133,18 +129,17 @@ bool scan_plugin_via_bridge(const std::string &path,
                 "keepsake: rejecting corrupt scan metadata for '%s' (category=%d in=%d out=%d params=%d)\n",
                 path.c_str(), info.category, info.num_inputs,
                 info.num_outputs, info.num_params);
-        platform_kill(proc);
+        platform_force_kill(proc);
         return false;
     }
 
     info.file_path = path;
     info.format = format;
+    info.binary_arch = vst2_detect_binary_arch(path);
     if (info.name.empty()) info.name = vst2_filename_stem(path);
     if (info.vendor.empty()) info.vendor = "Unknown";
 
-    ipc_write_instance_msg(proc.pipe_to, IPC_OP_SHUTDOWN, 0);
-    ipc_read_msg(proc.pipe_from, op, payload, 5000);
-    platform_kill(proc);
+    platform_force_kill(proc);
 
     fprintf(stderr, "keepsake: scanned '%s' — name='%s' vendor='%s' format=%u\n",
             path.c_str(), info.name.c_str(), info.vendor.c_str(), format);

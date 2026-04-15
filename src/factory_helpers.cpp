@@ -1,5 +1,6 @@
 #include "factory_internal.h"
 
+#include <unordered_map>
 #include <unordered_set>
 #include <cstdio>
 
@@ -48,12 +49,32 @@ std::string make_plugin_id(uint32_t format, int32_t unique_id) {
     return buf;
 }
 
+std::string display_arch_suffix(const std::string &arch) {
+    if (arch == "x86") return "x86";
+    if (arch == "x86_64" || arch == "native") return "x64";
+    if (arch == "arm64") return "arm64";
+    return {};
+}
+
+std::string id_arch_suffix(const std::string &arch) {
+    if (arch == "x86") return "x86";
+    if (arch == "arm64") return "arm64";
+    return {};
+}
+
 std::string make_plugin_id_disambiguated(uint32_t format,
                                          int32_t unique_id,
+                                         const std::string &arch,
                                          const std::string &path,
                                          bool needs_suffix) {
     std::string base = make_plugin_id(format, unique_id);
-    if (!needs_suffix) return base;
+    std::string arch_suffix = id_arch_suffix(arch);
+    if (format == FORMAT_VST2 && !arch_suffix.empty()) {
+        base += "." + arch_suffix;
+        if (!needs_suffix) return base;
+    } else if (!needs_suffix) {
+        return base;
+    }
 
     uint32_t hash = 0;
     for (char c : path) hash = hash * 31 + static_cast<uint32_t>(c);
@@ -165,10 +186,15 @@ void filter_plugins(std::vector<Vst2PluginInfo> &plugins,
 }
 
 void build_descriptors(std::vector<Vst2PluginInfo> &plugins) {
-    std::unordered_set<int32_t> seen_ids;
-    std::unordered_set<int32_t> colliding_ids;
+    std::unordered_map<std::string, size_t> id_counts;
+    std::unordered_set<std::string> assigned_ids;
     for (const auto &p : plugins) {
-        if (!seen_ids.insert(p.unique_id).second) colliding_ids.insert(p.unique_id);
+        std::string id_suffix = id_arch_suffix(p.binary_arch);
+        std::string key = make_plugin_id(p.format, p.unique_id);
+        if (p.format == FORMAT_VST2 && !id_suffix.empty()) {
+            key += "." + id_suffix;
+        }
+        ++id_counts[key];
     }
 
     s_entries.clear();
@@ -176,10 +202,29 @@ void build_descriptors(std::vector<Vst2PluginInfo> &plugins) {
 
     for (auto &p : plugins) {
         PluginEntry entry;
-        bool needs_suffix = colliding_ids.count(p.unique_id) > 0;
+        std::string arch_suffix = display_arch_suffix(p.binary_arch);
+        std::string id_suffix = id_arch_suffix(p.binary_arch);
+        std::string base_id = make_plugin_id(p.format, p.unique_id);
+        if (p.format == FORMAT_VST2 && !id_suffix.empty()) {
+            base_id += "." + id_suffix;
+        }
+        bool needs_suffix = id_counts[base_id] > 1;
         entry.id = make_plugin_id_disambiguated(
-            p.format, p.unique_id, p.file_path, needs_suffix);
+            p.format, p.unique_id, p.binary_arch, p.file_path, needs_suffix);
+        if (!assigned_ids.insert(entry.id).second) {
+            uint32_t hash = 0;
+            for (char c : p.file_path) hash = hash * 31 + static_cast<uint32_t>(c);
+            char suffix[8];
+            snprintf(suffix, sizeof(suffix), ".%04x", hash & 0xFFFF);
+            entry.id += suffix;
+            assigned_ids.insert(entry.id);
+        }
         entry.name = p.name;
+        if (p.format == FORMAT_VST2 && !arch_suffix.empty()) {
+            entry.name += (p.binary_arch == "x86") ? " (32-bit)" :
+                          (p.binary_arch == "x86_64" || p.binary_arch == "native") ? " (64-bit)" :
+                          (" (" + p.binary_arch + ")");
+        }
         entry.vendor = p.vendor;
         entry.version_str = format_version(p.vendor_version);
         entry.plugin_path = p.file_path;
@@ -188,7 +233,9 @@ void build_descriptors(std::vector<Vst2PluginInfo> &plugins) {
         entry.num_params = p.num_params;
         entry.has_editor = (p.flags & effFlagsHasEditor) != 0;
         entry.format = p.format;
-        entry.needs_x86_64_bridge = p.needs_cross_arch;
+        entry.binary_arch = p.binary_arch;
+        entry.needs_32bit_bridge = (p.binary_arch == "x86");
+        entry.needs_x86_64_bridge = (p.binary_arch == "x86_64") && p.needs_cross_arch;
 
         map_features(p, entry);
 

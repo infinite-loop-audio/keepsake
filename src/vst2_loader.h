@@ -19,6 +19,7 @@ struct Vst2PluginInfo {
     std::string vendor;
     std::string product;
     std::string file_path;  // absolute path to the plugin binary
+    std::string binary_arch; // "x86", "x86_64", "arm64", or "native"/empty
     bool needs_cross_arch = false; // needs a different-architecture bridge
     uint32_t format = 0; // PluginFormat enum (0=VST2, 1=VST3, 2=AU)
 };
@@ -51,3 +52,7 @@ bool scan_plugin_via_bridge(const std::string &path,
                              const std::string &bridge_binary,
                              uint32_t format,
                              Vst2PluginInfo &info);
+
+// Detect the binary architecture of a plugin file.
+// Returns values like "x86", "x86_64", "arm64", "native", or empty on failure.
+std::string vst2_detect_binary_arch(const std::string &path);
