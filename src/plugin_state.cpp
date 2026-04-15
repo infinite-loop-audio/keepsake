@@ -8,7 +8,7 @@ bool keepsake_state_save(const clap_plugin_t *plugin,
                           const clap_ostream_t *stream) {
     auto *kp = get(plugin);
     if (kp->crashed || !kp->bridge_ok) return false;
-    if (kp->processing || kp->editor_open || kp->editor_open_pending) {
+    if (kp->processing || keepsake_gui_session_is_open_or_pending(kp)) {
         return false;
     }
 
@@ -32,7 +32,7 @@ bool keepsake_state_load(const clap_plugin_t *plugin,
                           const clap_istream_t *stream) {
     auto *kp = get(plugin);
     if (kp->crashed || !kp->bridge_ok) return false;
-    if (kp->processing || kp->editor_open || kp->editor_open_pending) {
+    if (kp->processing || keepsake_gui_session_is_open_or_pending(kp)) {
         return false;
     }
 

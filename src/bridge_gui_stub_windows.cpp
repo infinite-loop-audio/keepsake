@@ -37,7 +37,6 @@ static std::atomic<bool> g_editor_open_inflight{false};
 static ShmProcessControl *g_gui_status_ctrl = nullptr;
 static UINT_PTR g_idle_timer = 0;
 static EditorHeaderInfo g_header_info;
-static const int WIN_HEADER_HEIGHT = 28;
 static int g_last_parent_w = 0;
 static int g_last_parent_h = 0;
 static bool g_editor_hwnd_on_window_thread = false;
@@ -247,7 +246,7 @@ static void draw_header_badge(HDC hdc, const std::string &text, COLORREF fill, i
     const int badge_w = sz.cx + (padding_x * 2);
     const int badge_h = 18;
     const int badge_x = *right_x - badge_w;
-    const int badge_y = (WIN_HEADER_HEIGHT - badge_h) / 2;
+    const int badge_y = (KEEPSAKE_EDITOR_HEADER_HEIGHT - badge_h) / 2;
 
     HBRUSH brush = CreateSolidBrush(fill);
     HBRUSH old_brush = (HBRUSH)SelectObject(hdc, brush);
@@ -389,12 +388,12 @@ static void resize_embedded_editor_to_parent() {
     if (g_editor_panel_hwnd) {
         MoveWindow(g_editor_hwnd, 0, 0, w, h, TRUE);
         if (g_header_hwnd) {
-            MoveWindow(g_header_hwnd, 0, 0, w, WIN_HEADER_HEIGHT, TRUE);
+            MoveWindow(g_header_hwnd, 0, 0, w, KEEPSAKE_EDITOR_HEADER_HEIGHT, TRUE);
             InvalidateRect(g_header_hwnd, nullptr, TRUE);
             UpdateWindow(g_header_hwnd);
         }
-        MoveWindow(g_editor_panel_hwnd, 0, WIN_HEADER_HEIGHT, w,
-                   (h > WIN_HEADER_HEIGHT) ? (h - WIN_HEADER_HEIGHT) : 0, TRUE);
+        MoveWindow(g_editor_panel_hwnd, 0, KEEPSAKE_EDITOR_HEADER_HEIGHT, w,
+                   (h > KEEPSAKE_EDITOR_HEADER_HEIGHT) ? (h - KEEPSAKE_EDITOR_HEADER_HEIGHT) : 0, TRUE);
     } else {
         MoveWindow(g_editor_hwnd, 0, 0, w, h, TRUE);
     }
@@ -454,7 +453,7 @@ static bool ensure_embedded_surface(EmbedOpenMode mode, int w, int h) {
         HWND wrapper = CreateWindowExA(
             kKeepsakeEmbedWrapperExStyle, kKeepsakeEmbedWrapperClass, nullptr,
             wrapper_style,
-            0, 0, w, h + WIN_HEADER_HEIGHT,
+            0, 0, w, h + KEEPSAKE_EDITOR_HEADER_HEIGHT,
             nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
         DWORD wrapper_err = GetLastError();
         keepsake_debug_log("bridge: ensure_embedded_surface wrapper hwnd=%p err=%lu\n",
@@ -465,7 +464,7 @@ static bool ensure_embedded_surface(EmbedOpenMode mode, int w, int h) {
         HWND header = CreateWindowExA(
             0, "KeepsakeHeader", nullptr,
             WS_CHILD | WS_VISIBLE,
-            0, 0, w, WIN_HEADER_HEIGHT,
+            0, 0, w, KEEPSAKE_EDITOR_HEADER_HEIGHT,
             wrapper, nullptr, GetModuleHandle(nullptr), nullptr);
         if (!header) {
             DestroyWindow(wrapper);
@@ -475,7 +474,7 @@ static bool ensure_embedded_surface(EmbedOpenMode mode, int w, int h) {
         HWND panel = CreateWindowExA(
             0, "STATIC", nullptr,
             kKeepsakeEmbedChildStyle | WS_VISIBLE,
-            0, WIN_HEADER_HEIGHT, w, h,
+            0, KEEPSAKE_EDITOR_HEADER_HEIGHT, w, h,
             wrapper, nullptr, GetModuleHandle(nullptr), nullptr);
         DWORD panel_err = GetLastError();
         keepsake_debug_log("bridge: ensure_embedded_surface panel hwnd=%p err=%lu\n",
@@ -525,13 +524,13 @@ static bool attach_embedded_surface(HWND parent, EmbedOpenMode mode, int w, int 
 
         MoveWindow(g_editor_hwnd, 0, 0, w, h, TRUE);
         if (g_header_hwnd) {
-            MoveWindow(g_header_hwnd, 0, 0, w, WIN_HEADER_HEIGHT, TRUE);
+            MoveWindow(g_header_hwnd, 0, 0, w, KEEPSAKE_EDITOR_HEADER_HEIGHT, TRUE);
             ShowWindow(g_header_hwnd, SW_SHOW);
             InvalidateRect(g_header_hwnd, nullptr, TRUE);
             UpdateWindow(g_header_hwnd);
         }
-        MoveWindow(g_editor_panel_hwnd, 0, WIN_HEADER_HEIGHT, w,
-                   (h > WIN_HEADER_HEIGHT) ? (h - WIN_HEADER_HEIGHT) : 0, TRUE);
+        MoveWindow(g_editor_panel_hwnd, 0, KEEPSAKE_EDITOR_HEADER_HEIGHT, w,
+                   (h > KEEPSAKE_EDITOR_HEADER_HEIGHT) ? (h - KEEPSAKE_EDITOR_HEADER_HEIGHT) : 0, TRUE);
         ShowWindow(g_editor_hwnd, SW_SHOW);
         ShowWindow(g_editor_panel_hwnd, SW_SHOW);
         UpdateWindow(g_editor_hwnd);
@@ -574,14 +573,14 @@ static LRESULT CALLBACK EditorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
             int w = LOWORD(lParam);
             int h = HIWORD(lParam);
             if (g_header_hwnd) {
-                MoveWindow(g_header_hwnd, 0, 0, w, WIN_HEADER_HEIGHT, TRUE);
+                MoveWindow(g_header_hwnd, 0, 0, w, KEEPSAKE_EDITOR_HEADER_HEIGHT, TRUE);
                 InvalidateRect(g_header_hwnd, nullptr, TRUE);
             }
             MoveWindow(g_editor_panel_hwnd,
                        0,
-                       WIN_HEADER_HEIGHT,
+                       KEEPSAKE_EDITOR_HEADER_HEIGHT,
                        w,
-                       (h > WIN_HEADER_HEIGHT) ? (h - WIN_HEADER_HEIGHT) : 0,
+                       (h > KEEPSAKE_EDITOR_HEADER_HEIGHT) ? (h - KEEPSAKE_EDITOR_HEADER_HEIGHT) : 0,
                        TRUE);
         } else if (hwnd == g_parent_hwnd) {
             resize_embedded_editor_to_parent();
@@ -715,7 +714,7 @@ static bool gui_open_editor_impl(BridgeLoader *loader, const EditorHeaderInfo &h
     char title[256];
     snprintf(title, sizeof(title), "Keepsake \xe2\x80\x94 %s", header.plugin_name.c_str());
 
-    RECT wr = {0, 0, w, h + WIN_HEADER_HEIGHT};
+    RECT wr = {0, 0, w, h + KEEPSAKE_EDITOR_HEADER_HEIGHT};
     AdjustWindowRect(&wr, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, FALSE);
 
     g_editor_hwnd = CreateWindowExA(
@@ -734,13 +733,13 @@ static bool gui_open_editor_impl(BridgeLoader *loader, const EditorHeaderInfo &h
 
     g_header_hwnd = CreateWindowExA(
         0, "KeepsakeHeader", nullptr, WS_CHILD | WS_VISIBLE,
-        0, 0, w, WIN_HEADER_HEIGHT,
+        0, 0, w, KEEPSAKE_EDITOR_HEADER_HEIGHT,
         g_editor_hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
 
     HWND editor_panel = CreateWindowExA(
         kKeepsakeEmbedWrapperExStyle, kKeepsakeEmbedPanelClass, nullptr,
         kKeepsakeEmbedChildStyle | WS_VISIBLE,
-        0, WIN_HEADER_HEIGHT, w, h,
+        0, KEEPSAKE_EDITOR_HEADER_HEIGHT, w, h,
         g_editor_hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
     g_editor_panel_hwnd = editor_panel;
 

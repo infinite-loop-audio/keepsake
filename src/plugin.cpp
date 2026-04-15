@@ -114,8 +114,7 @@ void abandon_bridge(KeepsakePlugin *kp, const char *reason) {
     kp->bridge = nullptr;
     kp->bridge_ok = false;
     kp->crashed = true;
-    kp->editor_open = false;
-    kp->editor_open_pending = false;
+    keepsake_gui_session_mark_closed(kp);
     kp->gui_embed_failed = true;
     kp->gui_is_floating = false;
 

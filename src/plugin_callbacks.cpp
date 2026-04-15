@@ -90,7 +90,7 @@ static bool plugin_activate(const clap_plugin_t *plugin,
                        kp->bridge_ok ? 1 : 0, kp->crashed ? 1 : 0);
     sync_async_init(kp);
     if (kp->crashed) return false;
-    if (kp->editor_open_pending) {
+    if (keepsake_gui_session_is_pending(kp)) {
         keepsake_debug_log("keepsake: plugin_activate deferred while editor open pending instance=%u\n",
                            kp->instance_id);
         return kp->active;
@@ -176,7 +176,7 @@ static void plugin_deactivate(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
     sync_async_init(kp);
     clear_async_queue(kp, true);
-    if (kp->editor_open_pending) {
+    if (keepsake_gui_session_is_pending(kp)) {
         keepsake_debug_log("keepsake: plugin_deactivate skipped while editor open pending instance=%u\n",
                            kp->instance_id);
         return;
@@ -198,7 +198,7 @@ static bool plugin_start_processing(const clap_plugin_t *plugin) {
                        kp->instance_id, kp->active ? 1 : 0, kp->bridge_ok ? 1 : 0);
     sync_async_init(kp);
     if (!kp->active || kp->crashed) return false;
-    if (kp->editor_open_pending) {
+    if (keepsake_gui_session_is_pending(kp)) {
         keepsake_debug_log("keepsake: plugin_start_processing deferred while editor open pending instance=%u\n",
                            kp->instance_id);
         return true;
@@ -222,7 +222,7 @@ static void plugin_stop_processing(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
     sync_async_init(kp);
     clear_async_queue(kp, false);
-    if (kp->editor_open_pending) {
+    if (keepsake_gui_session_is_pending(kp)) {
         keepsake_debug_log("keepsake: plugin_stop_processing skipped while editor open pending instance=%u\n",
                            kp->instance_id);
         return;
@@ -262,6 +262,7 @@ const clap_plugin_t *keepsake_plugin_create(
     kp->has_editor = has_editor;
     kp->format = format;
     kp->isolation = isolation;
+    keepsake_gui_session_mark_closed(kp);
 
     kp->clap = {};
     kp->clap.desc = descriptor;

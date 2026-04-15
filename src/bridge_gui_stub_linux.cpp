@@ -18,14 +18,12 @@ static GC g_header_gc = nullptr;
 static BridgeLoader *g_active_loader = nullptr;
 static bool g_editor_open = false;
 static EditorHeaderInfo g_header_info_x11;
-static const int X11_HEADER_HEIGHT = 24;
-
 static void x11_draw_header() {
     if (!g_display || !g_header_window || !g_header_gc) return;
 
     XSetForeground(g_display, g_header_gc, 0x262626);
     XFillRectangle(g_display, g_header_window, g_header_gc,
-                   0, 0, 2000, X11_HEADER_HEIGHT);
+                   0, 0, 2000, KEEPSAKE_EDITOR_HEADER_HEIGHT);
 
     XSetForeground(g_display, g_header_gc, 0xDDDDDD);
     char text[512];
@@ -54,7 +52,7 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     int screen = DefaultScreen(g_display);
     Window root = RootWindow(g_display, screen);
     g_editor_window = XCreateSimpleWindow(
-        g_display, root, 200, 200, w, h + X11_HEADER_HEIGHT, 1,
+        g_display, root, 200, 200, w, h + KEEPSAKE_EDITOR_HEADER_HEIGHT, 1,
         BlackPixel(g_display, screen), 0x262626);
 
     char title[256];
@@ -62,14 +60,14 @@ bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     XStoreName(g_display, g_editor_window, title);
 
     g_header_window = XCreateSimpleWindow(
-        g_display, g_editor_window, 0, 0, w, X11_HEADER_HEIGHT, 0, 0, 0x262626);
+        g_display, g_editor_window, 0, 0, w, KEEPSAKE_EDITOR_HEADER_HEIGHT, 0, 0, 0x262626);
     XMapWindow(g_display, g_header_window);
     XSelectInput(g_display, g_header_window, ExposureMask);
 
     g_header_gc = XCreateGC(g_display, g_header_window, 0, nullptr);
 
     Window editor_area = XCreateSimpleWindow(
-        g_display, g_editor_window, 0, X11_HEADER_HEIGHT, w, h, 0,
+        g_display, g_editor_window, 0, KEEPSAKE_EDITOR_HEADER_HEIGHT, w, h, 0,
         0, WhitePixel(g_display, screen));
     XMapWindow(g_display, editor_area);
 

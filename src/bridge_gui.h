@@ -16,6 +16,8 @@ struct EditorHeaderInfo {
     std::string isolation;     // "shared", "per-binary", "per-instance"
 };
 
+static constexpr int KEEPSAKE_EDITOR_HEADER_HEIGHT = 28;
+
 // Initialize the GUI subsystem. Call once at bridge startup.
 void gui_init();
 

@@ -4,7 +4,7 @@
 
 #include "bridge_gui.h"
 
-static const CGFloat HEADER_HEIGHT = 28.0;
+static const CGFloat HEADER_HEIGHT = static_cast<CGFloat>(KEEPSAKE_EDITOR_HEADER_HEIGHT);
 static const int DEFAULT_EDITOR_WIDTH = 960;
 static const int DEFAULT_EDITOR_HEIGHT = 640;
 static const int EDITOR_OPEN_TIMEOUT_MS = 5000;

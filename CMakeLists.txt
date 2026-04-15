@@ -69,6 +69,7 @@ add_library(keepsake MODULE
     src/vst2_loader_platform.cpp
     src/vst2_loader_bridge.cpp
     src/plugin.cpp
+    src/plugin_editor_session.cpp
     src/plugin_callbacks.cpp
     src/plugin_processing.cpp
     src/plugin_async.cpp

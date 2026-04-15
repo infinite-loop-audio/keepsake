@@ -3,6 +3,7 @@
 //
 
 #include "plugin_internal.h"
+#include "bridge_gui.h"
 #include "debug_log.h"
 
 #include <clap/events.h>
@@ -10,18 +11,15 @@
 #ifdef _WIN32
 #include <windows.h>
 static const uint64_t GUI_SIZE_POLL_INTERVAL_MS = 100;
-static const int GUI_EMBED_HEADER_HEIGHT = 28;
 static const uint64_t GUI_HOST_RESIZE_MIN_INTERVAL_MS = 33;
 static const uint64_t GUI_DIRECT_RESIZE_FALLBACK_SUPPRESS_MS = 500;
 #endif
 
 static void maybe_request_gui_main_thread(KeepsakePlugin *kp);
-static void request_gui_main_thread_once(KeepsakePlugin *kp);
 
 #ifdef _WIN32
 static bool maybe_apply_editor_resize_request(KeepsakePlugin *kp, ShmProcessControl *ctrl) {
-    if (!kp || !ctrl || !kp->editor_open || kp->editor_open_pending || kp->gui_is_floating ||
-        !kp->host_gui || !kp->host_gui->request_resize) {
+    if (!ctrl || !keepsake_gui_session_can_host_resize(kp)) {
         return false;
     }
 
@@ -38,11 +36,13 @@ static bool maybe_apply_editor_resize_request(KeepsakePlugin *kp, ShmProcessCont
     }
 
     const int32_t host_width = raw_width;
-    const int32_t host_height = raw_height + GUI_EMBED_HEADER_HEIGHT;
+    const int32_t host_height = raw_height + KEEPSAKE_EDITOR_HEADER_HEIGHT;
     const uint64_t now_ms = GetTickCount64();
-    if ((host_width == kp->last_requested_gui_width &&
-         host_height == kp->last_requested_gui_height) ||
-        (now_ms - kp->last_host_resize_request_ms < GUI_HOST_RESIZE_MIN_INTERVAL_MS)) {
+    if (keepsake_gui_session_should_rate_limit_resize(kp,
+                                                      host_width,
+                                                      host_height,
+                                                      now_ms,
+                                                      GUI_HOST_RESIZE_MIN_INTERVAL_MS)) {
         return false;
     }
 
@@ -54,14 +54,14 @@ static bool maybe_apply_editor_resize_request(KeepsakePlugin *kp, ShmProcessCont
         return false;
     }
 
-    kp->editor_width = raw_width;
-    kp->editor_height = raw_height;
-    kp->last_requested_gui_width = host_width;
-    kp->last_requested_gui_height = host_height;
-    kp->saw_direct_editor_resize = true;
-    kp->last_direct_resize_request_ms = now_ms;
-    kp->last_host_resize_request_ms = now_ms;
-    kp->last_seen_editor_resize_serial = resize_serial;
+    keepsake_gui_session_record_host_resize_request(kp,
+                                                    raw_width,
+                                                    raw_height,
+                                                    host_width,
+                                                    host_height,
+                                                    resize_serial,
+                                                    now_ms,
+                                                    true);
     return true;
 }
 #endif
@@ -362,18 +362,16 @@ void plugin_on_main_thread(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
     sync_async_init(kp);
     if (kp->crashed || !kp->bridge_ok || !kp->shm.ptr) return;
-    kp->gui_callback_requested.store(false, std::memory_order_release);
+    keepsake_gui_session_clear_callback_request(kp);
 
     auto *ctrl = shm_control(kp->shm.ptr);
 #ifdef _WIN32
-    if (kp->editor_open && !kp->editor_open_pending && !kp->gui_is_floating &&
-        kp->host_gui && kp->host_gui->request_resize) {
+    if (keepsake_gui_session_can_host_resize(kp)) {
         if (!maybe_apply_editor_resize_request(kp, ctrl)) {
-            if (kp->saw_direct_editor_resize) {
-                return;
-            }
             const uint64_t now_ms = GetTickCount64();
-            if (now_ms - kp->last_direct_resize_request_ms < GUI_DIRECT_RESIZE_FALLBACK_SUPPRESS_MS) {
+            if (keepsake_gui_session_should_suppress_poll(kp,
+                                                          now_ms,
+                                                          GUI_DIRECT_RESIZE_FALLBACK_SUPPRESS_MS)) {
                 return;
             }
             std::vector<uint8_t> payload;
@@ -384,10 +382,12 @@ void plugin_on_main_thread(const clap_plugin_t *plugin) {
                 if (rect.width > 0 && rect.height > 0 &&
                     (rect.width != kp->editor_width || rect.height != kp->editor_height)) {
                     const int32_t host_width = rect.width;
-                    const int32_t host_height = rect.height + GUI_EMBED_HEADER_HEIGHT;
-                    if ((host_width == kp->last_requested_gui_width &&
-                         host_height == kp->last_requested_gui_height) ||
-                        (now_ms - kp->last_host_resize_request_ms < GUI_HOST_RESIZE_MIN_INTERVAL_MS)) {
+                    const int32_t host_height = rect.height + KEEPSAKE_EDITOR_HEADER_HEIGHT;
+                    if (keepsake_gui_session_should_rate_limit_resize(kp,
+                                                                      host_width,
+                                                                      host_height,
+                                                                      now_ms,
+                                                                      GUI_HOST_RESIZE_MIN_INTERVAL_MS)) {
                         return;
                     }
                     keepsake_debug_log("keepsake: request_resize polled raw=%dx%d host=%dx%d\n",
@@ -395,11 +395,14 @@ void plugin_on_main_thread(const clap_plugin_t *plugin) {
                     if (kp->host_gui->request_resize(kp->host,
                                                      static_cast<uint32_t>(host_width),
                                                      static_cast<uint32_t>(host_height))) {
-                        kp->editor_width = rect.width;
-                        kp->editor_height = rect.height;
-                        kp->last_requested_gui_width = host_width;
-                        kp->last_requested_gui_height = host_height;
-                        kp->last_host_resize_request_ms = now_ms;
+                        keepsake_gui_session_record_host_resize_request(kp,
+                                                                        rect.width,
+                                                                        rect.height,
+                                                                        host_width,
+                                                                        host_height,
+                                                                        0,
+                                                                        now_ms,
+                                                                        false);
                     }
                 }
             }
@@ -409,14 +412,16 @@ void plugin_on_main_thread(const clap_plugin_t *plugin) {
 
     if (!kp->editor_open_pending) return;
 
-    uint32_t editor_state = shm_load_acquire(&ctrl->editor_state);
-    if (editor_state == SHM_EDITOR_OPEN) {
+    const KeepsakeGuiPendingState pending_state =
+        keepsake_gui_session_get_pending_state(kp);
+    if (pending_state == KeepsakeGuiPendingState::Open) {
         keepsake_debug_log("keepsake: editor pending complete instance=%u\n",
                            kp->instance_id);
         gui_complete_pending_open(kp);
-    } else if (editor_state == SHM_EDITOR_OPENING) {
-        request_gui_main_thread_once(kp);
+    } else if (pending_state == KeepsakeGuiPendingState::Opening) {
+        keepsake_gui_session_request_callback_once(kp);
     } else {
+        const uint32_t editor_state = shm_load_acquire(&ctrl->editor_state);
         keepsake_debug_log("keepsake: editor pending terminal state=%u instance=%u\n",
                            editor_state, kp->instance_id);
         if (kp->bridge && platform_process_alive(kp->bridge->proc)) {
@@ -427,20 +432,11 @@ void plugin_on_main_thread(const clap_plugin_t *plugin) {
     }
 }
 
-static void request_gui_main_thread_once(KeepsakePlugin *kp) {
-    if (!kp || !kp->host || !kp->host->request_callback) return;
-    bool expected = false;
-    if (kp->gui_callback_requested.compare_exchange_strong(expected, true,
-                                                           std::memory_order_acq_rel)) {
-        kp->host->request_callback(kp->host);
-    }
-}
-
 static void maybe_request_gui_main_thread(KeepsakePlugin *kp) {
     if (!kp) return;
 
     if (kp->editor_open_pending) {
-        request_gui_main_thread_once(kp);
+        keepsake_gui_session_request_callback_once(kp);
         return;
     }
 
@@ -449,14 +445,14 @@ static void maybe_request_gui_main_thread(KeepsakePlugin *kp) {
         if (kp->shm.ptr) {
             auto *ctrl = shm_control(kp->shm.ptr);
             if (shm_load_acquire(&ctrl->editor_resize_serial) != kp->last_seen_editor_resize_serial) {
-                request_gui_main_thread_once(kp);
+                keepsake_gui_session_request_callback_once(kp);
                 return;
             }
         }
         uint64_t now_ms = GetTickCount64();
         if (now_ms - kp->last_gui_poll_ms >= GUI_SIZE_POLL_INTERVAL_MS) {
             kp->last_gui_poll_ms = now_ms;
-            request_gui_main_thread_once(kp);
+            keepsake_gui_session_request_callback_once(kp);
         }
     }
 #endif

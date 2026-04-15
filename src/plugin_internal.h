@@ -4,6 +4,7 @@
 //
 
 #include "plugin.h"
+#include "plugin_editor_session.h"
 #include <condition_variable>
 #include <cstdio>
 #include <cstring>
