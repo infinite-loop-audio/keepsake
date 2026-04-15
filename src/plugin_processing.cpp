@@ -123,7 +123,7 @@ clap_process_status plugin_process(const clap_plugin_t *plugin,
                        frames, midi_idx, param_idx, shm_load_acquire(&ctrl->state));
     shm_store_release(&ctrl->state, SHM_STATE_PROCESS_REQUESTED);
 
-    uint64_t deadline = GetTickCount64() + 2;
+    uint64_t deadline = GetTickCount64() + 5;
     bool done = false;
     while (GetTickCount64() < deadline) {
         uint32_t state = shm_load_acquire(&ctrl->state);

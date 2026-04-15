@@ -110,6 +110,7 @@ static unsigned __stdcall audio_thread_func(void *arg) {
     auto *ctrl = shm_control(inst->shm.ptr);
 
     fprintf(stderr, "bridge: audio thread started for instance %u\n", inst->id);
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
     while (inst->active) {
         if (shm_load_acquire(&ctrl->state) == SHM_STATE_PROCESS_REQUESTED) {

@@ -292,6 +292,23 @@ if(WIN32)
     target_include_directories(windows-vst2-probe PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/vendor
     )
+
+    add_executable(windows-clap-host tools/windows-clap-host.cpp)
+    target_include_directories(windows-clap-host PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor
+    )
+    target_link_libraries(windows-clap-host PRIVATE clap)
+
+    add_library(host-probe-clap MODULE tools/host-probe-clap.cpp)
+    target_include_directories(host-probe-clap PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor
+    )
+    target_link_libraries(host-probe-clap PRIVATE clap)
+    set_target_properties(host-probe-clap PROPERTIES
+        PREFIX ""
+        SUFFIX ".clap"
+        OUTPUT_NAME "host-probe"
+    )
 endif()
 
 if(APPLE OR UNIX)

@@ -1,4 +1,5 @@
 #include "factory_internal.h"
+#include "debug_log.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -111,6 +112,10 @@ static const clap_plugin_factory_t s_factory = {
 // --- Public API ---
 
 bool keepsake_factory_init(const char *plugin_path) {
+    keepsake_debug_log_build_once("keepsake:");
+    keepsake_debug_log("keepsake: factory_init plugin_path=%s\n",
+                       plugin_path ? plugin_path : "(null)");
+
     // Determine bridge binary paths
     if (plugin_path) {
 #ifdef __APPLE__
@@ -141,6 +146,12 @@ bool keepsake_factory_init(const char *plugin_path) {
     if (const char *env = getenv("KEEPSAKE_BRIDGE_32_PATH")) {
         if (env[0] != '\0') s_bridge_32_path = env;
     }
+
+    keepsake_debug_log("keepsake: factory bridges main=%s x86_64=%s x86=%s env_main=%s\n",
+                       s_bridge_path.c_str(),
+                       s_bridge_x86_64_path.empty() ? "(none)" : s_bridge_x86_64_path.c_str(),
+                       s_bridge_32_path.empty() ? "(none)" : s_bridge_32_path.c_str(),
+                       getenv("KEEPSAKE_BRIDGE_PATH") ? getenv("KEEPSAKE_BRIDGE_PATH") : "(unset)");
 
     fprintf(stderr, "keepsake: bridge at '%s'\n", s_bridge_path.c_str());
     if (!s_bridge_x86_64_path.empty()) {

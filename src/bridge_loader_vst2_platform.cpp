@@ -72,6 +72,7 @@ static void trace_editor_open_callback(int32_t opcode,
                                        float opt,
                                        intptr_t result) {
     if (!s_editor_open_in_progress.load()) return;
+    if (opcode == audioMasterGetTime) return;
     if (opcode == audioMasterCanDo && ptr) {
         keepsake_debug_log("bridge/vst2: hostcb %s query='%s' -> %lld\n",
                            vst2_host_opcode_name(opcode),
