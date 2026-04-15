@@ -28,13 +28,21 @@ static HWND g_owner_hwnd = nullptr;
 static HWND g_header_hwnd = nullptr;
 static HWND g_editor_panel_hwnd = nullptr;
 static BridgeLoader *g_active_loader = nullptr;
+static uint64_t g_staged_embed_parent_handle = 0;
+static BridgeLoader *g_pending_open_loader = nullptr;
+static std::atomic<bool> g_pending_open{false};
+static bool g_pending_open_embedded = false;
+static EditorHeaderInfo g_pending_open_header;
+static std::atomic<bool> g_editor_open_inflight{false};
+static ShmProcessControl *g_gui_status_ctrl = nullptr;
 static UINT_PTR g_idle_timer = 0;
 static EditorHeaderInfo g_header_info;
 static const int WIN_HEADER_HEIGHT = 24;
 static int g_last_parent_w = 0;
 static int g_last_parent_h = 0;
+static bool g_editor_hwnd_on_window_thread = false;
+static bool g_editor_embedded_surface_ready = false;
 static std::atomic<bool> g_editor_open{false};
-static const DWORD EMBED_OPEN_TIMEOUT_MS = 1500;
 static constexpr const char *kKeepsakeHostWindowClass = "KeepsakeHostWindow";
 static constexpr const char *kKeepsakeEmbedWrapperClass = "KeepsakeEmbedWrapper";
 static constexpr const char *kKeepsakeEmbedPanelClass = "KeepsakeEmbedPanel";
@@ -42,13 +50,34 @@ static constexpr DWORD kKeepsakeEmbedChildStyle =
     WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
 static constexpr DWORD kKeepsakeEmbedWrapperExStyle = WS_EX_CONTROLPARENT;
 static constexpr UINT WM_KEEPSAKE_GUI_TASK = WM_APP + 41;
+static constexpr UINT WM_KEEPSAKE_WINDOW_TASK = WM_APP + 42;
 
-static std::thread g_gui_thread;
+enum class EmbedOpenMode {
+    MainThread,
+    Hybrid,
+    WindowThread,
+};
+
+enum class EmbedAttachTarget {
+    DirectParent,
+    RootAncestor,
+};
+
+enum class EmbedParentSurface {
+    Panel,
+    Wrapper,
+};
+
 static DWORD g_gui_thread_id = 0;
 static std::mutex g_gui_mutex;
-static std::condition_variable g_gui_ready_cv;
 static bool g_gui_ready = false;
 static std::queue<std::function<void()>> g_gui_tasks;
+static std::thread g_window_thread;
+static DWORD g_window_thread_id = 0;
+static std::mutex g_window_mutex;
+static std::condition_variable g_window_ready_cv;
+static bool g_window_ready = false;
+static std::queue<std::function<void()>> g_window_tasks;
 
 static void log_window_info(const char *label, HWND hwnd) {
     if (!hwnd) {
@@ -63,8 +92,16 @@ static void log_window_info(const char *label, HWND hwnd) {
     LONG_PTR exstyle = GetWindowLongPtrA(hwnd, GWL_EXSTYLE);
     HWND parent = GetParent(hwnd);
     HWND owner = GetWindow(hwnd, GW_OWNER);
+    HWND root = GetAncestor(hwnd, GA_ROOT);
+    HWND foreground = GetForegroundWindow();
+    HWND focus = GetFocus();
+    DWORD window_pid = 0;
+    DWORD window_tid = GetWindowThreadProcessId(hwnd, &window_pid);
+    WINDOWPLACEMENT placement = {};
+    placement.length = sizeof(placement);
+    bool have_placement = GetWindowPlacement(hwnd, &placement) != FALSE;
     keepsake_debug_log(
-        "bridge: %s hwnd=%p class='%s' style=0x%llx exstyle=0x%llx parent=%p owner=%p visible=%d rect=%ld,%ld,%ld,%ld\n",
+        "bridge: %s hwnd=%p class='%s' style=0x%llx exstyle=0x%llx parent=%p owner=%p root=%p visible=%d enabled=%d iconic=%d zoomed=%d fg=%d focus=%d tid=%lu pid=%lu show=%u rect=%ld,%ld,%ld,%ld\n",
         label,
         static_cast<void *>(hwnd),
         klass,
@@ -72,7 +109,16 @@ static void log_window_info(const char *label, HWND hwnd) {
         static_cast<long long>(exstyle),
         static_cast<void *>(parent),
         static_cast<void *>(owner),
+        static_cast<void *>(root),
         IsWindowVisible(hwnd) ? 1 : 0,
+        IsWindowEnabled(hwnd) ? 1 : 0,
+        IsIconic(hwnd) ? 1 : 0,
+        IsZoomed(hwnd) ? 1 : 0,
+        foreground == hwnd ? 1 : 0,
+        focus == hwnd ? 1 : 0,
+        static_cast<unsigned long>(window_tid),
+        static_cast<unsigned long>(window_pid),
+        have_placement ? static_cast<unsigned>(placement.showCmd) : 0U,
         static_cast<long>(rc.left),
         static_cast<long>(rc.top),
         static_cast<long>(rc.right),
@@ -96,10 +142,6 @@ static void log_window_tree(const char *phase, HWND parent, HWND wrapper, HWND p
     log_window_info("host-parent", parent);
     log_window_info("wrapper", wrapper);
     log_window_info("panel", panel);
-    if (parent) EnumChildWindows(parent, LogChildWindowsProc, reinterpret_cast<LPARAM>("host-child"));
-    DWORD tid = GetCurrentThreadId();
-    keepsake_debug_log("bridge: window-tree thread=%lu\n", static_cast<unsigned long>(tid));
-    EnumThreadWindows(tid, LogThreadWindowsProc, 0);
 }
 
 static void gui_register_classes() {
@@ -133,19 +175,158 @@ static void gui_drain_tasks() {
     std::queue<std::function<void()>> tasks;
     {
         std::lock_guard<std::mutex> lock(g_gui_mutex);
-        keepsake_debug_log("bridge: gui_drain_tasks queued=%zu thread=%lu\n",
-                           g_gui_tasks.size(),
-                           static_cast<unsigned long>(GetCurrentThreadId()));
         tasks.swap(g_gui_tasks);
     }
     while (!tasks.empty()) {
         auto task = std::move(tasks.front());
         tasks.pop();
-        keepsake_debug_log("bridge: gui_drain_tasks run remaining=%zu thread=%lu\n",
-                           tasks.size(),
-                           static_cast<unsigned long>(GetCurrentThreadId()));
         task();
     }
+}
+
+static void window_drain_tasks() {
+    std::queue<std::function<void()>> tasks;
+    {
+        std::lock_guard<std::mutex> lock(g_window_mutex);
+        tasks.swap(g_window_tasks);
+    }
+    while (!tasks.empty()) {
+        auto task = std::move(tasks.front());
+        tasks.pop();
+        task();
+    }
+}
+
+static const char *embed_open_mode_name(EmbedOpenMode mode) {
+    switch (mode) {
+    case EmbedOpenMode::MainThread:
+        return "main";
+    case EmbedOpenMode::Hybrid:
+        return "hybrid";
+    case EmbedOpenMode::WindowThread:
+        return "window";
+    }
+    return "hybrid";
+}
+
+static EmbedOpenMode get_embed_open_mode() {
+    static std::once_flag once;
+    static EmbedOpenMode mode = EmbedOpenMode::Hybrid;
+    std::call_once(once, []() {
+        char value[64] = {};
+        DWORD len = GetEnvironmentVariableA("KEEPSAKE_WIN_EMBED_MODE",
+                                            value,
+                                            static_cast<DWORD>(sizeof(value)));
+        if (len > 0 && len < sizeof(value)) {
+            if (_stricmp(value, "main") == 0) {
+                mode = EmbedOpenMode::MainThread;
+            } else if (_stricmp(value, "window") == 0 ||
+                       _stricmp(value, "legacy") == 0 ||
+                       _stricmp(value, "all-helper") == 0) {
+                mode = EmbedOpenMode::WindowThread;
+            }
+        }
+        keepsake_debug_log("bridge: embed open mode=%s env='%s'\n",
+                           embed_open_mode_name(mode),
+                           len > 0 ? value : "");
+    });
+    return mode;
+}
+
+static const char *embed_attach_target_name(EmbedAttachTarget target) {
+    switch (target) {
+    case EmbedAttachTarget::DirectParent:
+        return "direct";
+    case EmbedAttachTarget::RootAncestor:
+        return "root";
+    }
+    return "direct";
+}
+
+static EmbedAttachTarget get_embed_attach_target() {
+    static std::once_flag once;
+    static EmbedAttachTarget target = EmbedAttachTarget::DirectParent;
+    std::call_once(once, []() {
+        char value[64] = {};
+        DWORD len = GetEnvironmentVariableA("KEEPSAKE_WIN_EMBED_ATTACH_TARGET",
+                                            value,
+                                            static_cast<DWORD>(sizeof(value)));
+        if (len > 0 && len < sizeof(value)) {
+            if (_stricmp(value, "root") == 0 ||
+                _stricmp(value, "ancestor") == 0) {
+                target = EmbedAttachTarget::RootAncestor;
+            }
+        }
+        keepsake_debug_log("bridge: embed attach target=%s env='%s'\n",
+                           embed_attach_target_name(target),
+                           len > 0 ? value : "");
+    });
+    return target;
+}
+
+static HWND resolve_embed_attach_parent(HWND parent) {
+    HWND target = parent;
+    if (get_embed_attach_target() == EmbedAttachTarget::RootAncestor) {
+        HWND root = GetAncestor(parent, GA_ROOT);
+        if (root) target = root;
+    }
+    keepsake_debug_log("bridge: resolve_embed_attach_parent input=%p target=%p mode=%s\n",
+                       static_cast<void *>(parent),
+                       static_cast<void *>(target),
+                       embed_attach_target_name(get_embed_attach_target()));
+    return target;
+}
+
+static bool should_force_show_embed_parent() {
+    static std::once_flag once;
+    static bool enabled = false;
+    std::call_once(once, []() {
+        char value[16] = {};
+        DWORD len = GetEnvironmentVariableA("KEEPSAKE_WIN_FORCE_SHOW_PARENT",
+                                            value,
+                                            static_cast<DWORD>(sizeof(value)));
+        enabled = (len > 0 && value[0] != '\0' && value[0] != '0');
+        keepsake_debug_log("bridge: force show embed parent=%d env='%s'\n",
+                           enabled ? 1 : 0,
+                           len > 0 ? value : "");
+    });
+    return enabled;
+}
+
+static const char *embed_parent_surface_name(EmbedParentSurface surface) {
+    switch (surface) {
+    case EmbedParentSurface::Panel:
+        return "panel";
+    case EmbedParentSurface::Wrapper:
+        return "wrapper";
+    }
+    return "panel";
+}
+
+static EmbedParentSurface get_embed_parent_surface() {
+    static std::once_flag once;
+    static EmbedParentSurface surface = EmbedParentSurface::Panel;
+    std::call_once(once, []() {
+        char value[64] = {};
+        DWORD len = GetEnvironmentVariableA("KEEPSAKE_WIN_EMBED_PARENT_SURFACE",
+                                            value,
+                                            static_cast<DWORD>(sizeof(value)));
+        if (len > 0 && len < sizeof(value)) {
+            if (_stricmp(value, "wrapper") == 0) {
+                surface = EmbedParentSurface::Wrapper;
+            } else if (_stricmp(value, "panel") == 0) {
+                surface = EmbedParentSurface::Panel;
+            }
+        }
+        keepsake_debug_log("bridge: embed parent surface=%s env='%s'\n",
+                           embed_parent_surface_name(surface),
+                           len > 0 ? value : "");
+    });
+    return surface;
+}
+
+static void reset_embedded_surface_state() {
+    g_editor_embedded_surface_ready = false;
 }
 
 template <typename Fn>
@@ -182,6 +363,39 @@ static auto gui_call_sync(Fn &&fn) -> decltype(fn()) {
     PostThreadMessageA(g_gui_thread_id, WM_KEEPSAKE_GUI_TASK, 0, 0);
     keepsake_debug_log("bridge: gui_call_sync wait-begin caller=%lu\n",
                        static_cast<unsigned long>(GetCurrentThreadId()));
+    return future.get();
+}
+
+template <typename Fn>
+static auto window_call_sync(Fn &&fn) -> decltype(fn()) {
+    using Result = decltype(fn());
+    if (GetCurrentThreadId() == g_window_thread_id) return fn();
+
+    auto promise = std::make_shared<std::promise<Result>>();
+    auto future = promise->get_future();
+    keepsake_debug_log("bridge: window_call_sync enqueue window_thread=%lu caller=%lu\n",
+                       static_cast<unsigned long>(g_window_thread_id),
+                       static_cast<unsigned long>(GetCurrentThreadId()));
+    {
+        std::lock_guard<std::mutex> lock(g_window_mutex);
+        g_window_tasks.push([promise, fn = std::forward<Fn>(fn)]() mutable {
+            try {
+                keepsake_debug_log("bridge: window_call_sync task-begin thread=%lu\n",
+                                   static_cast<unsigned long>(GetCurrentThreadId()));
+                if constexpr (std::is_void_v<Result>) {
+                    fn();
+                    promise->set_value();
+                } else {
+                    promise->set_value(fn());
+                }
+                keepsake_debug_log("bridge: window_call_sync task-end thread=%lu\n",
+                                   static_cast<unsigned long>(GetCurrentThreadId()));
+            } catch (...) {
+                promise->set_exception(std::current_exception());
+            }
+        });
+    }
+    PostThreadMessageA(g_window_thread_id, WM_KEEPSAKE_WINDOW_TASK, 0, 0);
     return future.get();
 }
 
@@ -259,6 +473,117 @@ static void resize_embedded_editor_to_parent() {
     }
 }
 
+static bool ensure_embedded_surface(EmbedOpenMode mode, int w, int h) {
+    if (g_editor_hwnd && g_editor_panel_hwnd && g_editor_embedded_surface_ready)
+        return true;
+
+    const bool use_window_thread_for_host_window = (mode != EmbedOpenMode::MainThread);
+    auto create_surface = [=]() -> bool {
+        const DWORD wrapper_style = WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+        keepsake_debug_log("bridge: ensure_embedded_surface create mode=%s size=%dx%d thread=%lu\n",
+                           embed_open_mode_name(mode),
+                           w,
+                           h,
+                           static_cast<unsigned long>(GetCurrentThreadId()));
+
+        HWND wrapper = CreateWindowExA(
+            kKeepsakeEmbedWrapperExStyle, kKeepsakeEmbedWrapperClass, nullptr,
+            wrapper_style,
+            0, 0, w, h,
+            nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
+        DWORD wrapper_err = GetLastError();
+        keepsake_debug_log("bridge: ensure_embedded_surface wrapper hwnd=%p err=%lu\n",
+                           static_cast<void *>(wrapper),
+                           static_cast<unsigned long>(wrapper_err));
+        if (!wrapper) return false;
+
+        HWND panel = CreateWindowExA(
+            0, "STATIC", nullptr,
+            kKeepsakeEmbedChildStyle | WS_VISIBLE,
+            0, 0, w, h,
+            wrapper, nullptr, GetModuleHandle(nullptr), nullptr);
+        DWORD panel_err = GetLastError();
+        keepsake_debug_log("bridge: ensure_embedded_surface panel hwnd=%p err=%lu\n",
+                           static_cast<void *>(panel),
+                           static_cast<unsigned long>(panel_err));
+        if (!panel) {
+            DestroyWindow(wrapper);
+            return false;
+        }
+
+        g_editor_hwnd = wrapper;
+        g_editor_panel_hwnd = panel;
+        g_editor_hwnd_on_window_thread = use_window_thread_for_host_window;
+        g_editor_embedded_surface_ready = true;
+        return true;
+    };
+
+    return use_window_thread_for_host_window ? window_call_sync(create_surface)
+                                             : create_surface();
+}
+
+static bool attach_embedded_surface(HWND parent, EmbedOpenMode mode, int w, int h) {
+    if (!g_editor_hwnd || !g_editor_panel_hwnd) return false;
+
+    const bool use_window_thread_for_host_window = (mode != EmbedOpenMode::MainThread);
+    auto attach_surface = [=]() -> bool {
+        keepsake_debug_log("bridge: attach_embedded_surface wrapper=%p panel=%p parent=%p mode=%s thread=%lu\n",
+                           static_cast<void *>(g_editor_hwnd),
+                           static_cast<void *>(g_editor_panel_hwnd),
+                           static_cast<void *>(parent),
+                           embed_open_mode_name(mode),
+                           static_cast<unsigned long>(GetCurrentThreadId()));
+
+        LONG_PTR style = GetWindowLongPtrA(g_editor_hwnd, GWL_STYLE);
+        style &= ~static_cast<LONG_PTR>(WS_POPUP);
+        style |= kKeepsakeEmbedChildStyle;
+        SetWindowLongPtrA(g_editor_hwnd, GWL_STYLE, style);
+
+        SetLastError(0);
+        HWND previous_parent = SetParent(g_editor_hwnd, parent);
+        DWORD parent_err = GetLastError();
+        keepsake_debug_log("bridge: attach_embedded_surface SetParent previous=%p err=%lu\n",
+                           static_cast<void *>(previous_parent),
+                           static_cast<unsigned long>(parent_err));
+        if (!previous_parent && parent_err != 0) return false;
+
+        MoveWindow(g_editor_hwnd, 0, 0, w, h, TRUE);
+        MoveWindow(g_editor_panel_hwnd, 0, 0, w, h, TRUE);
+        ShowWindow(g_editor_hwnd, SW_SHOW);
+        ShowWindow(g_editor_panel_hwnd, SW_SHOW);
+        UpdateWindow(g_editor_hwnd);
+        UpdateWindow(g_editor_panel_hwnd);
+        keepsake_debug_log(
+            "bridge: attach_embedded_surface visible wrapper=%d panel=%d parent=%d\n",
+            IsWindowVisible(g_editor_hwnd) ? 1 : 0,
+            IsWindowVisible(g_editor_panel_hwnd) ? 1 : 0,
+            IsWindowVisible(parent) ? 1 : 0);
+        return true;
+    };
+
+    return use_window_thread_for_host_window ? window_call_sync(attach_surface)
+                                             : attach_surface();
+}
+
+static void wait_for_embed_parent_visibility(HWND parent, int timeout_ms) {
+    if (!parent || timeout_ms <= 0) return;
+
+    auto deadline = GetTickCount64() + static_cast<ULONGLONG>(timeout_ms);
+    while (GetTickCount64() < deadline) {
+        HWND root = GetAncestor(parent, GA_ROOT);
+        const bool parent_visible = IsWindowVisible(parent) != FALSE;
+        const bool root_visible = root ? (IsWindowVisible(root) != FALSE) : false;
+        if (parent_visible || root_visible) return;
+
+        MSG msg;
+        while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageA(&msg);
+        }
+        Sleep(10);
+    }
+}
+
 static LRESULT CALLBACK EditorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_TIMER:
@@ -271,6 +596,7 @@ static LRESULT CALLBACK EditorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         g_editor_panel_hwnd = nullptr;
         DestroyWindow(hwnd);
         g_editor_hwnd = nullptr;
+        reset_embedded_surface_state();
         return 0;
     }
     return DefWindowProcA(hwnd, msg, wParam, lParam);
@@ -312,39 +638,48 @@ static LRESULT CALLBACK HeaderWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
 }
 
 void gui_init() {
-    std::unique_lock<std::mutex> lock(g_gui_mutex);
     if (g_gui_ready) return;
+    g_gui_thread_id = GetCurrentThreadId();
+    keepsake_debug_log("bridge: gui owner thread init id=%lu\n",
+                       static_cast<unsigned long>(g_gui_thread_id));
+    MSG msg;
+    PeekMessageA(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+    gui_register_classes();
+    g_gui_ready = true;
+    keepsake_debug_log("bridge: gui owner thread ready id=%lu\n",
+                       static_cast<unsigned long>(g_gui_thread_id));
 
-    g_gui_thread = std::thread([]() {
-        g_gui_thread_id = GetCurrentThreadId();
-        keepsake_debug_log("bridge: gui thread start id=%lu\n",
-                           static_cast<unsigned long>(g_gui_thread_id));
-        MSG msg;
-        PeekMessageA(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
-        gui_register_classes();
-        {
-            std::lock_guard<std::mutex> ready_lock(g_gui_mutex);
-            g_gui_ready = true;
-        }
-        keepsake_debug_log("bridge: gui thread ready id=%lu\n",
-                           static_cast<unsigned long>(g_gui_thread_id));
-        g_gui_ready_cv.notify_all();
+    {
+        std::unique_lock<std::mutex> lock(g_window_mutex);
+        if (!g_window_ready) {
+            g_window_thread = std::thread([]() {
+                g_window_thread_id = GetCurrentThreadId();
+                keepsake_debug_log("bridge: helper window thread init id=%lu\n",
+                                   static_cast<unsigned long>(g_window_thread_id));
+                MSG msg;
+                PeekMessageA(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+                {
+                    std::lock_guard<std::mutex> ready_lock(g_window_mutex);
+                    g_window_ready = true;
+                }
+                keepsake_debug_log("bridge: helper window thread ready id=%lu\n",
+                                   static_cast<unsigned long>(g_window_thread_id));
+                g_window_ready_cv.notify_all();
 
-        while (GetMessageA(&msg, nullptr, 0, 0) > 0) {
-            keepsake_debug_log("bridge: gui thread msg=0x%04X thread=%lu\n",
-                               static_cast<unsigned>(msg.message),
-                               static_cast<unsigned long>(GetCurrentThreadId()));
-            if (msg.message == WM_KEEPSAKE_GUI_TASK) {
-                gui_drain_tasks();
-                continue;
-            }
-            TranslateMessage(&msg);
-            DispatchMessageA(&msg);
-            gui_drain_tasks();
+                while (GetMessageA(&msg, nullptr, 0, 0) > 0) {
+                    if (msg.message == WM_KEEPSAKE_WINDOW_TASK) {
+                        window_drain_tasks();
+                        continue;
+                    }
+                    TranslateMessage(&msg);
+                    DispatchMessageA(&msg);
+                    window_drain_tasks();
+                }
+            });
+            g_window_thread.detach();
+            g_window_ready_cv.wait(lock, [] { return g_window_ready; });
         }
-    });
-    g_gui_thread.detach();
-    g_gui_ready_cv.wait(lock, [] { return g_gui_ready; });
+    }
 }
 
 static bool gui_open_editor_impl(BridgeLoader *loader, const EditorHeaderInfo &header) {
@@ -409,12 +744,15 @@ static bool gui_open_editor_impl(BridgeLoader *loader, const EditorHeaderInfo &h
     return true;
 }
 
-static bool gui_open_editor_embedded_impl(BridgeLoader *loader, uint64_t native_handle) {
+static bool gui_open_editor_embedded_impl(BridgeLoader *loader,
+                                          uint64_t native_handle,
+                                          EmbedOpenMode mode) {
     if (!loader || !loader->has_editor()) return false;
     if (g_editor_open) return true;
-    keepsake_debug_log("bridge: gui_open_editor_embedded_impl enter handle=%p thread=%lu\n",
+    keepsake_debug_log("bridge: gui_open_editor_embedded_impl enter handle=%p thread=%lu mode=%s\n",
                        reinterpret_cast<void *>(static_cast<uintptr_t>(native_handle)),
-                       static_cast<unsigned long>(GetCurrentThreadId()));
+                       static_cast<unsigned long>(GetCurrentThreadId()),
+                       embed_open_mode_name(mode));
 
     HWND parent = reinterpret_cast<HWND>(static_cast<uintptr_t>(native_handle));
     keepsake_debug_log("bridge: gui_open_editor_embedded_impl before IsWindow parent=%p\n",
@@ -430,75 +768,100 @@ static bool gui_open_editor_embedded_impl(BridgeLoader *loader, uint64_t native_
     loader->get_editor_rect(w, h);
     keepsake_debug_log("bridge: gui_open_editor_embedded_impl after get_editor_rect size=%dx%d\n", w, h);
 
-    keepsake_debug_log("bridge: gui_open_editor_embedded_impl before CreateWindowExA wrapper parent=%p size=%dx%d\n",
-                       static_cast<void *>(parent), w, h);
-    g_editor_hwnd = CreateWindowExA(
-        kKeepsakeEmbedWrapperExStyle, kKeepsakeEmbedWrapperClass, nullptr,
-        kKeepsakeEmbedChildStyle,
-        0, 0, w, h,
-        parent, nullptr, GetModuleHandle(nullptr), nullptr);
-    keepsake_debug_log("bridge: gui_open_editor_embedded_impl after CreateWindowExA wrapper hwnd=%p err=%lu\n",
+    const bool use_window_thread_for_host_window = (mode != EmbedOpenMode::MainThread);
+    const bool use_window_thread_for_plugin_open = (mode == EmbedOpenMode::WindowThread);
+    HWND attach_parent = resolve_embed_attach_parent(parent);
+
+    keepsake_debug_log("bridge: gui_open_editor_embedded_impl before ensure_embedded_surface parent=%p size=%dx%d via=%s\n",
+                       static_cast<void *>(attach_parent),
+                       w,
+                       h,
+                       use_window_thread_for_host_window ? "window" : "main");
+    if (!ensure_embedded_surface(mode, w, h)) {
+        keepsake_debug_log("bridge: ensure_embedded_surface failed, reusing host parent directly\n");
+    } else if (!attach_embedded_surface(attach_parent, mode, w, h)) {
+        keepsake_debug_log("bridge: attach_embedded_surface failed\n");
+    }
+    keepsake_debug_log("bridge: gui_open_editor_embedded_impl after ensure/attach wrapper=%p panel=%p ready=%d\n",
                        static_cast<void *>(g_editor_hwnd),
-                       static_cast<unsigned long>(GetLastError()));
-
-    if (!g_editor_hwnd) return false;
-
-    keepsake_debug_log("bridge: gui_open_editor_embedded_impl before CreateWindowExA panel parent=%p size=%dx%d\n",
-                       static_cast<void *>(g_editor_hwnd), w, h);
-    HWND editor_panel = CreateWindowExA(
-        0, kKeepsakeEmbedPanelClass, nullptr,
-        kKeepsakeEmbedChildStyle,
-        0, 0, w, h,
-        g_editor_hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
-    keepsake_debug_log("bridge: gui_open_editor_embedded_impl after CreateWindowExA panel hwnd=%p err=%lu\n",
-                       static_cast<void *>(editor_panel),
-                       static_cast<unsigned long>(GetLastError()));
-
-    if (!editor_panel) {
-        keepsake_debug_log("bridge: embedded panel create failed, trying STATIC fallback\n");
-        editor_panel = CreateWindowExA(
-            0, "STATIC", nullptr,
-            kKeepsakeEmbedChildStyle,
-            0, 0, w, h,
-            g_editor_hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
-        keepsake_debug_log("bridge: embedded STATIC panel fallback hwnd=%p err=%lu\n",
-                           static_cast<void *>(editor_panel),
-                           static_cast<unsigned long>(GetLastError()));
+                       static_cast<void *>(g_editor_panel_hwnd),
+                       g_editor_embedded_surface_ready ? 1 : 0);
+    HWND editor_parent = parent;
+    switch (get_embed_parent_surface()) {
+    case EmbedParentSurface::Panel:
+        editor_parent = g_editor_panel_hwnd ? g_editor_panel_hwnd
+                                            : (g_editor_hwnd ? g_editor_hwnd : parent);
+        break;
+    case EmbedParentSurface::Wrapper:
+        editor_parent = g_editor_hwnd ? g_editor_hwnd : parent;
+        break;
     }
-
-    if (!editor_panel) {
-        keepsake_debug_log("bridge: embedded panel fallback missing, reusing wrapper as editor parent\n");
+    keepsake_debug_log("bridge: selected editor_parent=%p surface=%s\n",
+                       static_cast<void *>(editor_parent),
+                       embed_parent_surface_name(get_embed_parent_surface()));
+    wait_for_embed_parent_visibility(attach_parent, 500);
+    if (should_force_show_embed_parent() && !IsWindowVisible(attach_parent)) {
+        keepsake_debug_log("bridge: force showing embed parent=%p\n",
+                           static_cast<void *>(attach_parent));
+        ShowWindow(attach_parent, SW_SHOWNA);
+        UpdateWindow(attach_parent);
     }
-
-    HWND editor_parent = editor_panel ? editor_panel : g_editor_hwnd;
-    g_editor_panel_hwnd = editor_panel;
+    keepsake_debug_log(
+        "bridge: pre-open visibility attach_parent=%p parent_visible=%d editor_parent=%p editor_visible=%d wrapper=%p wrapper_visible=%d panel=%p panel_visible=%d\n",
+        static_cast<void *>(attach_parent),
+        (attach_parent && IsWindowVisible(attach_parent)) ? 1 : 0,
+        static_cast<void *>(editor_parent),
+        (editor_parent && IsWindowVisible(editor_parent)) ? 1 : 0,
+        static_cast<void *>(g_editor_hwnd),
+        (g_editor_hwnd && IsWindowVisible(g_editor_hwnd)) ? 1 : 0,
+        static_cast<void *>(g_editor_panel_hwnd),
+        (g_editor_panel_hwnd && IsWindowVisible(g_editor_panel_hwnd)) ? 1 : 0);
     g_active_loader = loader;
-    g_parent_hwnd = parent;
+    g_parent_hwnd = attach_parent;
     g_last_parent_w = 0;
     g_last_parent_h = 0;
-    g_idle_timer = SetTimer(g_editor_hwnd, 1, 16, nullptr);
-    log_window_tree("before-embed-open", parent, g_editor_hwnd, editor_panel);
+    if (g_editor_hwnd) {
+        auto start_timer = [=]() { return SetTimer(g_editor_hwnd, 1, 16, nullptr); };
+        g_idle_timer = use_window_thread_for_host_window
+            ? window_call_sync(start_timer)
+            : start_timer();
+    } else {
+        g_idle_timer = 0;
+    }
+    log_window_tree("before-embed-open", attach_parent, g_editor_hwnd, g_editor_panel_hwnd);
 
-    keepsake_debug_log("bridge: editor embed parent=%p child=%p\n",
-                       static_cast<void *>(parent), static_cast<void *>(g_editor_hwnd));
-
-    keepsake_debug_log("bridge: embedded editor open on gui thread parent=%p thread=%lu\n",
+    keepsake_debug_log("bridge: embedded editor open begin parent=%p thread=%lu\n",
                        static_cast<void *>(editor_parent),
                        static_cast<unsigned long>(GetCurrentThreadId()));
-    bool open_ok = loader->open_editor(static_cast<void *>(editor_parent));
-    keepsake_debug_log("bridge: embedded editor open returned ok=%d thread=%lu\n",
+    auto open_editor = [=]() { return loader->open_editor(static_cast<void *>(editor_parent)); };
+    bool open_ok = use_window_thread_for_plugin_open
+        ? window_call_sync(open_editor)
+        : open_editor();
+    keepsake_debug_log("bridge: embedded editor open end ok=%d thread=%lu\n",
                        open_ok ? 1 : 0,
                        static_cast<unsigned long>(GetCurrentThreadId()));
+
     if (!open_ok) {
         keepsake_debug_log("bridge: embedded editor open failed\n");
         if (g_idle_timer) {
-            KillTimer(g_editor_hwnd, g_idle_timer);
+            if (g_editor_hwnd_on_window_thread) {
+                window_call_sync([=]() { KillTimer(g_editor_hwnd, g_idle_timer); });
+            } else {
+                KillTimer(g_editor_hwnd, g_idle_timer);
+            }
             g_idle_timer = 0;
         }
-        if (editor_panel) DestroyWindow(editor_panel);
-        DestroyWindow(g_editor_hwnd);
+        if (g_editor_hwnd) {
+            if (g_editor_hwnd_on_window_thread) {
+                window_call_sync([=]() { DestroyWindow(g_editor_hwnd); });
+            } else {
+                DestroyWindow(g_editor_hwnd);
+            }
+        }
         g_editor_panel_hwnd = nullptr;
         g_editor_hwnd = nullptr;
+        g_editor_hwnd_on_window_thread = false;
+        reset_embedded_surface_state();
         g_active_loader = nullptr;
         g_parent_hwnd = nullptr;
         return false;
@@ -507,21 +870,70 @@ static bool gui_open_editor_embedded_impl(BridgeLoader *loader, uint64_t native_
     g_editor_open = true;
 
     resize_embedded_editor_to_parent();
-    ShowWindow(g_editor_hwnd, SW_SHOW);
-    if (editor_panel) ShowWindow(editor_panel, SW_SHOW);
+    if (g_editor_hwnd) {
+        if (use_window_thread_for_host_window) {
+            window_call_sync([=]() { ShowWindow(g_editor_hwnd, SW_SHOW); });
+        } else {
+            ShowWindow(g_editor_hwnd, SW_SHOW);
+        }
+    }
     resize_embedded_editor_to_parent();
-    log_window_tree("after-embed-open", parent, g_editor_hwnd, editor_panel);
+    log_window_tree("after-embed-open", attach_parent, g_editor_hwnd, g_editor_panel_hwnd);
     keepsake_debug_log("bridge: editor embedded in host window %p\n",
-                       static_cast<void *>(parent));
+                       static_cast<void *>(attach_parent));
     return true;
 }
 
 bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
-    return gui_call_sync([=]() { return gui_open_editor_impl(loader, header); });
+    if (!loader || !loader->has_editor()) return false;
+    if (g_editor_open) return true;
+
+    if (g_staged_embed_parent_handle != 0) {
+        g_pending_open_loader = loader;
+        g_pending_open_header = header;
+        g_pending_open_embedded = true;
+        g_pending_open.store(true);
+        keepsake_debug_log("bridge: gui_open_editor queued async embed open parent=%p\n",
+                           reinterpret_cast<void *>(static_cast<uintptr_t>(g_staged_embed_parent_handle)));
+        return true;
+    }
+
+    keepsake_debug_log("bridge: gui_open_editor synchronous floating open\n");
+    return gui_open_editor_impl(loader, header);
 }
 
 bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
-    return gui_call_sync([=]() { return gui_open_editor_embedded_impl(loader, native_handle); });
+    EmbedOpenMode mode = get_embed_open_mode();
+    if (mode == EmbedOpenMode::WindowThread) {
+        return window_call_sync([=]() {
+            return gui_open_editor_embedded_impl(loader, native_handle, mode);
+        });
+    }
+    return gui_call_sync([=]() {
+        return gui_open_editor_embedded_impl(loader, native_handle, mode);
+    });
+}
+
+bool gui_stage_editor_parent(BridgeLoader *loader, uint64_t native_handle) {
+    if (!loader || !loader->has_editor()) return false;
+    g_staged_embed_parent_handle = native_handle;
+    g_pending_open_loader = loader;
+    keepsake_debug_log("bridge: staged embed parent=%p\n",
+                       reinterpret_cast<void *>(static_cast<uintptr_t>(native_handle)));
+    return true;
+}
+
+bool gui_has_pending_work() {
+    return g_pending_open.load();
+}
+
+void gui_get_editor_status(bool &open, bool &pending) {
+    open = g_editor_open.load();
+    pending = g_pending_open.load() || g_editor_open_inflight.load();
+}
+
+void gui_set_status_shm(void *shm_ptr) {
+    g_gui_status_ctrl = shm_ptr ? shm_control(shm_ptr) : nullptr;
 }
 
 void gui_set_editor_transient(uint64_t native_handle) {
@@ -535,26 +947,57 @@ void gui_set_editor_transient(uint64_t native_handle) {
 }
 
 void gui_close_editor(BridgeLoader *loader) {
-    gui_call_sync([=]() {
-    if (!g_editor_open) return;
+    auto close_impl = [=]() {
+    if (!g_editor_open) {
+        g_staged_embed_parent_handle = 0;
+        g_pending_open_loader = nullptr;
+        g_pending_open.store(false);
+        g_pending_open_embedded = false;
+        if (g_gui_status_ctrl) {
+            shm_store_release(&g_gui_status_ctrl->editor_state, SHM_EDITOR_CLOSED);
+        }
+        return;
+    }
     if (g_idle_timer) {
-        KillTimer(g_editor_hwnd, g_idle_timer);
+        if (g_editor_hwnd_on_window_thread) {
+            window_call_sync([=]() { KillTimer(g_editor_hwnd, g_idle_timer); });
+        } else {
+            KillTimer(g_editor_hwnd, g_idle_timer);
+        }
         g_idle_timer = 0;
     }
     if (loader) loader->close_editor();
     else if (g_active_loader) g_active_loader->close_editor();
     if (g_editor_hwnd) {
-        DestroyWindow(g_editor_hwnd);
+        if (g_editor_hwnd_on_window_thread) {
+            window_call_sync([=]() { DestroyWindow(g_editor_hwnd); });
+        } else {
+            DestroyWindow(g_editor_hwnd);
+        }
         g_editor_hwnd = nullptr;
     }
     g_editor_panel_hwnd = nullptr;
     g_active_loader = nullptr;
     g_parent_hwnd = nullptr;
     g_owner_hwnd = nullptr;
+    g_staged_embed_parent_handle = 0;
+    g_pending_open_loader = nullptr;
+    g_pending_open.store(false);
+    g_pending_open_embedded = false;
+    g_editor_hwnd_on_window_thread = false;
+    reset_embedded_surface_state();
     g_last_parent_w = 0;
     g_last_parent_h = 0;
     g_editor_open = false;
-    });
+    if (g_gui_status_ctrl) {
+        shm_store_release(&g_gui_status_ctrl->editor_state, SHM_EDITOR_CLOSED);
+    }
+    };
+    if (get_embed_open_mode() == EmbedOpenMode::WindowThread) {
+        window_call_sync(close_impl);
+        return;
+    }
+    gui_call_sync(close_impl);
 }
 
 bool gui_get_editor_rect(BridgeLoader *loader, int &w, int &h) {
@@ -562,8 +1005,46 @@ bool gui_get_editor_rect(BridgeLoader *loader, int &w, int &h) {
 }
 
 void gui_idle(BridgeLoader *) {
+    if (!g_editor_open && g_pending_open.load() && g_pending_open_loader) {
+        bool ok = false;
+        if (g_pending_open_embedded && g_staged_embed_parent_handle != 0) {
+            g_editor_open_inflight.store(true);
+            if (g_gui_status_ctrl) {
+                shm_store_release(&g_gui_status_ctrl->editor_state, SHM_EDITOR_OPENING);
+            }
+            keepsake_debug_log("bridge: gui_idle opening staged embed parent=%p\n",
+                               reinterpret_cast<void *>(static_cast<uintptr_t>(g_staged_embed_parent_handle)));
+            ok = gui_open_editor_embedded_impl(g_pending_open_loader,
+                                               g_staged_embed_parent_handle,
+                                               get_embed_open_mode());
+            keepsake_debug_log("bridge: gui_idle staged embed result=%d\n", ok ? 1 : 0);
+            if (g_gui_status_ctrl) {
+                shm_store_release(&g_gui_status_ctrl->editor_state,
+                                  ok ? SHM_EDITOR_OPEN : SHM_EDITOR_FAILED);
+            }
+            g_editor_open_inflight.store(false);
+        } else {
+            keepsake_debug_log("bridge: gui_idle opening async floating editor\n");
+            ok = gui_open_editor_impl(g_pending_open_loader, g_pending_open_header);
+            keepsake_debug_log("bridge: gui_idle async floating result=%d\n", ok ? 1 : 0);
+        }
+        g_pending_open.store(false);
+        if (!ok) {
+            g_pending_open_loader = nullptr;
+            g_staged_embed_parent_handle = 0;
+        }
+    }
     if (!g_editor_open) return;
-    PostThreadMessageA(g_gui_thread_id, WM_NULL, 0, 0);
+    MSG msg;
+    while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        if (msg.message == WM_KEEPSAKE_GUI_TASK) {
+            gui_drain_tasks();
+            continue;
+        }
+        TranslateMessage(&msg);
+        DispatchMessageA(&msg);
+    }
+    gui_drain_tasks();
 }
 
 bool gui_is_open() { return g_editor_open; }

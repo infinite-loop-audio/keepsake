@@ -6,6 +6,9 @@ param(
   [string]$VstPath,
 
   [string]$ClapBundle = "",
+  [string]$ClapPathOverride = "",
+  [string]$BridgePathOverride = "",
+  [string]$EmbedModeOverride = "",
   [string]$Reaper = "C:\Program Files\REAPER (x64)\reaper.exe",
   [int]$TimeoutSec = 45,
   [int]$ScanTimeoutMs = 15000,
@@ -136,23 +139,18 @@ function Sync-DefaultInstallBundle {
     [string]$TargetBundle
   )
 
-  $targetDir = Split-Path -Parent $TargetBundle
-  $sourceDir = Split-Path -Parent $SourceBundle
-  $sourceBridge = Join-Path $sourceDir "keepsake-bridge.exe"
-  $targetBridge = Join-Path $targetDir "keepsake-bridge.exe"
-
-  if (-not (Test-Path $sourceBridge)) {
-    throw "bridge binary not found next to CLAP artifact: $sourceBridge"
+  $installScript = Join-Path $scriptDir "windows-install-built.ps1"
+  if (-not (Test-Path $installScript)) {
+    throw "install helper not found: $installScript"
   }
 
-  $null = New-Item -ItemType Directory -Path $targetDir -Force
-  Copy-Item -LiteralPath $SourceBundle -Destination $TargetBundle -Force
-  Copy-Item -LiteralPath $sourceBridge -Destination $targetBridge -Force
+  & powershell -NoProfile -ExecutionPolicy Bypass -File $installScript `
+    -SourceBundle $SourceBundle `
+    -TargetBundle $TargetBundle
 
-  $stamp = Get-Date
-  Get-Item -LiteralPath $TargetBundle | ForEach-Object { $_.LastWriteTime = $stamp }
-  Get-Item -LiteralPath $targetBridge | ForEach-Object { $_.LastWriteTime = $stamp }
-  Get-Item -LiteralPath $targetDir | ForEach-Object { $_.LastWriteTime = $stamp }
+  if ($LASTEXITCODE -ne 0) {
+    throw "default install sync failed with exit code $LASTEXITCODE"
+  }
 }
 
 function Copy-DebugLogSnapshot {
@@ -256,6 +254,15 @@ clap_path_win64=$clapPath
   Write-Host "plugin_id=$PluginId"
   Write-Host "vst_path=$VstPath"
   Write-Host "clap_bundle=$ClapBundle"
+  if (-not [string]::IsNullOrWhiteSpace($ClapPathOverride)) {
+    Write-Host "clap_path_override=$ClapPathOverride"
+  }
+  if (-not [string]::IsNullOrWhiteSpace($BridgePathOverride)) {
+    Write-Host "bridge_path_override=$BridgePathOverride"
+  }
+  if (-not [string]::IsNullOrWhiteSpace($EmbedModeOverride)) {
+    Write-Host "embed_mode_override=$EmbedModeOverride"
+  }
   Write-Host "temp_dir=$tmpDir"
   Write-Host "log_file=$logFile"
   Write-Host "debug_log=$debugLogCopy"
@@ -269,6 +276,8 @@ clap_path_win64=$clapPath
 
   $old = @{
     CLAP_PATH = $env:CLAP_PATH
+    KEEPSAKE_BRIDGE_PATH = $env:KEEPSAKE_BRIDGE_PATH
+    KEEPSAKE_WIN_EMBED_MODE = $env:KEEPSAKE_WIN_EMBED_MODE
     KEEPSAKE_VST2_PATH = $env:KEEPSAKE_VST2_PATH
     KEEPSAKE_REAPER_SMOKE_PLUGIN_ID = $env:KEEPSAKE_REAPER_SMOKE_PLUGIN_ID
     KEEPSAKE_REAPER_SMOKE_LOG = $env:KEEPSAKE_REAPER_SMOKE_LOG
@@ -284,7 +293,9 @@ clap_path_win64=$clapPath
     KEEPSAKE_REAPER_SMOKE_PLAY_HOLD_MS = $env:KEEPSAKE_REAPER_SMOKE_PLAY_HOLD_MS
   }
 
-  $env:CLAP_PATH = ""
+  $env:CLAP_PATH = $(if ([string]::IsNullOrWhiteSpace($ClapPathOverride)) { "" } else { $ClapPathOverride })
+  $env:KEEPSAKE_BRIDGE_PATH = $(if ([string]::IsNullOrWhiteSpace($BridgePathOverride)) { "" } else { $BridgePathOverride })
+  $env:KEEPSAKE_WIN_EMBED_MODE = $(if ([string]::IsNullOrWhiteSpace($EmbedModeOverride)) { "" } else { $EmbedModeOverride })
   $env:KEEPSAKE_VST2_PATH = $vstScanDir
   $env:KEEPSAKE_REAPER_SMOKE_PLUGIN_ID = $PluginId
   $env:KEEPSAKE_REAPER_SMOKE_LOG = $logFile
@@ -385,6 +396,15 @@ clap_path_win64=$clapPath
     Write-Host "debug_extract_end"
   } else {
     Write-Host "debug_extract=missing"
+  }
+
+  $scriptStarted = Test-Path $logFile
+  if ((-not $scriptStarted) -and ($result -eq "TIMEOUT")) {
+    Write-Host "smoke_script_status=not_started"
+    Write-Host "smoke_inference=REAPER likely hung before the startup script began running (often during scan/load)"
+  } elseif (-not $scriptStarted) {
+    Write-Host "smoke_script_status=missing"
+    Write-Host "smoke_inference=REAPER exited or was stopped before the startup script produced a log"
   }
 
   $missingDebugPattern = $null

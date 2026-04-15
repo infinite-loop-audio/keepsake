@@ -100,3 +100,26 @@ void clear_async_queue(KeepsakePlugin *kp, bool clear_activate) {
 BridgePool *keepsake_plugin_pool() {
     return s_pool;
 }
+
+void abandon_bridge(KeepsakePlugin *kp, const char *reason) {
+    if (!kp) return;
+
+    keepsake_debug_log("keepsake: abandoning bridge instance=%u reason=%s bridge_ok=%d crashed=%d\n",
+                       kp->instance_id,
+                       reason ? reason : "(unspecified)",
+                       kp->bridge_ok ? 1 : 0,
+                       kp->crashed ? 1 : 0);
+
+    BridgeProcess *bridge = kp->bridge;
+    kp->bridge = nullptr;
+    kp->bridge_ok = false;
+    kp->crashed = true;
+    kp->editor_open = false;
+    kp->editor_open_pending = false;
+    kp->gui_embed_failed = true;
+    kp->gui_is_floating = false;
+
+    if (bridge && keepsake_plugin_pool()) {
+        keepsake_plugin_pool()->abandon(bridge);
+    }
+}

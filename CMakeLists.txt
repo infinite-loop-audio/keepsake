@@ -287,6 +287,13 @@ else()
     set_target_properties(test-plugin PROPERTIES SUFFIX ".so")
 endif()
 
+if(WIN32)
+    add_executable(windows-vst2-probe tools/windows-vst2-probe.cpp)
+    target_include_directories(windows-vst2-probe PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor
+    )
+endif()
+
 if(APPLE OR UNIX)
     add_executable(bridge-test tools/bridge-test.cpp)
     target_include_directories(bridge-test PRIVATE

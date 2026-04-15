@@ -6,6 +6,10 @@
 void gui_init() {}
 bool gui_open_editor(BridgeLoader *, const EditorHeaderInfo &) { return false; }
 bool gui_open_editor_embedded(BridgeLoader *, uint64_t) { return false; }
+bool gui_stage_editor_parent(BridgeLoader *, uint64_t) { return false; }
+bool gui_has_pending_work() { return false; }
+void gui_get_editor_status(bool &open, bool &pending) { open = false; pending = false; }
+void gui_set_status_shm(void *) {}
 void gui_set_editor_transient(uint64_t) {}
 void gui_close_editor(BridgeLoader *) {}
 bool gui_get_editor_rect(BridgeLoader *l, int &w, int &h) {

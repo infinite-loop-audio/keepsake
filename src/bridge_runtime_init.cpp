@@ -3,6 +3,7 @@
 //
 
 #include "bridge_runtime.h"
+#include "bridge_gui.h"
 #include "debug_log.h"
 
 #include <cstdio>
@@ -12,6 +13,10 @@
 
 #ifndef _WIN32
 #include <unistd.h>
+#endif
+
+#ifdef _WIN32
+#include <windows.h>
 #endif
 
 std::unordered_map<uint32_t, PluginInstance *> g_instances;
@@ -53,6 +58,10 @@ void handle_init(uint32_t /*caller_id*/, const std::vector<uint8_t> &payload) {
     std::string path(payload.begin() + 4, payload.end());
     keepsake_debug_log("bridge: INIT begin format=%u path=%s\n",
                        format_id, path.c_str());
+#ifdef _WIN32
+    keepsake_debug_log("bridge: INIT thread=%lu\n",
+                       static_cast<unsigned long>(GetCurrentThreadId()));
+#endif
 
     auto *loader = create_loader(static_cast<PluginFormat>(format_id));
     if (!loader) {
@@ -113,6 +122,10 @@ void handle_init(uint32_t /*caller_id*/, const std::vector<uint8_t> &payload) {
         }
 #else
         keepsake_debug_log("bridge: INIT load direct path=%s\n", path.c_str());
+#ifdef _WIN32
+        keepsake_debug_log("bridge: INIT load direct thread=%lu\n",
+                           static_cast<unsigned long>(GetCurrentThreadId()));
+#endif
         if (!loader->load(path)) {
             keepsake_debug_log("bridge: INIT load FAILED path=%s\n", path.c_str());
             ipc_write_error(g_pipe_out, "failed to load plugin");

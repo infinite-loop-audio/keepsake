@@ -95,6 +95,10 @@ clap_process_status plugin_process(const clap_plugin_t *plugin,
                                    const clap_process_t *process);
 const void *plugin_get_extension(const clap_plugin_t *plugin, const char *id);
 void plugin_on_main_thread(const clap_plugin_t *plugin);
+void gui_complete_pending_open(KeepsakePlugin *kp);
 
 // Shared bridge pool accessor for plugin implementation files.
 BridgePool *keepsake_plugin_pool();
+
+// Treat the current bridge as unusable and dispose of it immediately.
+void abandon_bridge(KeepsakePlugin *kp, const char *reason);

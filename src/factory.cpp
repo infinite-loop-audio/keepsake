@@ -131,10 +131,25 @@ bool keepsake_factory_init(const char *plugin_path) {
         s_bridge_32_path = dir + "/keepsake-bridge-32";
 #endif
     }
+
+    if (const char *env = getenv("KEEPSAKE_BRIDGE_PATH")) {
+        if (env[0] != '\0') s_bridge_path = env;
+    }
+    if (const char *env = getenv("KEEPSAKE_BRIDGE_X86_64_PATH")) {
+        if (env[0] != '\0') s_bridge_x86_64_path = env;
+    }
+    if (const char *env = getenv("KEEPSAKE_BRIDGE_32_PATH")) {
+        if (env[0] != '\0') s_bridge_32_path = env;
+    }
+
     fprintf(stderr, "keepsake: bridge at '%s'\n", s_bridge_path.c_str());
     if (!s_bridge_x86_64_path.empty()) {
         fprintf(stderr, "keepsake: x86_64 bridge at '%s'\n",
                 s_bridge_x86_64_path.c_str());
+    }
+    if (!s_bridge_32_path.empty()) {
+        fprintf(stderr, "keepsake: 32-bit bridge at '%s'\n",
+                s_bridge_32_path.c_str());
     }
 
     // Load configuration

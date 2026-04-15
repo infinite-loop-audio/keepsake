@@ -5,11 +5,42 @@
 #include "plugin_internal.h"
 #include "debug_log.h"
 
+#include <atomic>
+#include <cmath>
+
 #ifdef _WIN32
+#include <windows.h>
 static const int GUI_OPEN_TIMEOUT_MS = 45000;
 static const int GUI_EMBED_TIMEOUT_MS = 1500;
+static const int GUI_PARENT_READY_TIMEOUT_MS = 750;
 #else
 static const int GUI_OPEN_TIMEOUT_MS = 5000;
+#endif
+
+static std::atomic<uint64_t> g_gui_lifecycle_seq{0};
+
+static uint64_t gui_next_lifecycle_seq() {
+    return g_gui_lifecycle_seq.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
+#ifdef _WIN32
+static void gui_wait_for_win32_parent_ready(uint64_t handle, int timeout_ms) {
+    HWND hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(handle));
+    if (!hwnd || timeout_ms <= 0) {
+        return;
+    }
+
+    auto deadline = GetTickCount64() + static_cast<ULONGLONG>(timeout_ms);
+    while (GetTickCount64() < deadline) {
+        LONG_PTR style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+        const bool visible = IsWindowVisible(hwnd) != FALSE;
+        const bool style_visible = (style & WS_VISIBLE) != 0;
+        if (visible || style_visible) return;
+        Sleep(10);
+    }
+    keepsake_debug_log("keepsake: gui_wait_for_win32_parent_ready timeout hwnd=%p\n",
+                       static_cast<void *>(hwnd));
+}
 #endif
 
 static bool gui_refresh_size(KeepsakePlugin *kp) {
@@ -44,6 +75,10 @@ static bool gui_refresh_size(KeepsakePlugin *kp) {
 
 static bool gui_open_floating(KeepsakePlugin *kp) {
     kp->gui_is_floating = true;
+    kp->editor_open_pending = false;
+    if (kp->shm.ptr) {
+        shm_store_release(&shm_control(kp->shm.ptr)->editor_state, SHM_EDITOR_CLOSED);
+    }
     if (kp->editor_open && !kp->crashed) {
         send_and_wait(kp, IPC_OP_EDITOR_CLOSE, nullptr, 0, nullptr, 1000);
         kp->editor_open = false;
@@ -59,6 +94,9 @@ static bool gui_open_floating(KeepsakePlugin *kp) {
     if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN, nullptr, 0, nullptr,
                        GUI_OPEN_TIMEOUT_MS)) {
         keepsake_debug_log("keepsake: floating fallback open failed\n");
+        if (kp->bridge && platform_process_alive(kp->bridge->proc)) {
+            abandon_bridge(kp, "EDITOR_OPEN failed while bridge still alive");
+        }
         return false;
     }
     kp->editor_open = true;
@@ -110,32 +148,92 @@ static bool gui_create(const clap_plugin_t *plugin, const char *, bool is_floati
 #else
     kp->gui_is_floating = is_floating || kp->gui_embed_failed;
 #endif
-    keepsake_debug_log("keepsake: gui_create floating=%d has_editor=%d\n",
+    keepsake_debug_log("keepsake: gui_create seq=%llu floating=%d has_editor=%d\n",
+                       static_cast<unsigned long long>(gui_next_lifecycle_seq()),
                        kp->gui_is_floating ? 1 : 0, kp->has_editor ? 1 : 0);
     kp->gui_transient_handle = 0;
+    kp->gui_scale = 1.0;
     return true;
 }
 
+#ifdef _WIN32
+static void gui_suspend_processing_for_editor(KeepsakePlugin *kp) {
+    if (!kp || kp->gui_processing_suspended || !kp->processing || kp->crashed) return;
+    keepsake_debug_log("keepsake: gui_suspend_processing_for_editor instance=%u\n",
+                       kp->instance_id);
+    if (kp->bridge_ok) {
+        if (!send_and_wait(kp, IPC_OP_STOP_PROC, nullptr, 0, nullptr, 250)) {
+            keepsake_debug_log("keepsake: gui_suspend_processing_for_editor STOP_PROC failed\n");
+            return;
+        }
+    }
+    kp->processing = false;
+    kp->gui_processing_suspended = true;
+}
+
+static void gui_resume_processing_after_editor(KeepsakePlugin *kp) {
+    if (!kp || !kp->gui_processing_suspended || kp->crashed || !kp->active) return;
+    keepsake_debug_log("keepsake: gui_resume_processing_after_editor instance=%u\n",
+                       kp->instance_id);
+    if (kp->bridge_ok) {
+        if (!send_and_wait(kp, IPC_OP_START_PROC, nullptr, 0, nullptr, 250)) {
+            keepsake_debug_log("keepsake: gui_resume_processing_after_editor START_PROC failed\n");
+            if (kp->bridge && platform_process_alive(kp->bridge->proc)) {
+                abandon_bridge(kp, "GUI resume START_PROC failed while bridge still alive");
+            }
+            return;
+        }
+    }
+    kp->processing = true;
+    kp->gui_processing_suspended = false;
+}
+#endif
+
 static void gui_destroy(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
-    keepsake_debug_log("keepsake: gui_destroy open=%d floating=%d\n",
-                       kp->editor_open ? 1 : 0, kp->gui_is_floating ? 1 : 0);
+    keepsake_debug_log("keepsake: gui_destroy seq=%llu open=%d pending=%d floating=%d\n",
+                       static_cast<unsigned long long>(gui_next_lifecycle_seq()),
+                       kp->editor_open ? 1 : 0,
+                       kp->editor_open_pending ? 1 : 0,
+                       kp->gui_is_floating ? 1 : 0);
+    if (kp->editor_open_pending && kp->bridge && platform_process_alive(kp->bridge->proc)) {
+        abandon_bridge(kp, "GUI destroy during pending editor open");
+    }
     if (kp->editor_open && !kp->crashed) {
         send_and_wait(kp, IPC_OP_EDITOR_CLOSE);
         kp->editor_open = false;
     }
+    kp->editor_open_pending = false;
+    if (kp->shm.ptr) {
+        shm_store_release(&shm_control(kp->shm.ptr)->editor_state, SHM_EDITOR_CLOSED);
+    }
+#ifdef _WIN32
+    gui_resume_processing_after_editor(kp);
+#endif
 }
 
-static bool gui_set_scale(const clap_plugin_t *, double) { return false; }
+static bool gui_set_scale(const clap_plugin_t *plugin, double scale) {
+    auto *kp = get(plugin);
+    if (!std::isfinite(scale) || scale <= 0.0) scale = 1.0;
+    kp->gui_scale = scale;
+    keepsake_debug_log("keepsake: gui_set_scale seq=%llu scale=%.3f -> 1\n",
+                       static_cast<unsigned long long>(gui_next_lifecycle_seq()),
+                       kp->gui_scale);
+    return true;
+}
 
 static bool gui_get_size(const clap_plugin_t *plugin, uint32_t *w, uint32_t *h) {
     auto *kp = get(plugin);
     if (!kp->bridge_ok && !kp->crashed) wait_async_init(kp, 1500);
     gui_refresh_size(kp);
     if (kp->editor_width > 0 && kp->editor_height > 0) {
-        *w = static_cast<uint32_t>(kp->editor_width);
-        *h = static_cast<uint32_t>(kp->editor_height);
-        keepsake_debug_log("keepsake: gui_get_size %ux%u\n", *w, *h);
+        const double scale = (kp->gui_scale > 0.0) ? kp->gui_scale : 1.0;
+        *w = static_cast<uint32_t>(std::lround(static_cast<double>(kp->editor_width) * scale));
+        *h = static_cast<uint32_t>(std::lround(static_cast<double>(kp->editor_height) * scale));
+        keepsake_debug_log("keepsake: gui_get_size %ux%u raw=%dx%d scale=%.3f\n",
+                           *w, *h,
+                           kp->editor_width, kp->editor_height,
+                           scale);
         return true;
     }
     keepsake_debug_log("keepsake: gui_get_size unavailable\n");
@@ -143,20 +241,25 @@ static bool gui_get_size(const clap_plugin_t *plugin, uint32_t *w, uint32_t *h) 
 }
 
 static bool gui_can_resize(const clap_plugin_t *) {
-    keepsake_debug_log("keepsake: gui_can_resize -> 0\n");
+    keepsake_debug_log("keepsake: gui_can_resize seq=%llu -> 0\n",
+                       static_cast<unsigned long long>(gui_next_lifecycle_seq()));
     return false;
 }
 static bool gui_get_resize_hints(const clap_plugin_t *, clap_gui_resize_hints_t *) {
-    keepsake_debug_log("keepsake: gui_get_resize_hints -> 0\n");
+    keepsake_debug_log("keepsake: gui_get_resize_hints seq=%llu -> 0\n",
+                       static_cast<unsigned long long>(gui_next_lifecycle_seq()));
     return false;
 }
 static bool gui_adjust_size(const clap_plugin_t *, uint32_t *w, uint32_t *h) {
-    keepsake_debug_log("keepsake: gui_adjust_size requested=%ux%u -> 0\n",
+    keepsake_debug_log("keepsake: gui_adjust_size seq=%llu requested=%ux%u -> 0\n",
+                       static_cast<unsigned long long>(gui_next_lifecycle_seq()),
                        w ? *w : 0, h ? *h : 0);
     return false;
 }
 static bool gui_set_size(const clap_plugin_t *, uint32_t w, uint32_t h) {
-    keepsake_debug_log("keepsake: gui_set_size %ux%u -> 0\n", w, h);
+    keepsake_debug_log("keepsake: gui_set_size seq=%llu %ux%u -> 0\n",
+                       static_cast<unsigned long long>(gui_next_lifecycle_seq()),
+                       w, h);
     return false;
 }
 
@@ -179,9 +282,12 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
     uint64_t handle = 0;
     handle = reinterpret_cast<uint64_t>(window->win32);
     kp->gui_transient_handle = handle;
-    keepsake_debug_log("keepsake: gui_set_parent handle=%p floating=%d open=%d\n",
+    keepsake_debug_log("keepsake: gui_set_parent seq=%llu handle=%p floating=%d open=%d\n",
+                       static_cast<unsigned long long>(gui_next_lifecycle_seq()),
                        reinterpret_cast<void *>(static_cast<uintptr_t>(handle)),
                        kp->gui_is_floating ? 1 : 0, kp->editor_open ? 1 : 0);
+    kp->editor_open_pending = false;
+    gui_wait_for_win32_parent_ready(handle, GUI_PARENT_READY_TIMEOUT_MS);
 
     if (kp->gui_embed_failed) {
         keepsake_debug_log("keepsake: gui_set_parent embed previously failed, keep floating fallback\n");
@@ -191,18 +297,16 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
     if (!send_and_wait(kp, IPC_OP_EDITOR_SET_PARENT, &handle, sizeof(handle),
                        nullptr, GUI_EMBED_TIMEOUT_MS)) {
         if (platform_process_alive(kp->bridge->proc)) {
-            keepsake_debug_log("keepsake: gui_set_parent embed failed, switching to floating fallback\n");
-            kp->gui_embed_failed = true;
-            kp->gui_is_floating = true;
-            return true;
+            keepsake_debug_log("keepsake: gui_set_parent embed timed out, abandoning live bridge\n");
+            abandon_bridge(kp, "EDITOR_SET_PARENT failed while bridge still alive");
+            return false;
         }
         keepsake_debug_log("keepsake: gui_set_parent embed hard failure\n");
         return false;
     }
 
-    kp->editor_open = true;
     kp->gui_is_floating = false;
-    keepsake_debug_log("keepsake: gui_set_parent embed success\n");
+    keepsake_debug_log("keepsake: gui_set_parent embed staged\n");
     return true;
 #else
     if (kp->gui_is_floating || kp->gui_embed_failed) {
@@ -211,7 +315,8 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
     }
     uint64_t handle = 0;
     handle = static_cast<uint64_t>(window->x11);
-    keepsake_debug_log("keepsake: gui_set_parent handle=%p\n",
+    keepsake_debug_log("keepsake: gui_set_parent seq=%llu handle=%p\n",
+                       static_cast<unsigned long long>(gui_next_lifecycle_seq()),
                        reinterpret_cast<void *>(static_cast<uintptr_t>(handle)));
     if (!send_and_wait(kp, IPC_OP_EDITOR_SET_PARENT, &handle, sizeof(handle),
                        nullptr, GUI_OPEN_TIMEOUT_MS)) {
@@ -248,7 +353,8 @@ static bool gui_set_transient(const clap_plugin_t *plugin, const clap_window_t *
     uint64_t handle = 0;
     if (window) handle = reinterpret_cast<uint64_t>(window->win32);
     kp->gui_transient_handle = handle;
-    keepsake_debug_log("keepsake: gui_set_transient handle=%p\n",
+    keepsake_debug_log("keepsake: gui_set_transient seq=%llu handle=%p\n",
+                       static_cast<unsigned long long>(gui_next_lifecycle_seq()),
                        reinterpret_cast<void *>(static_cast<uintptr_t>(handle)));
     if (handle == 0) return true;
     return send_and_wait(kp, IPC_OP_EDITOR_SET_TRANSIENT, &handle, sizeof(handle),
@@ -264,28 +370,85 @@ static bool gui_show(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
     if (!kp->bridge_ok && !kp->crashed) wait_async_init(kp, 1500);
     if (kp->crashed || !kp->has_editor) return false;
-    keepsake_debug_log("keepsake: gui_show floating=%d open=%d\n",
-                       kp->gui_is_floating ? 1 : 0, kp->editor_open ? 1 : 0);
-    if ((kp->gui_is_floating || kp->gui_embed_failed) && !kp->editor_open) {
+    keepsake_debug_log("keepsake: gui_show seq=%llu floating=%d open=%d pending=%d\n",
+                       static_cast<unsigned long long>(gui_next_lifecycle_seq()),
+                       kp->gui_is_floating ? 1 : 0,
+                       kp->editor_open ? 1 : 0,
+                       kp->editor_open_pending ? 1 : 0);
+    if (kp->gui_embed_failed && !kp->gui_is_floating) {
+        keepsake_debug_log("keepsake: gui_show blocked after embed timeout on current bridge instance\n");
+        return false;
+    }
+#ifdef _WIN32
+    keepsake_debug_log("keepsake: gui_show leaving processing live during pending editor open\n");
+#endif
+    if (!kp->editor_open && !kp->editor_open_pending) {
+        if (kp->shm.ptr) {
+            shm_store_release(&shm_control(kp->shm.ptr)->editor_state,
+                              kp->gui_is_floating ? SHM_EDITOR_CLOSED : SHM_EDITOR_OPENING);
+        }
         if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN, nullptr, 0, nullptr,
                            GUI_OPEN_TIMEOUT_MS)) {
             keepsake_debug_log("keepsake: gui_show() editor open failed\n");
+            if (kp->bridge && platform_process_alive(kp->bridge->proc)) {
+                abandon_bridge(kp, "GUI show editor open failed while bridge still alive");
+            }
             return false;
         }
-        kp->editor_open = true;
+        if (kp->gui_is_floating) {
+            kp->editor_open = true;
+            kp->editor_open_pending = false;
+            if (kp->shm.ptr) {
+                shm_store_release(&shm_control(kp->shm.ptr)->editor_state, SHM_EDITOR_OPEN);
+            }
+        } else {
+            kp->editor_open = false;
+            kp->editor_open_pending = true;
+            if (kp->host && kp->host->request_callback) {
+                kp->host->request_callback(kp->host);
+            }
+        }
     }
-    keepsake_debug_log("keepsake: gui_show success floating=%d open=%d\n",
-                       kp->gui_is_floating ? 1 : 0, kp->editor_open ? 1 : 0);
+    keepsake_debug_log("keepsake: gui_show success seq=%llu floating=%d open=%d pending=%d\n",
+                       static_cast<unsigned long long>(gui_next_lifecycle_seq()),
+                       kp->gui_is_floating ? 1 : 0,
+                       kp->editor_open ? 1 : 0,
+                       kp->editor_open_pending ? 1 : 0);
     return true;
+}
+
+void gui_complete_pending_open(KeepsakePlugin *kp) {
+    if (!kp) return;
+    kp->editor_open_pending = false;
+    kp->editor_open = true;
+    if (kp->shm.ptr) {
+        shm_store_release(&shm_control(kp->shm.ptr)->editor_state, SHM_EDITOR_OPEN);
+    }
+#ifdef _WIN32
+    gui_resume_processing_after_editor(kp);
+#endif
 }
 
 static bool gui_hide(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
-    keepsake_debug_log("keepsake: gui_hide open=%d\n", kp->editor_open ? 1 : 0);
+    keepsake_debug_log("keepsake: gui_hide seq=%llu open=%d pending=%d\n",
+                       static_cast<unsigned long long>(gui_next_lifecycle_seq()),
+                       kp->editor_open ? 1 : 0,
+                       kp->editor_open_pending ? 1 : 0);
+    if (kp->editor_open_pending && kp->bridge && platform_process_alive(kp->bridge->proc)) {
+        abandon_bridge(kp, "GUI hide during pending editor open");
+    }
     if (kp->editor_open && !kp->crashed) {
         send_and_wait(kp, IPC_OP_EDITOR_CLOSE);
         kp->editor_open = false;
     }
+    kp->editor_open_pending = false;
+    if (kp->shm.ptr) {
+        shm_store_release(&shm_control(kp->shm.ptr)->editor_state, SHM_EDITOR_CLOSED);
+    }
+#ifdef _WIN32
+    gui_resume_processing_after_editor(kp);
+#endif
     return true;
 }
 

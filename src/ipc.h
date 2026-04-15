@@ -39,6 +39,7 @@ static constexpr uint32_t IPC_OP_EDITOR_SET_PARENT  = 0x13; // payload: uint64_t
 static constexpr uint32_t IPC_OP_EDITOR_MOUSE       = 0x14; // payload: IpcMouseEvent
 static constexpr uint32_t IPC_OP_EDITOR_KEY          = 0x15; // payload: IpcKeyEvent
 static constexpr uint32_t IPC_OP_EDITOR_SET_TRANSIENT = 0x16; // payload: uint64_t native_handle
+static constexpr uint32_t IPC_OP_EDITOR_GET_STATUS    = 0x17; // no payload
 
 // Bridge → Host
 static constexpr uint32_t IPC_OP_OK           = 0x81;
@@ -99,6 +100,11 @@ struct IpcPluginInfo {
     int32_t category;
     int32_t vendor_version;
     // Followed by: name\0vendor\0product\0
+};
+
+struct IpcEditorStatus {
+    uint32_t open;
+    uint32_t pending;
 };
 
 // --- Pipe I/O helpers ---
@@ -243,6 +249,11 @@ static constexpr uint32_t SHM_STATE_IDLE              = 0;
 static constexpr uint32_t SHM_STATE_PROCESS_REQUESTED = 1;
 static constexpr uint32_t SHM_STATE_PROCESS_DONE      = 2;
 
+static constexpr uint32_t SHM_EDITOR_CLOSED  = 0;
+static constexpr uint32_t SHM_EDITOR_OPENING = 1;
+static constexpr uint32_t SHM_EDITOR_OPEN    = 2;
+static constexpr uint32_t SHM_EDITOR_FAILED  = 3;
+
 static constexpr uint32_t SHM_MAX_MIDI_EVENTS = 256;
 
 #pragma pack(push, 1)
@@ -253,6 +264,7 @@ struct ShmMidiEvent {
 
 struct ShmProcessControl {
     volatile uint32_t state;       // SHM_STATE_*
+    volatile uint32_t editor_state; // SHM_EDITOR_*
     uint32_t num_frames;           // frames to process this cycle
     uint32_t midi_count;           // number of MIDI events this cycle
     uint32_t param_count;          // number of param changes this cycle
@@ -267,6 +279,8 @@ struct ShmProcessControl {
 
 // Initialize the mutex/cond in shared memory (called by host after shm create)
 static inline bool shm_init_sync(ShmProcessControl *ctrl) {
+    ctrl->state = SHM_STATE_IDLE;
+    ctrl->editor_state = SHM_EDITOR_CLOSED;
 #ifndef _WIN32
     pthread_mutexattr_t mattr;
     pthread_mutexattr_init(&mattr);
