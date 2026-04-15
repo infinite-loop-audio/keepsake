@@ -50,6 +50,11 @@ static void bridge_process_shm_request(PluginInstance *inst) {
         nframes);
 
     shm_store_release(&ctrl->state, SHM_STATE_PROCESS_DONE);
+#ifdef _WIN32
+    if (inst->shm_done_event != INVALID_HANDLE_VALUE) {
+        SetEvent(inst->shm_done_event);
+    }
+#endif
     keepsake_debug_log("bridge: process done instance=%u state=%u\n",
                        inst->id, shm_load_acquire(&ctrl->state));
 }
@@ -114,6 +119,15 @@ static unsigned __stdcall audio_thread_func(void *arg) {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
     while (inst->active) {
+        if (inst->shm_request_event != INVALID_HANDLE_VALUE) {
+            DWORD wait_result = WaitForSingleObject(inst->shm_request_event, 10);
+            if (!inst->active) break;
+            if (wait_result == WAIT_OBJECT_0 ||
+                shm_load_acquire(&ctrl->state) == SHM_STATE_PROCESS_REQUESTED) {
+                bridge_process_shm_request(inst);
+            }
+            continue;
+        }
         if (shm_load_acquire(&ctrl->state) == SHM_STATE_PROCESS_REQUESTED) {
             bridge_process_shm_request(inst);
             continue;
@@ -133,6 +147,9 @@ void bridge_audio_start(PluginInstance *inst) {
 
 void bridge_audio_stop(PluginInstance *inst) {
     if (inst->audio_thread == INVALID_HANDLE_VALUE) return;
+    if (inst->shm_request_event != INVALID_HANDLE_VALUE) {
+        SetEvent(inst->shm_request_event);
+    }
     WaitForSingleObject(inst->audio_thread, 1000);
     CloseHandle(inst->audio_thread);
     inst->audio_thread = INVALID_HANDLE_VALUE;

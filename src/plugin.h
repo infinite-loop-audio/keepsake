@@ -47,6 +47,10 @@ struct KeepsakePlugin {
     // Shared memory
     PlatformShm shm;
     uint32_t max_frames = 0;
+#ifdef _WIN32
+    HANDLE shm_request_event = INVALID_HANDLE_VALUE;
+    HANDLE shm_done_event = INVALID_HANDLE_VALUE;
+#endif
 
     // Cached parameter info (queried lazily on first access)
     std::vector<CachedParamInfo> params;

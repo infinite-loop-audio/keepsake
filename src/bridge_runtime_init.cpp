@@ -22,6 +22,20 @@
 std::unordered_map<uint32_t, PluginInstance *> g_instances;
 static uint32_t g_next_instance_id = 1;
 
+#ifdef _WIN32
+static void close_shm_events(PluginInstance *inst) {
+    if (!inst) return;
+    if (inst->shm_request_event != INVALID_HANDLE_VALUE) {
+        CloseHandle(inst->shm_request_event);
+        inst->shm_request_event = INVALID_HANDLE_VALUE;
+    }
+    if (inst->shm_done_event != INVALID_HANDLE_VALUE) {
+        CloseHandle(inst->shm_done_event);
+        inst->shm_done_event = INVALID_HANDLE_VALUE;
+    }
+}
+#endif
+
 PluginInstance *get_instance(uint32_t id) {
     auto it = g_instances.find(id);
     return (it != g_instances.end()) ? it->second : nullptr;
@@ -32,10 +46,17 @@ void destroy_instance(uint32_t id) {
     if (it == g_instances.end()) return;
     auto *inst = it->second;
     if (inst->loader) {
-        if (inst->active) inst->loader->deactivate();
+        if (inst->active) {
+            inst->active = false;
+            bridge_audio_stop(inst);
+            inst->loader->deactivate();
+        }
         inst->loader->close();
         delete inst->loader;
     }
+#ifdef _WIN32
+    close_shm_events(inst);
+#endif
     if (inst->shm.ptr) platform_shm_close(inst->shm);
     delete inst;
     g_instances.erase(it);

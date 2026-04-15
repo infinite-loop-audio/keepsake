@@ -26,6 +26,8 @@ struct PluginInstance {
     pthread_t audio_thread = 0;
 #else
     HANDLE audio_thread = INVALID_HANDLE_VALUE;
+    HANDLE shm_request_event = INVALID_HANDLE_VALUE;
+    HANDLE shm_done_event = INVALID_HANDLE_VALUE;
 #endif
 };
 

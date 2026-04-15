@@ -5,6 +5,33 @@
 #include "plugin_internal.h"
 #include "debug_log.h"
 
+#ifdef _WIN32
+static void close_shm_events(KeepsakePlugin *kp) {
+    if (!kp) return;
+    if (kp->shm_request_event != INVALID_HANDLE_VALUE) {
+        CloseHandle(kp->shm_request_event);
+        kp->shm_request_event = INVALID_HANDLE_VALUE;
+    }
+    if (kp->shm_done_event != INVALID_HANDLE_VALUE) {
+        CloseHandle(kp->shm_done_event);
+        kp->shm_done_event = INVALID_HANDLE_VALUE;
+    }
+}
+
+static void create_shm_events(KeepsakePlugin *kp, const std::string &shm_name) {
+    close_shm_events(kp);
+
+    const std::string request_name = shm_event_name(shm_name, "-req");
+    const std::string done_name = shm_event_name(shm_name, "-done");
+
+    kp->shm_request_event = CreateEventA(nullptr, FALSE, FALSE, request_name.c_str());
+    kp->shm_done_event = CreateEventA(nullptr, FALSE, FALSE, done_name.c_str());
+
+    keepsake_debug_log("keepsake: shm events request=%p done=%p name=%s\n",
+                       kp->shm_request_event, kp->shm_done_event, shm_name.c_str());
+}
+#endif
+
 static bool plugin_init(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
     keepsake_debug_log_build_once("keepsake:");
@@ -41,6 +68,9 @@ static void plugin_destroy(const clap_plugin_t *plugin) {
         kp->bridge = nullptr;
     }
     kp->async_init.reset();
+#ifdef _WIN32
+    close_shm_events(kp);
+#endif
     if (kp->shm.ptr) platform_shm_close(kp->shm);
     delete kp;
 }
@@ -95,6 +125,9 @@ static bool plugin_activate(const clap_plugin_t *plugin,
     uint32_t shm_size32 = static_cast<uint32_t>(shm_size);
     if (!platform_shm_create(kp->shm, shm_name, shm_size)) return false;
     shm_init_sync(shm_control(kp->shm.ptr));
+#ifdef _WIN32
+    create_shm_events(kp, shm_name);
+#endif
     keepsake_debug_log("keepsake: plugin_activate shm name=%s size=%u\n",
                        shm_name.c_str(), shm_size32);
     std::vector<uint8_t> shm_payload(4 + name_len + 4);
@@ -107,12 +140,18 @@ static bool plugin_activate(const clap_plugin_t *plugin,
                            kp->instance_id);
         if (!send_and_wait(kp, IPC_OP_SET_SHM, shm_payload.data(),
                            static_cast<uint32_t>(shm_payload.size()))) {
+#ifdef _WIN32
+            close_shm_events(kp);
+#endif
             platform_shm_close(kp->shm);
             return false;
         }
 
         IpcActivatePayload ap = { sample_rate, max_frames };
         if (!send_and_wait(kp, IPC_OP_ACTIVATE, &ap, sizeof(ap))) {
+#ifdef _WIN32
+            close_shm_events(kp);
+#endif
             platform_shm_close(kp->shm);
             return false;
         }
@@ -142,6 +181,9 @@ static void plugin_deactivate(const clap_plugin_t *plugin) {
         send_and_wait(kp, IPC_OP_DEACTIVATE);
     }
     if (kp->shm.ptr) platform_shm_close(kp->shm);
+#ifdef _WIN32
+    close_shm_events(kp);
+#endif
     kp->active = false;
     kp->max_frames = 0;
 }

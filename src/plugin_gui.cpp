@@ -227,6 +227,17 @@ static bool gui_get_size(const clap_plugin_t *plugin, uint32_t *w, uint32_t *h) 
     if (!kp->bridge_ok && !kp->crashed) wait_async_init(kp, 1500);
     gui_refresh_size(kp);
     if (kp->editor_width > 0 && kp->editor_height > 0) {
+#ifdef _WIN32
+        if (kp->format == FORMAT_VST2) {
+            *w = static_cast<uint32_t>(kp->editor_width);
+            *h = static_cast<uint32_t>(kp->editor_height);
+            keepsake_debug_log("keepsake: gui_get_size %ux%u raw=%dx%d scale=%.3f windows-vst2-unscaled=1\n",
+                               *w, *h,
+                               kp->editor_width, kp->editor_height,
+                               kp->gui_scale);
+            return true;
+        }
+#endif
         const double scale = (kp->gui_scale > 0.0) ? kp->gui_scale : 1.0;
         *w = static_cast<uint32_t>(std::lround(static_cast<double>(kp->editor_width) * scale));
         *h = static_cast<uint32_t>(std::lround(static_cast<double>(kp->editor_height) * scale));

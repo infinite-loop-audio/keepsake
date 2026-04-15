@@ -317,6 +317,13 @@ static inline ShmProcessControl *shm_control(void *shm_ptr) {
     return reinterpret_cast<ShmProcessControl *>(shm_ptr);
 }
 
+#ifdef _WIN32
+static inline std::string shm_event_name(const std::string &shm_name,
+                                         const char *suffix) {
+    return shm_name + suffix;
+}
+#endif
+
 // Atomic helpers for cross-process shared memory
 static inline void shm_store_release(volatile uint32_t *ptr, uint32_t val) {
 #ifdef _WIN32

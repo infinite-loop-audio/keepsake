@@ -32,6 +32,27 @@ void handle_set_shm(PluginInstance *inst, const std::vector<uint8_t> &payload) {
         ipc_write_error(g_pipe_out, "failed to open shared memory");
         return;
     }
+#ifdef _WIN32
+    if (inst->shm_request_event != INVALID_HANDLE_VALUE) {
+        CloseHandle(inst->shm_request_event);
+        inst->shm_request_event = INVALID_HANDLE_VALUE;
+    }
+    if (inst->shm_done_event != INVALID_HANDLE_VALUE) {
+        CloseHandle(inst->shm_done_event);
+        inst->shm_done_event = INVALID_HANDLE_VALUE;
+    }
+    const std::string request_name = shm_event_name(name, "-req");
+    const std::string done_name = shm_event_name(name, "-done");
+    inst->shm_request_event = OpenEventA(SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE,
+                                         request_name.c_str());
+    inst->shm_done_event = OpenEventA(SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE,
+                                      done_name.c_str());
+    keepsake_debug_log("bridge: SET_SHM events instance=%u request=%p done=%p name=%s\n",
+                       inst ? inst->id : 0,
+                       inst->shm_request_event,
+                       inst->shm_done_event,
+                       name.c_str());
+#endif
     keepsake_debug_log("bridge: SET_SHM OK instance=%u\n", inst ? inst->id : 0);
     ipc_write_ok(g_pipe_out);
 }

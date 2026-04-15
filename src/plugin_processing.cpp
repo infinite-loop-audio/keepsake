@@ -133,10 +133,26 @@ clap_process_status plugin_process(const clap_plugin_t *plugin,
     keepsake_debug_log("keepsake: process request frames=%u midi=%u params=%u state=%u\n",
                        frames, midi_idx, param_idx, shm_load_acquire(&ctrl->state));
     shm_store_release(&ctrl->state, SHM_STATE_PROCESS_REQUESTED);
+#ifdef _WIN32
+    if (kp->shm_request_event != INVALID_HANDLE_VALUE) {
+        SetEvent(kp->shm_request_event);
+    }
+#endif
 
     uint64_t deadline = GetTickCount64() + 5;
     bool done = false;
     while (GetTickCount64() < deadline) {
+#ifdef _WIN32
+        if (kp->shm_done_event != INVALID_HANDLE_VALUE) {
+            DWORD wait_ms = static_cast<DWORD>(deadline - GetTickCount64());
+            if (WaitForSingleObject(kp->shm_done_event, wait_ms) == WAIT_OBJECT_0) {
+                if (shm_load_acquire(&ctrl->state) == SHM_STATE_PROCESS_DONE) {
+                    done = true;
+                    break;
+                }
+            }
+        }
+#endif
         uint32_t state = shm_load_acquire(&ctrl->state);
         if (state == SHM_STATE_PROCESS_DONE) {
             done = true;
