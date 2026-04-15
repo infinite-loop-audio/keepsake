@@ -42,7 +42,7 @@ static std::string stem(const std::string &path) {
 
 int main(int argc, char *argv[]) {
 #ifdef __APPLE__
-    g_bridge_x86 = "/Users/betterthanclay/Library/Audio/Plug-Ins/CLAP/keepsake.clap/Contents/Helpers/keepsake-bridge-x86_64";
+    g_bridge_x86 = "/Users/tom/Library/Audio/Plug-Ins/CLAP/keepsake.clap/Contents/Helpers/keepsake-bridge-x86_64";
 #endif
 
     for (int i = 1; i < argc; i++) {

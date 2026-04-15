@@ -53,7 +53,7 @@ primary alpha support lane.
 [scan]
 replace_default_vst2_paths = true
 rescan = true
-vst2_paths = ["C:/Users/betterthanclay/VSTPlugins/test-plugin.dll"]
+vst2_paths = ["C:~/VSTPlugins/test-plugin.dll"]
 
 [expose]
 mode = "all"

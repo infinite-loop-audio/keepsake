@@ -47,27 +47,27 @@ Without Keepsake, Signal users with large VST2 plugin libraries either stay on o
 - Active spec lane: none — no provisional specs are active; all baseline material has been promoted directly into architecture and contracts
 
 - Canonical refs for execution:
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/contracts/001-working-rules.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/architecture/system-architecture.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/architecture/product-guardrails.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/vision/001-keepsake-vision.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/project-brief.md`
+  - `~/Dev/projects/keepsake/docs/contracts/001-working-rules.md`
+  - `~/Dev/projects/keepsake/docs/architecture/system-architecture.md`
+  - `~/Dev/projects/keepsake/docs/architecture/product-guardrails.md`
+  - `~/Dev/projects/keepsake/docs/vision/001-keepsake-vision.md`
+  - `~/Dev/projects/keepsake/docs/project-brief.md`
 
 - Remaining continuation envelope: the next thread should author g01.001 and contract 002 — these are not yet ready cards but are the clear next authoring step before any execution begins
 
 - Lane budget / pause signal: the previous thread closed cleanly. No continuation envelope is in-flight. The next thread starts fresh on authoring.
 
 - Key files:
-  - `/Users/betterthanclay/Dev/projects/keepsake/AGENTS.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/README.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/project-brief.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/vision/001-keepsake-vision.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/architecture/system-architecture.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/architecture/product-guardrails.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/contracts/001-working-rules.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/contracts/contract-index.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/roadmaps/README.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/roadmaps/g01/README.md`
+  - `~/Dev/projects/keepsake/AGENTS.md`
+  - `~/Dev/projects/keepsake/docs/README.md`
+  - `~/Dev/projects/keepsake/docs/project-brief.md`
+  - `~/Dev/projects/keepsake/docs/vision/001-keepsake-vision.md`
+  - `~/Dev/projects/keepsake/docs/architecture/system-architecture.md`
+  - `~/Dev/projects/keepsake/docs/architecture/product-guardrails.md`
+  - `~/Dev/projects/keepsake/docs/contracts/001-working-rules.md`
+  - `~/Dev/projects/keepsake/docs/contracts/contract-index.md`
+  - `~/Dev/projects/keepsake/docs/roadmaps/README.md`
+  - `~/Dev/projects/keepsake/docs/roadmaps/g01/README.md`
 
 ## Boundaries
 
@@ -77,7 +77,7 @@ Without Keepsake, Signal users with large VST2 plugin libraries either stay on o
 - Do not begin implementation on g01.001 until `docs/contracts/002-clap-factory-interface.md` exists and the milestone itself is authored as a ready card
 - Do not treat "compiles without errors" as done — the g01.001 milestone closes when a real VST2 plugin appears in a real CLAP host with correct metadata
 - Signal integration work (Tier 2+ polish: badge, rescan trigger, detection) belongs in the Signal repo, not here; do not introduce Signal dependencies into Keepsake
-- Follow repo constraints from [AGENTS.md](/Users/betterthanclay/Dev/projects/keepsake/AGENTS.md)
+- Follow repo constraints from [AGENTS.md](~/Dev/projects/keepsake/AGENTS.md)
 
 ## Important Context
 
