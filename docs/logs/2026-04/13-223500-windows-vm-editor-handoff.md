@@ -19,18 +19,18 @@ Windows is the weakest major release lane right now. macOS primary evidence is s
 - Done so far: Windows helper scripts exist and are usable; Windows build/install hash verification is working; build IDs now show in both plugin and bridge logs; the Windows VM repo is current; the embedded editor path now runs on a dedicated GUI thread and emits queue/handoff traces.
 - Still open: APC still locks REAPER on Windows during embedded open. The current stamped run proves the GUI-thread handoff itself works, but the embedded path still times out before any of the old inner editor-open logs appear.
 - Active spec lane: none; execution is against the existing release and bridge architecture surfaces.
-- Canonical refs: `/Users/betterthanclay/Dev/projects/keepsake/README.md`, `/Users/betterthanclay/Dev/projects/keepsake/AGENTS.md`, `/Users/betterthanclay/Dev/projects/keepsake/docs/README.md`, `/Users/betterthanclay/Dev/projects/keepsake/docs/architecture/system-architecture.md`, `/Users/betterthanclay/Dev/projects/keepsake/docs/contracts/001-working-rules.md`, `/Users/betterthanclay/Dev/projects/keepsake/docs/releases/v0.1-alpha.md`, `/Users/betterthanclay/Dev/projects/keepsake/docs/releases/v0.1-alpha-validation-matrix.md`
+- Canonical refs: `~/Dev/projects/keepsake/README.md`, `~/Dev/projects/keepsake/AGENTS.md`, `~/Dev/projects/keepsake/docs/README.md`, `~/Dev/projects/keepsake/docs/architecture/system-architecture.md`, `~/Dev/projects/keepsake/docs/contracts/001-working-rules.md`, `~/Dev/projects/keepsake/docs/releases/v0.1-alpha.md`, `~/Dev/projects/keepsake/docs/releases/v0.1-alpha-validation-matrix.md`
 - Remaining continuation envelope: stay in the Windows REAPER editor-hosting lane only. Do not broaden into general release cleanup or other platform work until the Windows embedded-open defect is either fixed or sharply bounded.
 - Lane budget / pause signal: pause here because the next useful step should happen inside the Windows VM Codex app where REAPER, logs, and helper scripts are local and the SSH/control loop is no longer slowing iteration.
 - Key files:
-  - `/Users/betterthanclay/Dev/projects/keepsake/src/bridge_gui_stub_windows.cpp`
-  - `/Users/betterthanclay/Dev/projects/keepsake/src/plugin_gui.cpp`
-  - `/Users/betterthanclay/Dev/projects/keepsake/src/bridge_main.cpp`
-  - `/Users/betterthanclay/Dev/projects/keepsake/src/bridge_loader_vst2.cpp`
-  - `/Users/betterthanclay/Dev/projects/keepsake/src/bridge_loader_vst2_platform.cpp`
-  - `/Users/betterthanclay/Dev/projects/keepsake/tools/reaper-smoke.ps1`
-  - `/Users/betterthanclay/Dev/projects/keepsake/tools/windows-run.cmd`
-  - `/Users/betterthanclay/Dev/projects/keepsake/tools/windows-update-install.cmd`
+  - `~/Dev/projects/keepsake/src/bridge_gui_stub_windows.cpp`
+  - `~/Dev/projects/keepsake/src/plugin_gui.cpp`
+  - `~/Dev/projects/keepsake/src/bridge_main.cpp`
+  - `~/Dev/projects/keepsake/src/bridge_loader_vst2.cpp`
+  - `~/Dev/projects/keepsake/src/bridge_loader_vst2_platform.cpp`
+  - `~/Dev/projects/keepsake/tools/reaper-smoke.ps1`
+  - `~/Dev/projects/keepsake/tools/windows-run.cmd`
+  - `~/Dev/projects/keepsake/tools/windows-update-install.cmd`
 
 ## Boundaries
 
@@ -38,11 +38,11 @@ Windows is the weakest major release lane right now. macOS primary evidence is s
 - Do not widen into Linux, macOS, or general release-packaging work from this handoff.
 - Do not introduce plugin-name-specific hacks for APC or Serum.
 - Do not use or reference the Steinberg VST2 SDK; VST2 stays VeSTige-only.
-- Follow repo constraints from [AGENTS.md](/Users/betterthanclay/Dev/projects/keepsake/AGENTS.md).
+- Follow repo constraints from [AGENTS.md](~/Dev/projects/keepsake/AGENTS.md).
 
 ## Important Context
 
-- Planning lineage: release planning is in the `g02` stream and the Windows work is part of tightening `v0.1-alpha` evidence before publication. The freshest release-facing docs are under `/Users/betterthanclay/Dev/projects/keepsake/docs/releases/` and the active log lane is `/Users/betterthanclay/Dev/projects/keepsake/docs/logs/2026-04/`.
+- Planning lineage: release planning is in the `g02` stream and the Windows work is part of tightening `v0.1-alpha` evidence before publication. The freshest release-facing docs are under `~/Dev/projects/keepsake/docs/releases/` and the active log lane is `~/Dev/projects/keepsake/docs/logs/2026-04/`.
 - Spec-to-canonical relationship: this is not a speculative planning lane now. The work is implementation/debugging governed by existing architecture/contracts plus the release docs.
 - Decisions and preferences:
   - user wants glue-light communication and minimal filler

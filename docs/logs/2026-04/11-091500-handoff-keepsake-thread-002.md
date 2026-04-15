@@ -53,34 +53,34 @@ The work delivered in this thread takes Keepsake from "planning documents" to "w
 - Active spec lane: none — all planning material has been promoted into architecture and contracts
 
 - Canonical refs for execution:
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/contracts/001-working-rules.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/contracts/002-clap-factory-interface.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/contracts/004-ipc-bridge-protocol.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/architecture/system-architecture.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/architecture/product-guardrails.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/vision/001-keepsake-vision.md`
+  - `~/Dev/projects/keepsake/docs/contracts/001-working-rules.md`
+  - `~/Dev/projects/keepsake/docs/contracts/002-clap-factory-interface.md`
+  - `~/Dev/projects/keepsake/docs/contracts/004-ipc-bridge-protocol.md`
+  - `~/Dev/projects/keepsake/docs/architecture/system-architecture.md`
+  - `~/Dev/projects/keepsake/docs/architecture/product-guardrails.md`
+  - `~/Dev/projects/keepsake/docs/vision/001-keepsake-vision.md`
 
 - Remaining continuation envelope: g01.009 (32-bit bridge) is planned but not marked ready. g01.007 (CI) is deferred by user preference. Both can be picked up without new planning.
 
 - Lane budget / pause signal: this thread paused because context depth warranted a fresh start, not because work was blocked. The next thread can continue executing immediately.
 
 - Key files:
-  - `/Users/betterthanclay/Dev/projects/keepsake/AGENTS.md`
-  - `/Users/betterthanclay/Dev/projects/keepsake/CMakeLists.txt`
-  - `/Users/betterthanclay/Dev/projects/keepsake/src/main.cpp` — CLAP entry point
-  - `/Users/betterthanclay/Dev/projects/keepsake/src/factory.h` / `factory.cpp` — CLAP factory + multi-format scanning
-  - `/Users/betterthanclay/Dev/projects/keepsake/src/plugin.h` / `plugin.cpp` — CLAP plugin instance
-  - `/Users/betterthanclay/Dev/projects/keepsake/src/bridge_main.cpp` — bridge subprocess
-  - `/Users/betterthanclay/Dev/projects/keepsake/src/bridge_loader.h` — format-agnostic loader interface
-  - `/Users/betterthanclay/Dev/projects/keepsake/src/bridge_loader_vst2.cpp` — VST2 loader
-  - `/Users/betterthanclay/Dev/projects/keepsake/src/bridge_loader_au.mm` — AU v2 loader
-  - `/Users/betterthanclay/Dev/projects/keepsake/src/ipc.h` — IPC protocol + pipe I/O
-  - `/Users/betterthanclay/Dev/projects/keepsake/src/platform.h` — cross-platform abstraction
-  - `/Users/betterthanclay/Dev/projects/keepsake/src/bridge_gui.h` / `bridge_gui_mac.mm` — GUI forwarding
-  - `/Users/betterthanclay/Dev/projects/keepsake/src/config.h` / `config.cpp` — config + cache
-  - `/Users/betterthanclay/Dev/projects/keepsake/src/vst2_loader.h` / `vst2_loader.cpp` — metadata extraction
-  - `/Users/betterthanclay/Dev/projects/keepsake/vendor/vestige/vestige.h` — VeSTige ABI header
-  - `/Users/betterthanclay/Dev/projects/keepsake/docs/roadmaps/g01/README.md`
+  - `~/Dev/projects/keepsake/AGENTS.md`
+  - `~/Dev/projects/keepsake/CMakeLists.txt`
+  - `~/Dev/projects/keepsake/src/main.cpp` — CLAP entry point
+  - `~/Dev/projects/keepsake/src/factory.h` / `factory.cpp` — CLAP factory + multi-format scanning
+  - `~/Dev/projects/keepsake/src/plugin.h` / `plugin.cpp` — CLAP plugin instance
+  - `~/Dev/projects/keepsake/src/bridge_main.cpp` — bridge subprocess
+  - `~/Dev/projects/keepsake/src/bridge_loader.h` — format-agnostic loader interface
+  - `~/Dev/projects/keepsake/src/bridge_loader_vst2.cpp` — VST2 loader
+  - `~/Dev/projects/keepsake/src/bridge_loader_au.mm` — AU v2 loader
+  - `~/Dev/projects/keepsake/src/ipc.h` — IPC protocol + pipe I/O
+  - `~/Dev/projects/keepsake/src/platform.h` — cross-platform abstraction
+  - `~/Dev/projects/keepsake/src/bridge_gui.h` / `bridge_gui_mac.mm` — GUI forwarding
+  - `~/Dev/projects/keepsake/src/config.h` / `config.cpp` — config + cache
+  - `~/Dev/projects/keepsake/src/vst2_loader.h` / `vst2_loader.cpp` — metadata extraction
+  - `~/Dev/projects/keepsake/vendor/vestige/vestige.h` — VeSTige ABI header
+  - `~/Dev/projects/keepsake/docs/roadmaps/g01/README.md`
 
 ## Boundaries
 
@@ -89,7 +89,7 @@ The work delivered in this thread takes Keepsake from "planning documents" to "w
 - CLAP remains the outer plugin format — no VST3 outer format
 - VST3 SDK (GPLv3) must run in the bridge subprocess only (license boundary at process edge)
 - Signal integration work belongs in the Signal repo, not here
-- Follow repo constraints from [AGENTS.md](/Users/betterthanclay/Dev/projects/keepsake/AGENTS.md)
+- Follow repo constraints from [AGENTS.md](~/Dev/projects/keepsake/AGENTS.md)
 
 ## Important Context
 

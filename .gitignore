@@ -62,3 +62,4 @@ compile_commands.json
 .DS_Store
 Thumbs.db
 .dsp_cache
+.claude/settings.local.json
