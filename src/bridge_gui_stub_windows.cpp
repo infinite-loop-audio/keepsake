@@ -37,12 +37,14 @@ static std::atomic<bool> g_editor_open_inflight{false};
 static ShmProcessControl *g_gui_status_ctrl = nullptr;
 static UINT_PTR g_idle_timer = 0;
 static EditorHeaderInfo g_header_info;
-static const int WIN_HEADER_HEIGHT = 24;
+static const int WIN_HEADER_HEIGHT = 28;
 static int g_last_parent_w = 0;
 static int g_last_parent_h = 0;
 static bool g_editor_hwnd_on_window_thread = false;
 static bool g_editor_embedded_surface_ready = false;
 static std::atomic<bool> g_editor_open{false};
+static int g_last_live_editor_w = 0;
+static int g_last_live_editor_h = 0;
 static constexpr const char *kKeepsakeHostWindowClass = "KeepsakeHostWindow";
 static constexpr const char *kKeepsakeEmbedWrapperClass = "KeepsakeEmbedWrapper";
 static constexpr const char *kKeepsakeEmbedPanelClass = "KeepsakeEmbedPanel";
@@ -56,16 +58,6 @@ enum class EmbedOpenMode {
     MainThread,
     Hybrid,
     WindowThread,
-};
-
-enum class EmbedAttachTarget {
-    DirectParent,
-    RootAncestor,
-};
-
-enum class EmbedParentSurface {
-    Panel,
-    Wrapper,
 };
 
 static DWORD g_gui_thread_id = 0;
@@ -233,100 +225,47 @@ static EmbedOpenMode get_embed_open_mode() {
     return mode;
 }
 
-static const char *embed_attach_target_name(EmbedAttachTarget target) {
-    switch (target) {
-    case EmbedAttachTarget::DirectParent:
-        return "direct";
-    case EmbedAttachTarget::RootAncestor:
-        return "root";
-    }
-    return "direct";
-}
-
-static EmbedAttachTarget get_embed_attach_target() {
-    static std::once_flag once;
-    static EmbedAttachTarget target = EmbedAttachTarget::DirectParent;
-    std::call_once(once, []() {
-        char value[64] = {};
-        DWORD len = GetEnvironmentVariableA("KEEPSAKE_WIN_EMBED_ATTACH_TARGET",
-                                            value,
-                                            static_cast<DWORD>(sizeof(value)));
-        if (len > 0 && len < sizeof(value)) {
-            if (_stricmp(value, "root") == 0 ||
-                _stricmp(value, "ancestor") == 0) {
-                target = EmbedAttachTarget::RootAncestor;
-            }
-        }
-        keepsake_debug_log("bridge: embed attach target=%s env='%s'\n",
-                           embed_attach_target_name(target),
-                           len > 0 ? value : "");
-    });
-    return target;
-}
-
 static HWND resolve_embed_attach_parent(HWND parent) {
     HWND target = parent;
-    if (get_embed_attach_target() == EmbedAttachTarget::RootAncestor) {
-        HWND root = GetAncestor(parent, GA_ROOT);
-        if (root) target = root;
-    }
-    keepsake_debug_log("bridge: resolve_embed_attach_parent input=%p target=%p mode=%s\n",
+    keepsake_debug_log("bridge: resolve_embed_attach_parent input=%p target=%p\n",
                        static_cast<void *>(parent),
-                       static_cast<void *>(target),
-                       embed_attach_target_name(get_embed_attach_target()));
+                       static_cast<void *>(target));
     return target;
-}
-
-static bool should_force_show_embed_parent() {
-    static std::once_flag once;
-    static bool enabled = false;
-    std::call_once(once, []() {
-        char value[16] = {};
-        DWORD len = GetEnvironmentVariableA("KEEPSAKE_WIN_FORCE_SHOW_PARENT",
-                                            value,
-                                            static_cast<DWORD>(sizeof(value)));
-        enabled = (len > 0 && value[0] != '\0' && value[0] != '0');
-        keepsake_debug_log("bridge: force show embed parent=%d env='%s'\n",
-                           enabled ? 1 : 0,
-                           len > 0 ? value : "");
-    });
-    return enabled;
-}
-
-static const char *embed_parent_surface_name(EmbedParentSurface surface) {
-    switch (surface) {
-    case EmbedParentSurface::Panel:
-        return "panel";
-    case EmbedParentSurface::Wrapper:
-        return "wrapper";
-    }
-    return "panel";
-}
-
-static EmbedParentSurface get_embed_parent_surface() {
-    static std::once_flag once;
-    static EmbedParentSurface surface = EmbedParentSurface::Panel;
-    std::call_once(once, []() {
-        char value[64] = {};
-        DWORD len = GetEnvironmentVariableA("KEEPSAKE_WIN_EMBED_PARENT_SURFACE",
-                                            value,
-                                            static_cast<DWORD>(sizeof(value)));
-        if (len > 0 && len < sizeof(value)) {
-            if (_stricmp(value, "wrapper") == 0) {
-                surface = EmbedParentSurface::Wrapper;
-            } else if (_stricmp(value, "panel") == 0) {
-                surface = EmbedParentSurface::Panel;
-            }
-        }
-        keepsake_debug_log("bridge: embed parent surface=%s env='%s'\n",
-                           embed_parent_surface_name(surface),
-                           len > 0 ? value : "");
-    });
-    return surface;
 }
 
 static void reset_embedded_surface_state() {
     g_editor_embedded_surface_ready = false;
+}
+
+static void draw_header_badge(HDC hdc, const std::string &text, COLORREF fill, int *right_x) {
+    if (text.empty()) return;
+
+    SIZE sz = {};
+    GetTextExtentPoint32A(hdc, text.c_str(), static_cast<int>(text.size()), &sz);
+
+    const int padding_x = 7;
+    const int badge_w = sz.cx + (padding_x * 2);
+    const int badge_h = 18;
+    const int badge_x = *right_x - badge_w;
+    const int badge_y = (WIN_HEADER_HEIGHT - badge_h) / 2;
+
+    HBRUSH brush = CreateSolidBrush(fill);
+    HBRUSH old_brush = (HBRUSH)SelectObject(hdc, brush);
+    HPEN pen = CreatePen(PS_SOLID, 1, fill);
+    HPEN old_pen = (HPEN)SelectObject(hdc, pen);
+    RoundRect(hdc, badge_x, badge_y, badge_x + badge_w, badge_y + badge_h, 6, 6);
+    SelectObject(hdc, old_pen);
+    SelectObject(hdc, old_brush);
+    DeleteObject(pen);
+    DeleteObject(brush);
+
+    SetTextColor(hdc, RGB(198, 198, 198));
+    TextOutA(hdc,
+             badge_x + padding_x,
+             badge_y + 3,
+             text.c_str(),
+             static_cast<int>(text.size()));
+    *right_x = badge_x - 6;
 }
 
 template <typename Fn>
@@ -336,33 +275,22 @@ static auto gui_call_sync(Fn &&fn) -> decltype(fn()) {
 
     auto promise = std::make_shared<std::promise<Result>>();
     auto future = promise->get_future();
-    keepsake_debug_log("bridge: gui_call_sync enqueue gui_thread=%lu caller=%lu\n",
-                       static_cast<unsigned long>(g_gui_thread_id),
-                       static_cast<unsigned long>(GetCurrentThreadId()));
     {
         std::lock_guard<std::mutex> lock(g_gui_mutex);
         g_gui_tasks.push([promise, fn = std::forward<Fn>(fn)]() mutable {
             try {
-                keepsake_debug_log("bridge: gui_call_sync task-begin thread=%lu\n",
-                                   static_cast<unsigned long>(GetCurrentThreadId()));
                 if constexpr (std::is_void_v<Result>) {
                     fn();
                     promise->set_value();
                 } else {
                     promise->set_value(fn());
                 }
-                keepsake_debug_log("bridge: gui_call_sync task-end thread=%lu\n",
-                                   static_cast<unsigned long>(GetCurrentThreadId()));
             } catch (...) {
                 promise->set_exception(std::current_exception());
             }
         });
     }
-    keepsake_debug_log("bridge: gui_call_sync post thread=%lu\n",
-                       static_cast<unsigned long>(g_gui_thread_id));
     PostThreadMessageA(g_gui_thread_id, WM_KEEPSAKE_GUI_TASK, 0, 0);
-    keepsake_debug_log("bridge: gui_call_sync wait-begin caller=%lu\n",
-                       static_cast<unsigned long>(GetCurrentThreadId()));
     return future.get();
 }
 
@@ -373,23 +301,16 @@ static auto window_call_sync(Fn &&fn) -> decltype(fn()) {
 
     auto promise = std::make_shared<std::promise<Result>>();
     auto future = promise->get_future();
-    keepsake_debug_log("bridge: window_call_sync enqueue window_thread=%lu caller=%lu\n",
-                       static_cast<unsigned long>(g_window_thread_id),
-                       static_cast<unsigned long>(GetCurrentThreadId()));
     {
         std::lock_guard<std::mutex> lock(g_window_mutex);
         g_window_tasks.push([promise, fn = std::forward<Fn>(fn)]() mutable {
             try {
-                keepsake_debug_log("bridge: window_call_sync task-begin thread=%lu\n",
-                                   static_cast<unsigned long>(GetCurrentThreadId()));
                 if constexpr (std::is_void_v<Result>) {
                     fn();
                     promise->set_value();
                 } else {
                     promise->set_value(fn());
                 }
-                keepsake_debug_log("bridge: window_call_sync task-end thread=%lu\n",
-                                   static_cast<unsigned long>(GetCurrentThreadId()));
             } catch (...) {
                 promise->set_exception(std::current_exception());
             }
@@ -467,10 +388,54 @@ static void resize_embedded_editor_to_parent() {
     g_last_parent_h = h;
     if (g_editor_panel_hwnd) {
         MoveWindow(g_editor_hwnd, 0, 0, w, h, TRUE);
-        MoveWindow(g_editor_panel_hwnd, 0, 0, w, h, TRUE);
+        if (g_header_hwnd) {
+            MoveWindow(g_header_hwnd, 0, 0, w, WIN_HEADER_HEIGHT, TRUE);
+            InvalidateRect(g_header_hwnd, nullptr, TRUE);
+            UpdateWindow(g_header_hwnd);
+        }
+        MoveWindow(g_editor_panel_hwnd, 0, WIN_HEADER_HEIGHT, w,
+                   (h > WIN_HEADER_HEIGHT) ? (h - WIN_HEADER_HEIGHT) : 0, TRUE);
     } else {
         MoveWindow(g_editor_hwnd, 0, 0, w, h, TRUE);
     }
+}
+
+static bool query_embedded_editor_live_rect(int &w, int &h) {
+    if (!g_editor_open || !g_editor_panel_hwnd || !IsWindow(g_editor_panel_hwnd)) {
+        return false;
+    }
+
+    for (HWND child = GetWindow(g_editor_panel_hwnd, GW_CHILD);
+         child != nullptr;
+         child = GetWindow(child, GW_HWNDNEXT)) {
+        if (!IsWindow(child) || !IsWindowVisible(child)) continue;
+
+        RECT rc = {};
+        if (!GetWindowRect(child, &rc)) continue;
+
+        POINT tl = { rc.left, rc.top };
+        POINT br = { rc.right, rc.bottom };
+        MapWindowPoints(HWND_DESKTOP, g_editor_panel_hwnd, &tl, 1);
+        MapWindowPoints(HWND_DESKTOP, g_editor_panel_hwnd, &br, 1);
+
+        const int cw = br.x - tl.x;
+        const int ch = br.y - tl.y;
+        if (cw > 0 && ch > 0) {
+            w = cw;
+            h = ch;
+            g_last_live_editor_w = cw;
+            g_last_live_editor_h = ch;
+            return true;
+        }
+    }
+
+    if (g_last_live_editor_w > 0 && g_last_live_editor_h > 0) {
+        w = g_last_live_editor_w;
+        h = g_last_live_editor_h;
+        return true;
+    }
+
+    return false;
 }
 
 static bool ensure_embedded_surface(EmbedOpenMode mode, int w, int h) {
@@ -489,7 +454,7 @@ static bool ensure_embedded_surface(EmbedOpenMode mode, int w, int h) {
         HWND wrapper = CreateWindowExA(
             kKeepsakeEmbedWrapperExStyle, kKeepsakeEmbedWrapperClass, nullptr,
             wrapper_style,
-            0, 0, w, h,
+            0, 0, w, h + WIN_HEADER_HEIGHT,
             nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
         DWORD wrapper_err = GetLastError();
         keepsake_debug_log("bridge: ensure_embedded_surface wrapper hwnd=%p err=%lu\n",
@@ -497,10 +462,20 @@ static bool ensure_embedded_surface(EmbedOpenMode mode, int w, int h) {
                            static_cast<unsigned long>(wrapper_err));
         if (!wrapper) return false;
 
+        HWND header = CreateWindowExA(
+            0, "KeepsakeHeader", nullptr,
+            WS_CHILD | WS_VISIBLE,
+            0, 0, w, WIN_HEADER_HEIGHT,
+            wrapper, nullptr, GetModuleHandle(nullptr), nullptr);
+        if (!header) {
+            DestroyWindow(wrapper);
+            return false;
+        }
+
         HWND panel = CreateWindowExA(
             0, "STATIC", nullptr,
             kKeepsakeEmbedChildStyle | WS_VISIBLE,
-            0, 0, w, h,
+            0, WIN_HEADER_HEIGHT, w, h,
             wrapper, nullptr, GetModuleHandle(nullptr), nullptr);
         DWORD panel_err = GetLastError();
         keepsake_debug_log("bridge: ensure_embedded_surface panel hwnd=%p err=%lu\n",
@@ -512,6 +487,7 @@ static bool ensure_embedded_surface(EmbedOpenMode mode, int w, int h) {
         }
 
         g_editor_hwnd = wrapper;
+        g_header_hwnd = header;
         g_editor_panel_hwnd = panel;
         g_editor_hwnd_on_window_thread = use_window_thread_for_host_window;
         g_editor_embedded_surface_ready = true;
@@ -548,7 +524,14 @@ static bool attach_embedded_surface(HWND parent, EmbedOpenMode mode, int w, int 
         if (!previous_parent && parent_err != 0) return false;
 
         MoveWindow(g_editor_hwnd, 0, 0, w, h, TRUE);
-        MoveWindow(g_editor_panel_hwnd, 0, 0, w, h, TRUE);
+        if (g_header_hwnd) {
+            MoveWindow(g_header_hwnd, 0, 0, w, WIN_HEADER_HEIGHT, TRUE);
+            ShowWindow(g_header_hwnd, SW_SHOW);
+            InvalidateRect(g_header_hwnd, nullptr, TRUE);
+            UpdateWindow(g_header_hwnd);
+        }
+        MoveWindow(g_editor_panel_hwnd, 0, WIN_HEADER_HEIGHT, w,
+                   (h > WIN_HEADER_HEIGHT) ? (h - WIN_HEADER_HEIGHT) : 0, TRUE);
         ShowWindow(g_editor_hwnd, SW_SHOW);
         ShowWindow(g_editor_panel_hwnd, SW_SHOW);
         UpdateWindow(g_editor_hwnd);
@@ -586,6 +569,24 @@ static void wait_for_embed_parent_visibility(HWND parent, int timeout_ms) {
 
 static LRESULT CALLBACK EditorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
+    case WM_SIZE:
+        if (hwnd == g_editor_hwnd && g_editor_panel_hwnd) {
+            int w = LOWORD(lParam);
+            int h = HIWORD(lParam);
+            if (g_header_hwnd) {
+                MoveWindow(g_header_hwnd, 0, 0, w, WIN_HEADER_HEIGHT, TRUE);
+                InvalidateRect(g_header_hwnd, nullptr, TRUE);
+            }
+            MoveWindow(g_editor_panel_hwnd,
+                       0,
+                       WIN_HEADER_HEIGHT,
+                       w,
+                       (h > WIN_HEADER_HEIGHT) ? (h - WIN_HEADER_HEIGHT) : 0,
+                       TRUE);
+        } else if (hwnd == g_parent_hwnd) {
+            resize_embedded_editor_to_parent();
+        }
+        return 0;
     case WM_TIMER:
         resize_embedded_editor_to_parent();
         if (g_active_loader) g_active_loader->editor_idle();
@@ -593,6 +594,7 @@ static LRESULT CALLBACK EditorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
     case WM_CLOSE:
         if (g_active_loader) g_active_loader->close_editor();
         g_editor_open = false;
+        g_header_hwnd = nullptr;
         g_editor_panel_hwnd = nullptr;
         DestroyWindow(hwnd);
         g_editor_hwnd = nullptr;
@@ -603,6 +605,10 @@ static LRESULT CALLBACK EditorWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
 }
 
 static LRESULT CALLBACK HeaderWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_SIZE) {
+        InvalidateRect(hwnd, nullptr, TRUE);
+        return 0;
+    }
     if (msg == WM_PAINT) {
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hwnd, &ps);
@@ -613,24 +619,40 @@ static LRESULT CALLBACK HeaderWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         FillRect(hdc, &rc, bg);
         DeleteObject(bg);
 
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, RGB(220, 220, 220));
-        HFONT font = CreateFontA(13, 0, 0, 0, FW_MEDIUM, FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, "Segoe UI");
-        HFONT old_font = (HFONT)SelectObject(hdc, font);
+        HPEN border_pen = CreatePen(PS_SOLID, 1, RGB(77, 77, 77));
+        HPEN old_pen = (HPEN)SelectObject(hdc, border_pen);
+        MoveToEx(hdc, rc.left, rc.bottom - 1, nullptr);
+        LineTo(hdc, rc.right, rc.bottom - 1);
+        SelectObject(hdc, old_pen);
+        DeleteObject(border_pen);
 
-        char text[512];
-        snprintf(text, sizeof(text), "  %s   [%s]  [%s]  [%s]",
-                 g_header_info.plugin_name.c_str(),
-                 g_header_info.format.c_str(),
-                 g_header_info.architecture.c_str(),
-                 g_header_info.isolation.c_str());
-        rc.left += 4;
-        rc.top += 4;
-        DrawTextA(hdc, text, -1, &rc, DT_LEFT | DT_SINGLELINE);
+        SetBkMode(hdc, TRANSPARENT);
+        HFONT name_font = CreateFontA(13, 0, 0, 0, FW_MEDIUM, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, "Segoe UI");
+        HFONT badge_font = CreateFontA(10, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, "Segoe UI");
+
+        int right_x = rc.right - 10;
+        HFONT old_font = (HFONT)SelectObject(hdc, badge_font);
+        draw_header_badge(hdc, g_header_info.isolation, RGB(77, 77, 128), &right_x);
+        draw_header_badge(hdc, g_header_info.architecture, RGB(77, 115, 77), &right_x);
+        draw_header_badge(hdc, g_header_info.format, RGB(115, 77, 51), &right_x);
+
+        SelectObject(hdc, name_font);
+        SetTextColor(hdc, RGB(230, 230, 230));
+        RECT text_rc = rc;
+        text_rc.left = 10;
+        text_rc.right = max(text_rc.left, right_x - 8);
+        text_rc.top += 1;
+        DrawTextA(hdc,
+                  g_header_info.plugin_name.c_str(),
+                  -1,
+                  &text_rc,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 
         SelectObject(hdc, old_font);
-        DeleteObject(font);
+        DeleteObject(name_font);
+        DeleteObject(badge_font);
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -749,24 +771,18 @@ static bool gui_open_editor_embedded_impl(BridgeLoader *loader,
                                           EmbedOpenMode mode) {
     if (!loader || !loader->has_editor()) return false;
     if (g_editor_open) return true;
+    g_header_info = g_pending_open_header;
     keepsake_debug_log("bridge: gui_open_editor_embedded_impl enter handle=%p thread=%lu mode=%s\n",
                        reinterpret_cast<void *>(static_cast<uintptr_t>(native_handle)),
                        static_cast<unsigned long>(GetCurrentThreadId()),
                        embed_open_mode_name(mode));
 
     HWND parent = reinterpret_cast<HWND>(static_cast<uintptr_t>(native_handle));
-    keepsake_debug_log("bridge: gui_open_editor_embedded_impl before IsWindow parent=%p\n",
-                       static_cast<void *>(parent));
     BOOL parent_ok = IsWindow(parent);
-    keepsake_debug_log("bridge: gui_open_editor_embedded_impl after IsWindow parent=%p ok=%d\n",
-                       static_cast<void *>(parent),
-                       parent_ok ? 1 : 0);
     if (!parent_ok) return false;
 
     int w = 640, h = 480;
-    keepsake_debug_log("bridge: gui_open_editor_embedded_impl before get_editor_rect default=%dx%d\n", w, h);
     loader->get_editor_rect(w, h);
-    keepsake_debug_log("bridge: gui_open_editor_embedded_impl after get_editor_rect size=%dx%d\n", w, h);
 
     const bool use_window_thread_for_host_window = (mode != EmbedOpenMode::MainThread);
     const bool use_window_thread_for_plugin_open = (mode == EmbedOpenMode::WindowThread);
@@ -786,26 +802,11 @@ static bool gui_open_editor_embedded_impl(BridgeLoader *loader,
                        static_cast<void *>(g_editor_hwnd),
                        static_cast<void *>(g_editor_panel_hwnd),
                        g_editor_embedded_surface_ready ? 1 : 0);
-    HWND editor_parent = parent;
-    switch (get_embed_parent_surface()) {
-    case EmbedParentSurface::Panel:
-        editor_parent = g_editor_panel_hwnd ? g_editor_panel_hwnd
-                                            : (g_editor_hwnd ? g_editor_hwnd : parent);
-        break;
-    case EmbedParentSurface::Wrapper:
-        editor_parent = g_editor_hwnd ? g_editor_hwnd : parent;
-        break;
-    }
-    keepsake_debug_log("bridge: selected editor_parent=%p surface=%s\n",
-                       static_cast<void *>(editor_parent),
-                       embed_parent_surface_name(get_embed_parent_surface()));
+    HWND editor_parent = g_editor_panel_hwnd ? g_editor_panel_hwnd
+                                             : (g_editor_hwnd ? g_editor_hwnd : parent);
+    keepsake_debug_log("bridge: selected editor_parent=%p surface=panel\n",
+                       static_cast<void *>(editor_parent));
     wait_for_embed_parent_visibility(attach_parent, 500);
-    if (should_force_show_embed_parent() && !IsWindowVisible(attach_parent)) {
-        keepsake_debug_log("bridge: force showing embed parent=%p\n",
-                           static_cast<void *>(attach_parent));
-        ShowWindow(attach_parent, SW_SHOWNA);
-        UpdateWindow(attach_parent);
-    }
     keepsake_debug_log(
         "bridge: pre-open visibility attach_parent=%p parent_visible=%d editor_parent=%p editor_visible=%d wrapper=%p wrapper_visible=%d panel=%p panel_visible=%d\n",
         static_cast<void *>(attach_parent),
@@ -859,6 +860,7 @@ static bool gui_open_editor_embedded_impl(BridgeLoader *loader,
             }
         }
         g_editor_panel_hwnd = nullptr;
+        g_header_hwnd = nullptr;
         g_editor_hwnd = nullptr;
         g_editor_hwnd_on_window_thread = false;
         reset_embedded_surface_state();
@@ -976,6 +978,7 @@ void gui_close_editor(BridgeLoader *loader) {
         }
         g_editor_hwnd = nullptr;
     }
+    g_header_hwnd = nullptr;
     g_editor_panel_hwnd = nullptr;
     g_active_loader = nullptr;
     g_parent_hwnd = nullptr;
@@ -1001,6 +1004,7 @@ void gui_close_editor(BridgeLoader *loader) {
 }
 
 bool gui_get_editor_rect(BridgeLoader *loader, int &w, int &h) {
+    if (query_embedded_editor_live_rect(w, h)) return true;
     return loader ? loader->get_editor_rect(w, h) : false;
 }
 

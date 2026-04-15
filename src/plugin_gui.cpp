@@ -13,6 +13,7 @@
 static const int GUI_OPEN_TIMEOUT_MS = 45000;
 static const int GUI_EMBED_TIMEOUT_MS = 1500;
 static const int GUI_PARENT_READY_TIMEOUT_MS = 750;
+static const int GUI_EMBED_HEADER_HEIGHT = 28;
 #else
 static const int GUI_OPEN_TIMEOUT_MS = 5000;
 #endif
@@ -208,6 +209,7 @@ static void gui_destroy(const clap_plugin_t *plugin) {
         shm_store_release(&shm_control(kp->shm.ptr)->editor_state, SHM_EDITOR_CLOSED);
     }
 #ifdef _WIN32
+    kp->gui_callback_requested.store(false, std::memory_order_release);
     gui_resume_processing_after_editor(kp);
 #endif
 }
@@ -230,10 +232,11 @@ static bool gui_get_size(const clap_plugin_t *plugin, uint32_t *w, uint32_t *h) 
 #ifdef _WIN32
         if (kp->format == FORMAT_VST2) {
             *w = static_cast<uint32_t>(kp->editor_width);
-            *h = static_cast<uint32_t>(kp->editor_height);
-            keepsake_debug_log("keepsake: gui_get_size %ux%u raw=%dx%d scale=%.3f windows-vst2-unscaled=1\n",
+            *h = static_cast<uint32_t>(kp->editor_height + GUI_EMBED_HEADER_HEIGHT);
+            keepsake_debug_log("keepsake: gui_get_size %ux%u raw=%dx%d header=%d scale=%.3f windows-vst2-unscaled=1\n",
                                *w, *h,
                                kp->editor_width, kp->editor_height,
+                               GUI_EMBED_HEADER_HEIGHT,
                                kp->gui_scale);
             return true;
         }
@@ -458,6 +461,7 @@ static bool gui_hide(const clap_plugin_t *plugin) {
         shm_store_release(&shm_control(kp->shm.ptr)->editor_state, SHM_EDITOR_CLOSED);
     }
 #ifdef _WIN32
+    kp->gui_callback_requested.store(false, std::memory_order_release);
     gui_resume_processing_after_editor(kp);
 #endif
     return true;

@@ -63,6 +63,7 @@ add_library(keepsake MODULE
     src/main.cpp
     src/factory.cpp
     src/factory_helpers.cpp
+    src/plugin_labels.cpp
     src/factory_scan.cpp
     src/vst2_loader.cpp
     src/vst2_loader_platform.cpp
@@ -163,6 +164,7 @@ endif()
 
 add_executable(keepsake-bridge
     src/bridge_main.cpp
+    src/plugin_labels.cpp
     src/bridge_runtime.cpp
     src/bridge_runtime_init.cpp
     src/bridge_runtime_audio.cpp

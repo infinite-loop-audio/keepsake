@@ -7,6 +7,16 @@
 
 #include <clap/events.h>
 
+#ifdef _WIN32
+#include <windows.h>
+static const uint64_t GUI_SIZE_POLL_INTERVAL_MS = 16;
+static const int GUI_EMBED_HEADER_HEIGHT = 28;
+static const uint64_t GUI_HOST_RESIZE_MIN_INTERVAL_MS = 33;
+#endif
+
+static void maybe_request_gui_main_thread(KeepsakePlugin *kp);
+static void request_gui_main_thread_once(KeepsakePlugin *kp);
+
 static void output_silence(const clap_process_t *process) {
     for (uint32_t i = 0; i < process->audio_outputs_count; i++) {
         for (uint32_t ch = 0; ch < process->audio_outputs[i].channel_count; ch++) {
@@ -214,6 +224,7 @@ clap_process_status plugin_process(const clap_plugin_t *plugin,
         }
     }
 
+    maybe_request_gui_main_thread(kp);
     return CLAP_PROCESS_CONTINUE;
 }
 
@@ -301,18 +312,53 @@ const void *plugin_get_extension(const clap_plugin_t *plugin, const char *id) {
 void plugin_on_main_thread(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
     sync_async_init(kp);
-    if (!kp->editor_open_pending || kp->crashed || !kp->bridge_ok || !kp->shm.ptr) return;
+    if (kp->crashed || !kp->bridge_ok || !kp->shm.ptr) return;
+    kp->gui_callback_requested.store(false, std::memory_order_release);
 
     auto *ctrl = shm_control(kp->shm.ptr);
+#ifdef _WIN32
+    if (kp->editor_open && !kp->editor_open_pending && !kp->gui_is_floating &&
+        kp->host_gui && kp->host_gui->request_resize) {
+        std::vector<uint8_t> payload;
+        if (send_and_wait(kp, IPC_OP_EDITOR_GET_RECT, nullptr, 0, &payload, 10) &&
+            payload.size() >= sizeof(IpcEditorRect)) {
+            IpcEditorRect rect{};
+            memcpy(&rect, payload.data(), sizeof(rect));
+            if (rect.width > 0 && rect.height > 0 &&
+                (rect.width != kp->editor_width || rect.height != kp->editor_height)) {
+                const int32_t host_width = rect.width;
+                const int32_t host_height = rect.height + GUI_EMBED_HEADER_HEIGHT;
+                const uint64_t now_ms = GetTickCount64();
+                if ((host_width == kp->last_requested_gui_width &&
+                     host_height == kp->last_requested_gui_height) ||
+                    (now_ms - kp->last_host_resize_request_ms < GUI_HOST_RESIZE_MIN_INTERVAL_MS)) {
+                    return;
+                }
+                keepsake_debug_log("keepsake: request_resize raw=%dx%d host=%dx%d\n",
+                                   rect.width, rect.height, host_width, host_height);
+                if (kp->host_gui->request_resize(kp->host,
+                                                 static_cast<uint32_t>(host_width),
+                                                 static_cast<uint32_t>(host_height))) {
+                    kp->editor_width = rect.width;
+                    kp->editor_height = rect.height;
+                    kp->last_requested_gui_width = host_width;
+                    kp->last_requested_gui_height = host_height;
+                    kp->last_host_resize_request_ms = now_ms;
+                }
+            }
+        }
+    }
+#endif
+
+    if (!kp->editor_open_pending) return;
+
     uint32_t editor_state = shm_load_acquire(&ctrl->editor_state);
     if (editor_state == SHM_EDITOR_OPEN) {
         keepsake_debug_log("keepsake: editor pending complete instance=%u\n",
                            kp->instance_id);
         gui_complete_pending_open(kp);
     } else if (editor_state == SHM_EDITOR_OPENING) {
-        if (kp->host && kp->host->request_callback) {
-            kp->host->request_callback(kp->host);
-        }
+        request_gui_main_thread_once(kp);
     } else {
         keepsake_debug_log("keepsake: editor pending terminal state=%u instance=%u\n",
                            editor_state, kp->instance_id);
@@ -322,4 +368,32 @@ void plugin_on_main_thread(const clap_plugin_t *plugin) {
             kp->crashed = true;
         }
     }
+}
+
+static void request_gui_main_thread_once(KeepsakePlugin *kp) {
+    if (!kp || !kp->host || !kp->host->request_callback) return;
+    bool expected = false;
+    if (kp->gui_callback_requested.compare_exchange_strong(expected, true,
+                                                           std::memory_order_acq_rel)) {
+        kp->host->request_callback(kp->host);
+    }
+}
+
+static void maybe_request_gui_main_thread(KeepsakePlugin *kp) {
+    if (!kp) return;
+
+    if (kp->editor_open_pending) {
+        request_gui_main_thread_once(kp);
+        return;
+    }
+
+#ifdef _WIN32
+    if (kp->editor_open && !kp->gui_is_floating) {
+        uint64_t now_ms = GetTickCount64();
+        if (now_ms - kp->last_gui_poll_ms >= GUI_SIZE_POLL_INTERVAL_MS) {
+            kp->last_gui_poll_ms = now_ms;
+            request_gui_main_thread_once(kp);
+        }
+    }
+#endif
 }

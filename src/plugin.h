@@ -8,10 +8,12 @@
 #include "platform.h"
 #include "bridge_pool.h"
 #include <clap/clap.h>
+#include <clap/ext/gui.h>
 #include <memory>
 #include <string>
 #include <vector>
 #include <mutex>
+#include <atomic>
 
 struct AsyncBridgeInitState;
 
@@ -25,6 +27,7 @@ struct CachedParamInfo {
 struct KeepsakePlugin {
     clap_plugin_t clap;
     const clap_host_t *host;
+    const clap_host_gui_t *host_gui = nullptr;
 
     // Identity (from factory scan)
     const clap_plugin_descriptor_t *descriptor;
@@ -67,6 +70,11 @@ struct KeepsakePlugin {
     double gui_scale = 1.0;
     int32_t editor_width = 0;
     int32_t editor_height = 0;
+    int32_t last_requested_gui_width = 0;
+    int32_t last_requested_gui_height = 0;
+    uint64_t last_gui_poll_ms = 0;
+    uint64_t last_host_resize_request_ms = 0;
+    std::atomic<bool> gui_callback_requested{false};
     void *iosurface_layer = nullptr; // CALayer* for IOSurface refresh
 
     // State

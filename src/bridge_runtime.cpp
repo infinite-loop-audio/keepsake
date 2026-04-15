@@ -3,6 +3,7 @@
 //
 
 #include "bridge_runtime.h"
+#include "bridge_gui.h"
 #include "debug_log.h"
 
 #include <cstdio>
@@ -157,7 +158,7 @@ void handle_editor_get_rect(PluginInstance *inst) {
     IpcEditorRect rect = {};
     int w = 0;
     int h = 0;
-    if (inst->loader && inst->loader->get_editor_rect(w, h)) {
+    if (inst->loader && gui_get_editor_rect(inst->loader, w, h)) {
         rect.width = w;
         rect.height = h;
     }

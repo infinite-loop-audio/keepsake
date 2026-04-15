@@ -1,7 +1,7 @@
 #include "factory_internal.h"
+#include "plugin_labels.h"
 
 #include <algorithm>
-#include <cctype>
 #include <unordered_map>
 #include <unordered_set>
 #include <cstdio>
@@ -62,79 +62,6 @@ std::string id_arch_suffix(const std::string &arch) {
     if (arch == "x86") return "x86";
     if (arch == "arm64") return "arm64";
     return {};
-}
-
-std::string format_label(uint32_t format) {
-    switch (format) {
-    case FORMAT_VST2: return "VST2";
-    case FORMAT_VST3: return "VST3";
-    case FORMAT_AU:   return "AU";
-    default:          return "Unknown";
-    }
-}
-
-std::string trim_copy(const std::string &text) {
-    size_t begin = 0;
-    while (begin < text.size() && std::isspace(static_cast<unsigned char>(text[begin]))) {
-        ++begin;
-    }
-    size_t end = text.size();
-    while (end > begin && std::isspace(static_cast<unsigned char>(text[end - 1]))) {
-        --end;
-    }
-    return text.substr(begin, end - begin);
-}
-
-bool ends_with_case_insensitive(const std::string &text, const std::string &suffix) {
-    if (suffix.size() > text.size()) return false;
-    size_t offset = text.size() - suffix.size();
-    for (size_t i = 0; i < suffix.size(); ++i) {
-        unsigned char a = static_cast<unsigned char>(text[offset + i]);
-        unsigned char b = static_cast<unsigned char>(suffix[i]);
-        if (std::tolower(a) != std::tolower(b)) return false;
-    }
-    return true;
-}
-
-std::string strip_known_arch_suffixes(std::string name) {
-    static const char *patterns[] = {
-        " (64-bit)",
-        " (32-bit)",
-        " [64-bit]",
-        " [32-bit]",
-        " x64",
-        " x86",
-        "_x64",
-        "_x86",
-        "-x64",
-        "-x86",
-    };
-
-    name = trim_copy(name);
-    bool removed = true;
-    while (removed) {
-        removed = false;
-        for (const char *pattern : patterns) {
-            std::string suffix(pattern);
-            if (!ends_with_case_insensitive(name, suffix)) continue;
-            name.resize(name.size() - suffix.size());
-            name = trim_copy(name);
-            removed = true;
-            break;
-        }
-    }
-    return name;
-}
-
-std::string make_display_name(const Vst2PluginInfo &plugin) {
-    std::string base = strip_known_arch_suffixes(plugin.name);
-    if (base.empty()) base = plugin.name;
-
-    std::string suffix = format_label(plugin.format);
-    std::string arch = display_arch_suffix(plugin.binary_arch);
-    if (!arch.empty()) suffix += " " + arch;
-
-    return base + " [" + suffix + "]";
 }
 
 std::string make_plugin_id_disambiguated(uint32_t format,
@@ -277,7 +204,6 @@ void build_descriptors(std::vector<Vst2PluginInfo> &plugins) {
 
     for (auto &p : plugins) {
         PluginEntry entry;
-        std::string arch_suffix = display_arch_suffix(p.binary_arch);
         std::string id_suffix = id_arch_suffix(p.binary_arch);
         std::string base_id = make_plugin_id(p.format, p.unique_id);
         if (p.format == FORMAT_VST2 && !id_suffix.empty()) {
@@ -294,7 +220,7 @@ void build_descriptors(std::vector<Vst2PluginInfo> &plugins) {
             entry.id += suffix;
             assigned_ids.insert(entry.id);
         }
-        entry.name = make_display_name(p);
+        entry.name = keepsake_make_display_name(p.name, p.format, p.binary_arch);
         entry.vendor = p.vendor;
         entry.version_str = format_version(p.vendor_version);
         entry.plugin_path = p.file_path;

@@ -34,6 +34,10 @@ static void create_shm_events(KeepsakePlugin *kp, const std::string &shm_name) {
 
 static bool plugin_init(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
+    kp->host_gui = kp->host
+        ? static_cast<const clap_host_gui_t *>(
+              kp->host->get_extension(kp->host, CLAP_EXT_GUI))
+        : nullptr;
     keepsake_debug_log_build_once("keepsake:");
     keepsake_debug_log("keepsake: plugin_init desc=%s path=%s format=%u isolation=%d\n",
                        kp->descriptor ? kp->descriptor->id : "(null)",

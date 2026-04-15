@@ -11,6 +11,7 @@
 #include "bridge_runtime.h"
 #include "bridge_gui.h"
 #include "debug_log.h"
+#include "plugin_labels.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -175,13 +176,13 @@ int main(int argc, char *argv[]) {
             if (inst->loader && inst->loader->has_editor()) {
                 gui_set_status_shm(inst->shm.ptr);
                 EditorHeaderInfo hdr;
-                hdr.format = "VST2";
+                hdr.format = keepsake_format_label(FORMAT_VST2);
 #if defined(__x86_64__)
-                hdr.architecture = "x86_64 (Rosetta)";
+                hdr.architecture = "x64";
 #elif defined(__aarch64__)
-                hdr.architecture = "ARM64";
+                hdr.architecture = "arm64";
 #elif defined(__i386__)
-                hdr.architecture = "32-bit";
+                hdr.architecture = "x86";
 #else
                 hdr.architecture = "native";
 #endif
@@ -190,8 +191,8 @@ int main(int argc, char *argv[]) {
                 std::vector<uint8_t> extra2;
                 inst->loader->get_info(pi2, extra2);
                 if (!extra2.empty())
-                    hdr.plugin_name = std::string(
-                        reinterpret_cast<const char *>(extra2.data()));
+                    hdr.plugin_name = keepsake_strip_known_arch_suffixes(
+                        std::string(reinterpret_cast<const char *>(extra2.data())));
                 else
                     hdr.plugin_name = "Plugin";
 

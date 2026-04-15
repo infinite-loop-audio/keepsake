@@ -33,6 +33,7 @@ class Vst2Loader : public BridgeLoader {
     AEffect *effect = nullptr;
     void *lib = nullptr;
     bool active = false;
+    bool editor_open = false;
     bool editor_rect_cached = false;
     int cached_editor_w = 0;
     int cached_editor_h = 0;
@@ -258,6 +259,7 @@ public:
                            s_last_automated_param.load(),
                            s_last_automated_value.load());
         s_editor_open_in_progress.store(false);
+        editor_open = (result != 0);
         return result != 0;
     }
 
@@ -266,6 +268,7 @@ public:
             std::lock_guard<std::recursive_mutex> lock(effect_mutex);
             effect->dispatcher(effect, effEditClose, 0, 0, nullptr, 0.0f);
         }
+        editor_open = false;
     }
 
     void editor_idle() override {
@@ -276,7 +279,7 @@ public:
     }
 
     bool get_editor_rect(int &w, int &h) override {
-        if (editor_rect_cached && cached_editor_w > 0 && cached_editor_h > 0) {
+        if (!editor_open && editor_rect_cached && cached_editor_w > 0 && cached_editor_h > 0) {
             w = cached_editor_w;
             h = cached_editor_h;
             keepsake_debug_log("bridge/vst2: effEditGetRect cache-hit size=%dx%d thread=%lu\n",
