@@ -5,11 +5,18 @@
 #include "bridge_runtime.h"
 #include "debug_log.h"
 
+#include <clap/events.h>
+#include <vestige/vestige.h>
+
 #include <cstdio>
 
 #ifdef _WIN32
 #include <process.h>
 #endif
+
+extern double s_sample_rate;
+extern uint32_t s_max_frames;
+extern VstTimeInfo s_vst_time_info;
 
 static void bridge_process_shm_request(PluginInstance *inst) {
     auto *ctrl = shm_control(inst->shm.ptr);
@@ -20,6 +27,38 @@ static void bridge_process_shm_request(PluginInstance *inst) {
 
     uint32_t nframes = ctrl->num_frames;
     if (nframes > inst->max_frames) nframes = inst->max_frames;
+
+    s_vst_time_info.sampleRate = s_sample_rate;
+    s_vst_time_info.samplePos = static_cast<double>(ctrl->transport.steady_time);
+    s_vst_time_info.nanoSeconds =
+        s_sample_rate > 0.0 ? (s_vst_time_info.samplePos * 1000000000.0 / s_sample_rate) : 0.0;
+    s_vst_time_info.ppqPos = ctrl->transport.song_pos_beats;
+    s_vst_time_info.tempo = ctrl->transport.tempo;
+    s_vst_time_info.barStartPos = ctrl->transport.bar_start_beats;
+    s_vst_time_info.cycleStartPos = ctrl->transport.loop_start_beats;
+    s_vst_time_info.cycleEndPos = ctrl->transport.loop_end_beats;
+    s_vst_time_info.timeSigNumerator = ctrl->transport.tsig_num;
+    s_vst_time_info.timeSigDenominator = ctrl->transport.tsig_denom;
+    s_vst_time_info.flags = kVstNanosValid;
+    if ((ctrl->transport.flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) != 0) {
+        s_vst_time_info.flags |= kVstPpqPosValid;
+    }
+    if ((ctrl->transport.flags & CLAP_TRANSPORT_HAS_TEMPO) != 0) {
+        s_vst_time_info.flags |= kVstTempoValid;
+    }
+    if ((ctrl->transport.flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) != 0 &&
+        (ctrl->transport.flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE) != 0) {
+        s_vst_time_info.flags |= kVstBarsValid | kVstTimeSigValid;
+    }
+    if ((ctrl->transport.flags & CLAP_TRANSPORT_IS_PLAYING) != 0) {
+        s_vst_time_info.flags |= kVstTransportPlaying;
+    }
+    if ((ctrl->transport.flags & CLAP_TRANSPORT_IS_RECORDING) != 0) {
+        s_vst_time_info.flags |= kVstTransportRecording;
+    }
+    if ((ctrl->transport.flags & CLAP_TRANSPORT_IS_LOOP_ACTIVE) != 0) {
+        s_vst_time_info.flags |= kVstTransportCycleActive | kVstCyclePosValid;
+    }
 
     keepsake_debug_log("bridge: process request instance=%u frames=%u midi=%u params=%u state=%u\n",
                        inst->id, nframes, ctrl->midi_count, ctrl->param_count,

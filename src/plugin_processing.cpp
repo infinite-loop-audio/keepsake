@@ -5,6 +5,8 @@
 #include "plugin_internal.h"
 #include "debug_log.h"
 
+#include <clap/events.h>
+
 static void output_silence(const clap_process_t *process) {
     for (uint32_t i = 0; i < process->audio_outputs_count; i++) {
         for (uint32_t ch = 0; ch < process->audio_outputs[i].channel_count; ch++) {
@@ -102,6 +104,34 @@ clap_process_status plugin_process(const clap_plugin_t *plugin,
     ctrl->num_frames = frames;
     ctrl->midi_count = midi_idx;
     ctrl->param_count = param_idx;
+    memset(&ctrl->transport, 0, sizeof(ctrl->transport));
+    int64_t steady_time = process->steady_time;
+    if (steady_time < 0) {
+        steady_time = kp->process_steady_time;
+    }
+    ctrl->transport.steady_time = steady_time;
+    kp->process_steady_time = steady_time + frames;
+    if (process->transport) {
+        const auto *transport = process->transport;
+        ctrl->transport.flags = transport->flags;
+        ctrl->transport.song_pos_beats =
+            static_cast<double>(transport->song_pos_beats) /
+            static_cast<double>(CLAP_BEATTIME_FACTOR);
+        ctrl->transport.tempo = transport->tempo;
+        ctrl->transport.tempo_inc = transport->tempo_inc;
+        ctrl->transport.loop_start_beats =
+            static_cast<double>(transport->loop_start_beats) /
+            static_cast<double>(CLAP_BEATTIME_FACTOR);
+        ctrl->transport.loop_end_beats =
+            static_cast<double>(transport->loop_end_beats) /
+            static_cast<double>(CLAP_BEATTIME_FACTOR);
+        ctrl->transport.bar_start_beats =
+            static_cast<double>(transport->bar_start) /
+            static_cast<double>(CLAP_BEATTIME_FACTOR);
+        ctrl->transport.bar_number = transport->bar_number;
+        ctrl->transport.tsig_num = transport->tsig_num;
+        ctrl->transport.tsig_denom = transport->tsig_denom;
+    }
 
 #ifndef _WIN32
     pthread_mutex_lock(&ctrl->mutex);

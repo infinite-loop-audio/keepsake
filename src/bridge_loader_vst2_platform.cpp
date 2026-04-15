@@ -35,6 +35,7 @@ std::atomic<uint32_t> s_automate_count{0};
 std::atomic<uint32_t> s_begin_edit_count{0};
 std::atomic<uint32_t> s_end_edit_count{0};
 std::atomic<float> s_last_automated_value{0.0f};
+VstTimeInfo s_vst_time_info{};
 
 static const char *vst2_host_opcode_name(int32_t opcode) {
     switch (opcode) {
@@ -103,7 +104,7 @@ intptr_t __cdecl vst2_host_callback(
         break;
     case audioMasterIdle: result = 1; break;
     case audioMasterWantMidi: result = 1; break;
-    case audioMasterGetTime: result = 0; break;
+    case audioMasterGetTime: result = reinterpret_cast<intptr_t>(&s_vst_time_info); break;
     case audioMasterProcessEvents: result = 1; break;
     case audioMasterGetSampleRate: result = static_cast<intptr_t>(s_sample_rate); break;
     case audioMasterGetBlockSize: result = static_cast<intptr_t>(s_max_frames); break;

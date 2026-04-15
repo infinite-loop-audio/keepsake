@@ -263,12 +263,27 @@ struct ShmMidiEvent {
     uint8_t data[4];
 };
 
+struct ShmTransportInfo {
+    int64_t steady_time;
+    uint32_t flags;
+    double song_pos_beats;
+    double tempo;
+    double tempo_inc;
+    double loop_start_beats;
+    double loop_end_beats;
+    double bar_start_beats;
+    int32_t bar_number;
+    int32_t tsig_num;
+    int32_t tsig_denom;
+};
+
 struct ShmProcessControl {
     volatile uint32_t state;       // SHM_STATE_*
     volatile uint32_t editor_state; // SHM_EDITOR_*
     uint32_t num_frames;           // frames to process this cycle
     uint32_t midi_count;           // number of MIDI events this cycle
     uint32_t param_count;          // number of param changes this cycle
+    ShmTransportInfo transport;    // transport/time info for the current block
 #ifndef _WIN32
     pthread_mutex_t mutex;         // cross-process mutex for sync
     pthread_cond_t cond;           // cross-process condition variable

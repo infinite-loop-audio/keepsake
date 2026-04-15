@@ -74,6 +74,7 @@ struct KeepsakePlugin {
     volatile bool active = false;
     bool processing = false;
     bool crashed = false;
+    int64_t process_steady_time = 0;
 
     std::shared_ptr<AsyncBridgeInitState> async_init;
 };
