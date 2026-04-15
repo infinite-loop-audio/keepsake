@@ -29,8 +29,12 @@ static HWND g_header_hwnd = nullptr;
 static HWND g_editor_panel_hwnd = nullptr;
 static BridgeLoader *g_active_loader = nullptr;
 static uint64_t g_staged_embed_parent_handle = 0;
-static BridgeLoader *g_pending_embed_loader = nullptr;
-static std::atomic<bool> g_pending_embed_open{false};
+static BridgeLoader *g_pending_open_loader = nullptr;
+static std::atomic<bool> g_pending_open{false};
+static bool g_pending_open_embedded = false;
+static EditorHeaderInfo g_pending_open_header;
+static std::atomic<bool> g_editor_open_inflight{false};
+static ShmProcessControl *g_gui_status_ctrl = nullptr;
 static UINT_PTR g_idle_timer = 0;
 static EditorHeaderInfo g_header_info;
 static const int WIN_HEADER_HEIGHT = 24;
@@ -301,7 +305,7 @@ static const char *embed_parent_surface_name(EmbedParentSurface surface) {
 
 static EmbedParentSurface get_embed_parent_surface() {
     static std::once_flag once;
-    static EmbedParentSurface surface = EmbedParentSurface::Wrapper;
+    static EmbedParentSurface surface = EmbedParentSurface::Panel;
     std::call_once(once, []() {
         char value[64] = {};
         DWORD len = GetEnvironmentVariableA("KEEPSAKE_WIN_EMBED_PARENT_SURFACE",
@@ -310,6 +314,8 @@ static EmbedParentSurface get_embed_parent_surface() {
         if (len > 0 && len < sizeof(value)) {
             if (_stricmp(value, "wrapper") == 0) {
                 surface = EmbedParentSurface::Wrapper;
+            } else if (_stricmp(value, "panel") == 0) {
+                surface = EmbedParentSurface::Panel;
             }
         }
         keepsake_debug_log("bridge: embed parent surface=%s env='%s'\n",
@@ -879,14 +885,21 @@ static bool gui_open_editor_embedded_impl(BridgeLoader *loader,
 }
 
 bool gui_open_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
+    if (!loader || !loader->has_editor()) return false;
+    if (g_editor_open) return true;
+
     if (g_staged_embed_parent_handle != 0) {
-        g_pending_embed_loader = loader;
-        g_pending_embed_open.store(true);
-        keepsake_debug_log("bridge: gui_open_editor queued staged embed parent=%p\n",
+        g_pending_open_loader = loader;
+        g_pending_open_header = header;
+        g_pending_open_embedded = true;
+        g_pending_open.store(true);
+        keepsake_debug_log("bridge: gui_open_editor queued async embed open parent=%p\n",
                            reinterpret_cast<void *>(static_cast<uintptr_t>(g_staged_embed_parent_handle)));
         return true;
     }
-    return gui_call_sync([=]() { return gui_open_editor_impl(loader, header); });
+
+    keepsake_debug_log("bridge: gui_open_editor synchronous floating open\n");
+    return gui_open_editor_impl(loader, header);
 }
 
 bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
@@ -904,14 +917,23 @@ bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
 bool gui_stage_editor_parent(BridgeLoader *loader, uint64_t native_handle) {
     if (!loader || !loader->has_editor()) return false;
     g_staged_embed_parent_handle = native_handle;
-    g_pending_embed_loader = loader;
+    g_pending_open_loader = loader;
     keepsake_debug_log("bridge: staged embed parent=%p\n",
                        reinterpret_cast<void *>(static_cast<uintptr_t>(native_handle)));
     return true;
 }
 
 bool gui_has_pending_work() {
-    return g_pending_embed_open.load();
+    return g_pending_open.load();
+}
+
+void gui_get_editor_status(bool &open, bool &pending) {
+    open = g_editor_open.load();
+    pending = g_pending_open.load() || g_editor_open_inflight.load();
+}
+
+void gui_set_status_shm(void *shm_ptr) {
+    g_gui_status_ctrl = shm_ptr ? shm_control(shm_ptr) : nullptr;
 }
 
 void gui_set_editor_transient(uint64_t native_handle) {
@@ -928,8 +950,12 @@ void gui_close_editor(BridgeLoader *loader) {
     auto close_impl = [=]() {
     if (!g_editor_open) {
         g_staged_embed_parent_handle = 0;
-        g_pending_embed_loader = nullptr;
-        g_pending_embed_open.store(false);
+        g_pending_open_loader = nullptr;
+        g_pending_open.store(false);
+        g_pending_open_embedded = false;
+        if (g_gui_status_ctrl) {
+            shm_store_release(&g_gui_status_ctrl->editor_state, SHM_EDITOR_CLOSED);
+        }
         return;
     }
     if (g_idle_timer) {
@@ -955,13 +981,17 @@ void gui_close_editor(BridgeLoader *loader) {
     g_parent_hwnd = nullptr;
     g_owner_hwnd = nullptr;
     g_staged_embed_parent_handle = 0;
-    g_pending_embed_loader = nullptr;
-    g_pending_embed_open.store(false);
+    g_pending_open_loader = nullptr;
+    g_pending_open.store(false);
+    g_pending_open_embedded = false;
     g_editor_hwnd_on_window_thread = false;
     reset_embedded_surface_state();
     g_last_parent_w = 0;
     g_last_parent_h = 0;
     g_editor_open = false;
+    if (g_gui_status_ctrl) {
+        shm_store_release(&g_gui_status_ctrl->editor_state, SHM_EDITOR_CLOSED);
+    }
     };
     if (get_embed_open_mode() == EmbedOpenMode::WindowThread) {
         window_call_sync(close_impl);
@@ -975,15 +1005,32 @@ bool gui_get_editor_rect(BridgeLoader *loader, int &w, int &h) {
 }
 
 void gui_idle(BridgeLoader *) {
-    if (!g_editor_open && g_pending_embed_open.load() &&
-        g_pending_embed_loader && g_staged_embed_parent_handle != 0) {
-        keepsake_debug_log("bridge: gui_idle opening staged embed parent=%p\n",
-                           reinterpret_cast<void *>(static_cast<uintptr_t>(g_staged_embed_parent_handle)));
-        bool ok = gui_open_editor_embedded(g_pending_embed_loader, g_staged_embed_parent_handle);
-        keepsake_debug_log("bridge: gui_idle staged embed result=%d\n", ok ? 1 : 0);
-        g_pending_embed_open.store(false);
+    if (!g_editor_open && g_pending_open.load() && g_pending_open_loader) {
+        bool ok = false;
+        if (g_pending_open_embedded && g_staged_embed_parent_handle != 0) {
+            g_editor_open_inflight.store(true);
+            if (g_gui_status_ctrl) {
+                shm_store_release(&g_gui_status_ctrl->editor_state, SHM_EDITOR_OPENING);
+            }
+            keepsake_debug_log("bridge: gui_idle opening staged embed parent=%p\n",
+                               reinterpret_cast<void *>(static_cast<uintptr_t>(g_staged_embed_parent_handle)));
+            ok = gui_open_editor_embedded_impl(g_pending_open_loader,
+                                               g_staged_embed_parent_handle,
+                                               get_embed_open_mode());
+            keepsake_debug_log("bridge: gui_idle staged embed result=%d\n", ok ? 1 : 0);
+            if (g_gui_status_ctrl) {
+                shm_store_release(&g_gui_status_ctrl->editor_state,
+                                  ok ? SHM_EDITOR_OPEN : SHM_EDITOR_FAILED);
+            }
+            g_editor_open_inflight.store(false);
+        } else {
+            keepsake_debug_log("bridge: gui_idle opening async floating editor\n");
+            ok = gui_open_editor_impl(g_pending_open_loader, g_pending_open_header);
+            keepsake_debug_log("bridge: gui_idle async floating result=%d\n", ok ? 1 : 0);
+        }
+        g_pending_open.store(false);
         if (!ok) {
-            g_pending_embed_loader = nullptr;
+            g_pending_open_loader = nullptr;
             g_staged_embed_parent_handle = 0;
         }
     }

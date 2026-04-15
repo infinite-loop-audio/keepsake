@@ -139,23 +139,18 @@ function Sync-DefaultInstallBundle {
     [string]$TargetBundle
   )
 
-  $targetDir = Split-Path -Parent $TargetBundle
-  $sourceDir = Split-Path -Parent $SourceBundle
-  $sourceBridge = Join-Path $sourceDir "keepsake-bridge.exe"
-  $targetBridge = Join-Path $targetDir "keepsake-bridge.exe"
-
-  if (-not (Test-Path $sourceBridge)) {
-    throw "bridge binary not found next to CLAP artifact: $sourceBridge"
+  $installScript = Join-Path $scriptDir "windows-install-built.ps1"
+  if (-not (Test-Path $installScript)) {
+    throw "install helper not found: $installScript"
   }
 
-  $null = New-Item -ItemType Directory -Path $targetDir -Force
-  Copy-Item -LiteralPath $SourceBundle -Destination $TargetBundle -Force
-  Copy-Item -LiteralPath $sourceBridge -Destination $targetBridge -Force
+  & powershell -NoProfile -ExecutionPolicy Bypass -File $installScript `
+    -SourceBundle $SourceBundle `
+    -TargetBundle $TargetBundle
 
-  $stamp = Get-Date
-  Get-Item -LiteralPath $TargetBundle | ForEach-Object { $_.LastWriteTime = $stamp }
-  Get-Item -LiteralPath $targetBridge | ForEach-Object { $_.LastWriteTime = $stamp }
-  Get-Item -LiteralPath $targetDir | ForEach-Object { $_.LastWriteTime = $stamp }
+  if ($LASTEXITCODE -ne 0) {
+    throw "default install sync failed with exit code $LASTEXITCODE"
+  }
 }
 
 function Copy-DebugLogSnapshot {

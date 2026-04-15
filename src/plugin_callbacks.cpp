@@ -56,6 +56,11 @@ static bool plugin_activate(const clap_plugin_t *plugin,
                        kp->bridge_ok ? 1 : 0, kp->crashed ? 1 : 0);
     sync_async_init(kp);
     if (kp->crashed) return false;
+    if (kp->editor_open_pending) {
+        keepsake_debug_log("keepsake: plugin_activate deferred while editor open pending instance=%u\n",
+                           kp->instance_id);
+        return kp->active;
+    }
     (void)min_frames;
 
     constexpr int32_t kMaxBridgeChannels = 64;
@@ -128,6 +133,11 @@ static void plugin_deactivate(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
     sync_async_init(kp);
     clear_async_queue(kp, true);
+    if (kp->editor_open_pending) {
+        keepsake_debug_log("keepsake: plugin_deactivate skipped while editor open pending instance=%u\n",
+                           kp->instance_id);
+        return;
+    }
     if (kp->bridge_ok && kp->active && !kp->crashed) {
         send_and_wait(kp, IPC_OP_DEACTIVATE);
     }
@@ -142,6 +152,11 @@ static bool plugin_start_processing(const clap_plugin_t *plugin) {
                        kp->instance_id, kp->active ? 1 : 0, kp->bridge_ok ? 1 : 0);
     sync_async_init(kp);
     if (!kp->active || kp->crashed) return false;
+    if (kp->editor_open_pending) {
+        keepsake_debug_log("keepsake: plugin_start_processing deferred while editor open pending instance=%u\n",
+                           kp->instance_id);
+        return true;
+    }
     if (kp->bridge_ok) {
         if (!send_and_wait(kp, IPC_OP_START_PROC)) return false;
     } else {
@@ -161,6 +176,11 @@ static void plugin_stop_processing(const clap_plugin_t *plugin) {
     auto *kp = get(plugin);
     sync_async_init(kp);
     clear_async_queue(kp, false);
+    if (kp->editor_open_pending) {
+        keepsake_debug_log("keepsake: plugin_stop_processing skipped while editor open pending instance=%u\n",
+                           kp->instance_id);
+        return;
+    }
     if (kp->bridge_ok && kp->processing && !kp->crashed) {
         send_and_wait(kp, IPC_OP_STOP_PROC);
     }

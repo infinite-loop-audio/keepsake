@@ -13,6 +13,9 @@ set "SOURCE_BRIDGE=%BUILD_DIR%\%CONFIG%\keepsake-bridge.exe"
 set "CLAP_TARGET=%CommonProgramFiles%\CLAP\keepsake.clap"
 set "BRIDGE_TARGET=%CommonProgramFiles%\CLAP\keepsake-bridge.exe"
 set "DEBUG_LOG=%TEMP%\keepsake-debug.log"
+set "INSTALL_HELPER=%REPO%\tools\windows-install-built.ps1"
+set "INSTALL_TASK_RUNNER=%REPO%\tools\windows-run-install-task.ps1"
+set "INSTALL_TASK_NAME=KeepsakeInstallBuilt"
 
 echo [keepsake] repo=%REPO%
 cd /d "%REPO%" || exit /b 1
@@ -24,8 +27,12 @@ cmake --build "%BUILD_DIR%" --config %CONFIG% || exit /b 1
 taskkill /IM reaper.exe /F >NUL 2>&1
 taskkill /IM keepsake-bridge.exe /F >NUL 2>&1
 
-copy /Y "%SOURCE_CLAP%" "%CLAP_TARGET%" >NUL || exit /b 1
-copy /Y "%SOURCE_BRIDGE%" "%BRIDGE_TARGET%" >NUL || exit /b 1
+schtasks /Query /TN "%INSTALL_TASK_NAME%" >NUL 2>&1
+if %ERRORLEVEL% EQU 0 (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%INSTALL_TASK_RUNNER%" -TaskName "%INSTALL_TASK_NAME%" || exit /b 1
+) else (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%INSTALL_HELPER%" -SourceBundle "%SOURCE_CLAP%" -TargetBundle "%CLAP_TARGET%" || exit /b 1
+)
 del /Q "%DEBUG_LOG%" 2>NUL
 
 echo [keepsake] source:

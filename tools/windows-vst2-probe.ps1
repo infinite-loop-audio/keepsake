@@ -4,6 +4,16 @@ param(
 
   [switch]$OpenEditor,
   [switch]$RectTwice,
+  [switch]$Activate,
+  [switch]$GetChunk,
+  [switch]$SetChunk,
+  [switch]$ChunkDuringProcess,
+  [switch]$OpenDuringProcess,
+  [switch]$EditorChunkDuringProcess,
+  [switch]$BridgeHostMode,
+  [switch]$BridgeGateMode,
+  [switch]$BridgeMarshalMode,
+  [switch]$AsyncOpenMarshalMode,
   [ValidateSet("child", "top", "none")]
   [string]$Parent = "child",
   [ValidateSet("current", "worker")]
@@ -12,10 +22,23 @@ param(
   [string]$RectThread = "current",
   [ValidateSet("current", "worker")]
   [string]$OpenThread = "current",
+  [ValidateSet("current", "worker")]
+  [string]$ProcessThread = "current",
+  [ValidateSet("current", "worker")]
+  [string]$ChunkThread = "current",
   [int]$IdleMs = 1000,
   [int]$LoadTimeoutMs = 5000,
   [int]$RectTimeoutMs = 5000,
-  [int]$OpenTimeoutMs = 2000
+  [int]$OpenTimeoutMs = 2000,
+  [int]$ProcessTimeoutMs = 5000,
+  [int]$ChunkTimeoutMs = 5000,
+  [int]$ProcessBlocks = 0,
+  [int]$ProcessSleepMs = 0,
+  [int]$SampleRate = 44100,
+  [int]$BlockSize = 512,
+  [int]$CallbackDelayMs = 0,
+  [int]$GetTimeDelayMs = 0,
+  [int]$GateDelayMs = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,14 +55,35 @@ if (-not (Test-Path $VstPath)) {
 $args = @($VstPath)
 if ($OpenEditor) { $args += "--open-editor" }
 if ($RectTwice) { $args += "--rect-twice" }
+if ($Activate) { $args += "--activate" }
+if ($GetChunk) { $args += "--get-chunk" }
+if ($SetChunk) { $args += "--set-chunk" }
+if ($ChunkDuringProcess) { $args += "--chunk-during-process" }
+if ($OpenDuringProcess) { $args += "--open-during-process" }
+if ($EditorChunkDuringProcess) { $args += "--editor-chunk-during-process" }
+if ($BridgeHostMode) { $args += "--bridge-host-mode" }
+if ($BridgeGateMode) { $args += "--bridge-gate-mode" }
+if ($BridgeMarshalMode) { $args += "--bridge-marshal-mode" }
+if ($AsyncOpenMarshalMode) { $args += "--async-open-marshal-mode" }
 $args += @("--parent", $Parent,
   "--load-thread", $LoadThread,
   "--rect-thread", $RectThread,
   "--open-thread", $OpenThread,
+  "--process-thread", $ProcessThread,
+  "--chunk-thread", $ChunkThread,
   "--idle-ms", "$IdleMs",
   "--load-timeout-ms", "$LoadTimeoutMs",
   "--rect-timeout-ms", "$RectTimeoutMs",
-  "--open-timeout-ms", "$OpenTimeoutMs")
+  "--open-timeout-ms", "$OpenTimeoutMs",
+  "--process-timeout-ms", "$ProcessTimeoutMs",
+  "--chunk-timeout-ms", "$ChunkTimeoutMs",
+  "--process-blocks", "$ProcessBlocks",
+  "--process-sleep-ms", "$ProcessSleepMs",
+  "--sample-rate", "$SampleRate",
+  "--block-size", "$BlockSize",
+  "--callback-delay-ms", "$CallbackDelayMs",
+  "--get-time-delay-ms", "$GetTimeDelayMs",
+  "--gate-delay-ms", "$GateDelayMs")
 
 Write-Host "probe_exe=$probeExe"
 Write-Host "vst_path=$VstPath"
@@ -47,7 +91,25 @@ Write-Host "parent_mode=$Parent"
 Write-Host "load_thread_mode=$LoadThread"
 Write-Host "rect_thread_mode=$RectThread"
 Write-Host "open_thread_mode=$OpenThread"
+Write-Host "process_thread_mode=$ProcessThread"
+Write-Host "chunk_thread_mode=$ChunkThread"
 Write-Host "open_editor=" + ($(if ($OpenEditor) { 1 } else { 0 }))
+Write-Host "activate=" + ($(if ($Activate) { 1 } else { 0 }))
+Write-Host "get_chunk=" + ($(if ($GetChunk) { 1 } else { 0 }))
+Write-Host "set_chunk=" + ($(if ($SetChunk) { 1 } else { 0 }))
+Write-Host "chunk_during_process=" + ($(if ($ChunkDuringProcess) { 1 } else { 0 }))
+Write-Host "open_during_process=" + ($(if ($OpenDuringProcess) { 1 } else { 0 }))
+Write-Host "editor_chunk_during_process=" + ($(if ($EditorChunkDuringProcess) { 1 } else { 0 }))
+Write-Host "bridge_host_mode=" + ($(if ($BridgeHostMode) { 1 } else { 0 }))
+Write-Host "bridge_gate_mode=" + ($(if ($BridgeGateMode) { 1 } else { 0 }))
+Write-Host "bridge_marshal_mode=" + ($(if ($BridgeMarshalMode) { 1 } else { 0 }))
+Write-Host "async_open_marshal_mode=" + ($(if ($AsyncOpenMarshalMode) { 1 } else { 0 }))
+Write-Host "process_blocks=$ProcessBlocks"
+Write-Host "sample_rate=$SampleRate"
+Write-Host "block_size=$BlockSize"
+Write-Host "callback_delay_ms=$CallbackDelayMs"
+Write-Host "get_time_delay_ms=$GetTimeDelayMs"
+Write-Host "gate_delay_ms=$GateDelayMs"
 
 & $probeExe @args
 $exitCode = $LASTEXITCODE

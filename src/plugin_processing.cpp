@@ -123,7 +123,7 @@ clap_process_status plugin_process(const clap_plugin_t *plugin,
                        frames, midi_idx, param_idx, shm_load_acquire(&ctrl->state));
     shm_store_release(&ctrl->state, SHM_STATE_PROCESS_REQUESTED);
 
-    uint64_t deadline = GetTickCount64() + 100;
+    uint64_t deadline = GetTickCount64() + 2;
     bool done = false;
     while (GetTickCount64() < deadline) {
         uint32_t state = shm_load_acquire(&ctrl->state);
@@ -131,7 +131,7 @@ clap_process_status plugin_process(const clap_plugin_t *plugin,
             done = true;
             break;
         }
-        Sleep(0);
+        SwitchToThread();
     }
 
     keepsake_debug_log("keepsake: process wait done=%d final_state=%u\n",
@@ -240,5 +240,27 @@ const void *plugin_get_extension(const clap_plugin_t *plugin, const char *id) {
 }
 
 void plugin_on_main_thread(const clap_plugin_t *plugin) {
-    sync_async_init(get(plugin));
+    auto *kp = get(plugin);
+    sync_async_init(kp);
+    if (!kp->editor_open_pending || kp->crashed || !kp->bridge_ok || !kp->shm.ptr) return;
+
+    auto *ctrl = shm_control(kp->shm.ptr);
+    uint32_t editor_state = shm_load_acquire(&ctrl->editor_state);
+    if (editor_state == SHM_EDITOR_OPEN) {
+        keepsake_debug_log("keepsake: editor pending complete instance=%u\n",
+                           kp->instance_id);
+        gui_complete_pending_open(kp);
+    } else if (editor_state == SHM_EDITOR_OPENING) {
+        if (kp->host && kp->host->request_callback) {
+            kp->host->request_callback(kp->host);
+        }
+    } else {
+        keepsake_debug_log("keepsake: editor pending terminal state=%u instance=%u\n",
+                           editor_state, kp->instance_id);
+        if (kp->bridge && platform_process_alive(kp->bridge->proc)) {
+            abandon_bridge(kp, "pending editor open failed");
+        } else {
+            kp->crashed = true;
+        }
+    }
 }

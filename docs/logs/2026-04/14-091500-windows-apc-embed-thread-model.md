@@ -787,6 +787,343 @@ Next task: validate the deferred staged-open architecture against Serum and the
 existing Windows smoke lanes, then reduce the temporary investigation logging
 once the cross-plugin checks stay stable.
 
+## Follow-up: Standalone Probe Expansion Result
+
+The standalone Windows VST2 probe was expanded on `2026-04-14` so it can now
+exercise more than just load + editor open. It now supports:
+
+- activation (`effSetSampleRate`, `effSetBlockSize`, `effMainsChanged`)
+- chunk read/write (`effGetChunk`, `effSetChunk`)
+- simple processing (`processReplacing`)
+- a small overlap case where chunk read happens while processing is active
+
+Primary purpose:
+
+- stop debugging inside the full REAPER + CLAP + bridge lifecycle when we need
+  to answer smaller host-behavior questions first
+- establish which combinations are safe in a tiny VeSTige host before
+  reintroducing bridge complexity
+
+Observed results in the expanded standalone host:
+
+- Serum:
+  - `open_editor + activate + get_chunk + set_chunk + process` all succeeded
+  - `chunk_during_process` also succeeded
+- APC:
+  - `open_editor + activate + get_chunk + set_chunk + process` all succeeded
+  - `chunk_during_process` also succeeded
+
+Important interpretation:
+
+- The tiny host still does **not** reproduce the catastrophic REAPER lockup,
+  even when we overlap state (`effGetChunk`) and active processing.
+- Both plugins repeatedly query `audioMasterGetTime` during processing in this
+  standalone host too, and that alone is not enough to break them.
+- That strongly reinforces the current hypothesis that the dangerous behavior
+  is introduced by the higher-level REAPER/CLAP/bridge lifecycle rather than
+  by basic VST2 hosting primitives themselves.
+
+Practical consequence:
+
+- The standalone harness is now a good proving ground for the next smaller
+  experiment instead of continuing to thrash inside the full host path.
+- The next useful extension is not more window-debugging; it is a closer
+  miniature of the REAPER failure shape, such as overlapping editor-open,
+  processing, and state access in a controlled sequence.
+
+Next task: extend the standalone probe with one or two explicit "editor +
+processing + chunk overlap" scenarios so we can see which minimal combination
+starts to resemble the REAPER lockup before we touch the main bridge again.
+
+## Follow-up: Editor-In-The-Loop Probe Result
+
+The standalone probe was extended again on `2026-04-14` with two more explicit
+overlap scenarios:
+
+- `open_during_process`
+  - start processing first
+  - then call `effEditOpen()` while processing is already active
+- `editor_chunk_during_process`
+  - open the editor first
+  - then overlap active processing with `effGetChunk()`
+
+Observed results:
+
+- Serum:
+  - `open_during_process` succeeded
+  - `editor_chunk_during_process` succeeded
+- APC:
+  - `open_during_process` succeeded
+  - `editor_chunk_during_process` succeeded
+
+Important interpretation:
+
+- Even the more REAPER-like miniature scenarios still do **not** reproduce the
+  catastrophic host lockup.
+- Both plugins continue to spam `audioMasterGetTime` during processing in these
+  runs, and that still is not sufficient to break them.
+- That means the dangerous behavior now looks even less like a raw
+  "VST2 plugin cannot tolerate editor/process/state overlap" problem and more
+  like a specific interaction introduced by the full Keepsake bridge path,
+  host callback surface, or CLAP/REAPER lifecycle integration.
+
+Practical consequence:
+
+- The standalone harness has now ruled out a larger slice of the obvious
+  overlap theories.
+- The next useful standalone extension would be a miniature closer to bridge
+  semantics rather than plain host semantics, such as adding a coarse
+  request/response boundary or delayed host callback behavior to see whether
+  the lockup requires the extra IPC-style timing we introduce in Keepsake.
+
+Next task: use the standalone probe to simulate a more "bridge-like" host
+surface or timing boundary, because plain in-process editor/process/chunk
+overlap is still not enough to reproduce the REAPER failure.
+
+## Follow-up: Bridge-Gate Standalone Probe Result
+
+The standalone probe was extended again on `2026-04-14` with a coarse
+"bridge gate" mode:
+
+- all plugin entry points used by the probe now optionally pass through one
+  serialized timed gate
+- the same runs can also enable the earlier bridge-like callback surface:
+  - `audioMasterGetTime -> 0`
+  - bridge-like `audioMasterGetAutomationState`
+  - small callback delays
+- this gives the tiny host a much closer approximation of the bridge's
+  "one owned call boundary plus extra latency" behavior without dragging
+  REAPER or CLAP back into the experiment
+
+Representative commands:
+
+- `tools/windows-vst2-probe.ps1 "C:\Program Files\Common Files\VST2\Serum_x64.dll" -OpenEditor -Activate -OpenDuringProcess -ProcessBlocks 200 -ProcessSleepMs 1 -BridgeHostMode -BridgeGateMode -CallbackDelayMs 2 -GetTimeDelayMs 2 -GateDelayMs 2`
+- `tools/windows-vst2-probe.ps1 "C:\Program Files\Ample Sound\APC.dll" -OpenEditor -Activate -OpenDuringProcess -ProcessBlocks 200 -ProcessSleepMs 1 -BridgeHostMode -BridgeGateMode -CallbackDelayMs 2 -GetTimeDelayMs 2 -GateDelayMs 2`
+- `tools/windows-vst2-probe.ps1 "C:\Program Files\Common Files\VST2\Serum_x64.dll" -OpenEditor -Activate -EditorChunkDuringProcess -GetChunk -ProcessBlocks 200 -ProcessSleepMs 1 -BridgeHostMode -BridgeGateMode -CallbackDelayMs 2 -GetTimeDelayMs 2 -GateDelayMs 2`
+- `tools/windows-vst2-probe.ps1 "C:\Program Files\Ample Sound\APC.dll" -OpenEditor -Activate -EditorChunkDuringProcess -GetChunk -ProcessBlocks 200 -ProcessSleepMs 1 -BridgeHostMode -BridgeGateMode -CallbackDelayMs 2 -GetTimeDelayMs 2 -GateDelayMs 2`
+
+Observed results:
+
+- Serum:
+  - `open_during_process` still succeeded
+  - `editor_chunk_during_process` still succeeded
+- APC:
+  - `open_during_process` still succeeded
+  - `editor_chunk_during_process` still succeeded
+
+Important interpretation:
+
+- Even after adding both:
+  - a bridge-like host callback surface
+  - a coarse serialized call gate with extra delay
+- the tiny host still does **not** reproduce the catastrophic REAPER lockup.
+- That makes the problem look even less like "basic plugin overlap plus a bit
+  of latency" and more like a higher-level bridge integration issue:
+  - cross-process request/response ownership
+  - CLAP/REAPER callback ordering
+  - host-side waits interacting with bridge-side waits
+
+Practical consequence:
+
+- The standalone harness has now ruled out another plausible class of causes.
+- The next useful miniature is no longer just "more latency" or "more mutex";
+  it needs to model an actual command boundary:
+  - one thread acting like the host issuing synchronous requests
+  - another thread acting like the plugin side servicing them
+  - explicit waits around open/process/chunk so we can see whether the failure
+    shape only appears once requests have to cross a real rendezvous boundary
+
+Next task: extend the standalone probe with a tiny request/response command
+loop so editor/process/chunk calls can be marshalled across a fake bridge
+boundary, because plain in-process serialization plus callback delay is still
+not enough to reproduce the REAPER failure.
+
+## Follow-up: Marshalled Command-Boundary Probe Result
+
+The standalone probe was extended again on `2026-04-14` with a tiny
+fake-bridge command loop:
+
+- one service thread owns the VST instance
+- the host thread sends synchronous requests to that service thread
+- representative commands:
+  - `query_rect`
+  - `open_editor`
+  - `process`
+  - `get_chunk`
+- this is intentionally much closer to the real bridge shape than the earlier
+  "same process + mutex" experiments
+
+The same bridge-like host surface was kept enabled:
+
+- `audioMasterGetTime -> 0`
+- callback delays
+- optional serialized gate inside the service thread
+
+Observed results:
+
+- `open_during_process`:
+  - Serum succeeded
+  - APC succeeded
+- `editor_chunk_during_process`:
+  - Serum hit a host-side command timeout waiting for `open_editor`
+  - APC hit the same host-side command timeout waiting for `open_editor`
+  - in both cases, the service thread later logged `effEditOpen result=1`
+    after about `4.0-4.6 s`
+
+Important interpretation:
+
+- This is the **first** standalone result that meaningfully diverges from the
+  plain in-process probe.
+- The plugin is not hard-deadlocking in the miniature:
+  - `effEditOpen()` eventually returns success
+- but the synchronous rendezvous boundary materially changes the timing:
+  - editor open becomes slow enough that a host-side wait budget can expire
+    even though the plugin itself eventually completes
+- That is much closer to the real bridge failure shape than anything the probe
+  had shown earlier.
+
+Why this matters:
+
+- It suggests the dangerous part may be less "plugin wedges forever" and more
+  "host waits synchronously across a command boundary while the bridge-side
+  editor open takes longer than expected"
+- Once the host has already timed out or changed state, the later bridge-side
+  success may be too late and can poison the lifecycle
+
+Practical consequence:
+
+- The probe now supports the core architectural suspicion:
+  - the rendezvous boundary itself is part of the problem
+  - not just VST2 overlap, callback shape, or a local mutex
+- This makes the next standalone experiment very concrete:
+  - compare command-boundary open latency with and without child HWND creation
+  - compare "open first" vs "query chunk first" vs "show/idle before open"
+  - identify which part of the boundary is stretching `effEditOpen()` from
+    sub-second to multi-second behavior
+
+Next task: use the marshalled probe to isolate why `effEditOpen()` becomes a
+4-4.6 s operation once it crosses the fake bridge boundary, because that is
+the first miniature result that actually resembles the real bridge timing
+problem.
+
+## Follow-up: Plain Marshalled Open Result
+
+The marshalled probe was tightened again on `2026-04-15`:
+
+- pending and completed command state were split so a timed-out host request
+  can no longer corrupt the next queued request
+- this made the plain `open_editor` case trustworthy in marshal mode
+
+Observed results with:
+
+- `--open-editor --activate --bridge-host-mode --bridge-gate-mode --bridge-marshal-mode`
+- `--callback-delay-ms 2 --get-time-delay-ms 2 --gate-delay-ms 2`
+
+APC:
+
+- `effEditGetRect` completed in about `1.7 s`
+- plain marshalled `open_editor` timed out host-side after `9.0 s`
+- the service thread later logged:
+  - `effEditOpen 9078.9 ms result=1`
+- meaning APC eventually completed editor open, but only after the host-side
+  synchronous wait had already expired
+
+Serum:
+
+- `effEditGetRect` still completed quickly (`3.4 ms`)
+- plain marshalled `open_editor` timed out host-side after `11.0 s`
+- unlike APC, no later `effEditOpen result=1` line appeared even after an
+  additional observation window
+- practical reading: Serum appears to stay stuck once plain editor open crosses
+  the fake bridge boundary
+
+Important interpretation:
+
+- We no longer need process/chunk overlap to reproduce the timing hazard.
+- A **plain synchronous editor-open request across the fake bridge boundary**
+  is enough to trigger the bad shape:
+  - APC: "late success after host timeout"
+  - Serum: "host timeout with no observed completion"
+- That is much closer to the real Keepsake/REAPER failures than any earlier
+  standalone experiment.
+
+Practical consequence:
+
+- The core danger now looks architectural:
+  - synchronous host-side waits for editor open across a rendezvous boundary
+    are inherently unsafe for these plugins
+- This supports the broader design rule the user cares about:
+  - Keepsake must not let the host block on bridge-side editor open
+
+Next task: extend the standalone probe one more step to model the safer design
+we probably need in Keepsake: fire editor-open asynchronously across the fake
+bridge boundary and let the host observe completion later, instead of waiting
+inside the request path.
+
+## Follow-up: Async Marshalled Open Result
+
+The standalone probe was extended again on `2026-04-15` with an async open
+mode across the fake bridge boundary:
+
+- the host thread posts an `OpenEditorAsync` command
+- the service thread still performs the real `effEditOpen()` itself
+- the host does **not** synchronously wait for the open request to return
+- instead it polls shared completion state during an observation window
+
+Representative commands:
+
+- `tools/windows-vst2-probe.ps1 "C:\Program Files\Ample Sound\APC.dll" -OpenEditor -Activate -BridgeHostMode -BridgeGateMode -BridgeMarshalMode -AsyncOpenMarshalMode -CallbackDelayMs 2 -GetTimeDelayMs 2 -GateDelayMs 2 -IdleMs 15000 -OpenTimeoutMs 9000`
+- `tools/windows-vst2-probe.ps1 "C:\Program Files\Common Files\VST2\Serum_x64.dll" -OpenEditor -Activate -BridgeHostMode -BridgeGateMode -BridgeMarshalMode -AsyncOpenMarshalMode -CallbackDelayMs 2 -GetTimeDelayMs 2 -GateDelayMs 2 -IdleMs 15000 -OpenTimeoutMs 9000`
+
+Observed results:
+
+APC:
+
+- async open was posted immediately
+- service thread logged:
+  - `effEditOpen 312.7 ms result=1`
+- host observed:
+  - `open_completed=1`
+  - `open_result=1`
+
+Serum:
+
+- async open was posted immediately
+- service thread logged:
+  - `effEditOpen 710.9 ms result=1`
+- host observed:
+  - `open_completed=1`
+  - `open_result=1`
+
+Important interpretation:
+
+- Once the host stopped synchronously waiting inside the request path, the
+  fake bridge boundary no longer produced the catastrophic timing shape.
+- Both plugins completed editor open successfully across the same artificial
+  boundary that previously caused:
+  - APC late success after host timeout
+  - Serum apparent stuck open with host timeout
+- This is the strongest miniature confirmation so far that the unsafe piece is
+  the **synchronous host-side wait on bridge-side editor open**, not merely the
+  existence of a bridge boundary by itself.
+
+One caveat:
+
+- the follow-up `CloseEditor` command still timed out in this async probe lane,
+  so the miniature is not yet fully tidy
+- but that does not change the main result: async host behavior removed the bad
+  open-path timing shape
+
+Practical consequence:
+
+- The safer Keepsake architecture now has direct probe support:
+  - do not let the host block synchronously on bridge-side editor open
+  - request editor open, return to the host, and observe completion later
+
+Next task: translate this probe result back into Keepsake by redesigning the
+Windows GUI/editor-open path so the host never waits synchronously for bridge
+editor open to finish.
+
 ## Follow-up: Serum Validation Result
 
 The deferred staged-open architecture also held up on Serum in REAPER.
@@ -819,3 +1156,56 @@ Meaning:
 Next task: keep APC + Serum as the primary Windows GUI regressions, then trim
 the temporary investigation logging to a smaller persistent set while
 preserving the new staged/deferred embedded-open architecture.
+
+## Follow-up: Host-Safe And Playable Smoke Result
+
+The next Windows bridge change removed the audio starvation that still remained
+after the host-safety work.
+
+Key bridge change:
+
+- in `src/bridge_loader_vst2.cpp`, audio-side `effProcessEvents` and
+  `processReplacing` no longer wait behind the same `effect_mutex` while
+  `effEditOpen()` is already in progress
+- this is intentionally narrow to the editor-open window
+
+Meaning:
+
+- the host-side safety work already prevented REAPER from locking up
+- but the bridge was still "safe but silent" because the editor-open path
+  starved audio processing
+- allowing audio-side VST2 calls to keep flowing during `effEditOpen()`
+  removed that starvation in the smoke harness
+
+Serial smoke evidence on the fresh build:
+
+- Serum transport/audio:
+  - `C:\Users\betterthanclay\AppData\Local\Temp\keepsake-reaper-smoke.52ced3029084485180e6f61695790976`
+  - `audio-peak max=0.331733 saw_audio=1`
+  - overall `PASS`
+- APC transport/audio:
+  - `C:\Users\betterthanclay\AppData\Local\Temp\keepsake-reaper-smoke.c3878bc7080447c3b918f0a5edef6285`
+  - `audio-peak max=0.376650 saw_audio=1`
+  - overall `PASS`
+- installed-path serial sanity:
+  - Serum transport/audio:
+    - `C:\Users\betterthanclay\AppData\Local\Temp\keepsake-reaper-smoke.8c6c2b026d8c43108e3c3daab4807c6c`
+    - `PASS`
+  - APC open/close:
+    - `C:\Users\betterthanclay\AppData\Local\Temp\keepsake-reaper-smoke.e10976c9cc774f8ba0f4253745296625`
+    - `PASS`
+
+Important caution:
+
+- some earlier APC/Serum scan-timeout artifacts were produced by parallel smoke
+  runs and should not be treated as trusted evidence
+- the serial runs above are the trustworthy ones
+
+Current status:
+
+- the Windows smoke lane is now both host-safe and playable for APC and Serum
+- however, manual REAPER still needs fresh confirmation because there was still
+  a user-reported immediate Serum lockup before this checkpoint
+
+Next task: validate the exact same installed build in a manual REAPER session,
+then continue investigating any remaining manual-only mismatch from there.

@@ -173,6 +173,7 @@ int main(int argc, char *argv[]) {
         case IPC_OP_SET_CHUNK:  handle_set_chunk(inst, payload); break;
         case IPC_OP_EDITOR_OPEN:
             if (inst->loader && inst->loader->has_editor()) {
+                gui_set_status_shm(inst->shm.ptr);
                 EditorHeaderInfo hdr;
                 hdr.format = "VST2";
 #if defined(__x86_64__)
@@ -206,6 +207,7 @@ int main(int argc, char *argv[]) {
             }
             break;
         case IPC_OP_EDITOR_CLOSE:
+            gui_set_status_shm(inst->shm.ptr);
             gui_close_editor(inst->loader);
             ipc_write_ok(g_pipe_out);
             break;
@@ -224,8 +226,17 @@ int main(int argc, char *argv[]) {
             }
             break;
         case IPC_OP_EDITOR_GET_RECT: handle_editor_get_rect(inst); break;
+        case IPC_OP_EDITOR_GET_STATUS: {
+            bool open = false;
+            bool pending = false;
+            gui_get_editor_status(open, pending);
+            IpcEditorStatus status = { open ? 1u : 0u, pending ? 1u : 0u };
+            ipc_write_ok(g_pipe_out, &status, sizeof(status));
+            break;
+        }
         case IPC_OP_EDITOR_SET_PARENT:
             if (inst->loader && payload.size() >= 8) {
+                gui_set_status_shm(inst->shm.ptr);
                 uint64_t handle;
                 memcpy(&handle, payload.data(), 8);
                 keepsake_debug_log("bridge: EDITOR_SET_PARENT handle=%p instance=%u\n",

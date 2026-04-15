@@ -105,6 +105,14 @@ bool gui_open_editor_embedded(BridgeLoader *loader, uint64_t native_handle) {
     return true;
 }
 
+bool gui_stage_editor_parent(BridgeLoader *, uint64_t) { return false; }
+bool gui_has_pending_work() { return false; }
+void gui_get_editor_status(bool &open, bool &pending) {
+    open = g_editor_open;
+    pending = false;
+}
+void gui_set_status_shm(void *) {}
+
 void gui_set_editor_transient(uint64_t) {}
 
 void gui_close_editor(BridgeLoader *loader) {

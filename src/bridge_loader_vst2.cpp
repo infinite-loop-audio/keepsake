@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 
 // --- VeSTige loader ---
 
@@ -35,6 +36,7 @@ class Vst2Loader : public BridgeLoader {
     bool editor_rect_cached = false;
     int cached_editor_w = 0;
     int cached_editor_h = 0;
+    std::recursive_mutex effect_mutex;
 
     // MIDI queue
     static constexpr int MAX_MIDI = 512;
@@ -66,8 +68,10 @@ public:
             return false;
         }
 
-        if (effect->dispatcher)
+        if (effect->dispatcher) {
+            std::lock_guard<std::recursive_mutex> lock(effect_mutex);
             effect->dispatcher(effect, effOpen, 0, 0, nullptr, 0.0f);
+        }
 
         fprintf(stderr, "bridge/vst2: loaded — in=%d out=%d params=%d\n",
                 effect->numInputs, effect->numOutputs, effect->numParams);
@@ -92,6 +96,7 @@ public:
 
         char namebuf[256] = {}, vendorbuf[256] = {}, productbuf[256] = {};
         if (effect->dispatcher) {
+            std::lock_guard<std::recursive_mutex> lock(effect_mutex);
             effect->dispatcher(effect, effGetEffectName, 0, 0, namebuf, 0);
             effect->dispatcher(effect, effGetVendorString, 0, 0, vendorbuf, 0);
             effect->dispatcher(effect, effGetProductString, 0, 0, productbuf, 0);
@@ -115,6 +120,7 @@ public:
     void activate(double sr, uint32_t mf) override {
         s_sample_rate = sr;
         s_max_frames = mf;
+        std::lock_guard<std::recursive_mutex> lock(effect_mutex);
         effect->dispatcher(effect, effSetSampleRate, 0, 0, nullptr, static_cast<float>(sr));
         effect->dispatcher(effect, effSetBlockSize, 0, static_cast<intptr_t>(mf), nullptr, 0);
         effect->dispatcher(effect, effMainsChanged, 0, 1, nullptr, 0);
@@ -122,37 +128,59 @@ public:
     }
 
     void deactivate() override {
-        if (active && effect)
+        if (active && effect) {
+            std::lock_guard<std::recursive_mutex> lock(effect_mutex);
             effect->dispatcher(effect, effMainsChanged, 0, 0, nullptr, 0);
+        }
         active = false;
     }
 
     void process(float **inputs, int /*num_in*/, float **outputs, int /*num_out*/,
                   uint32_t num_frames) override {
+        const bool editor_open_in_progress = s_editor_open_in_progress.load();
         // Flush MIDI
         if (midi_count > 0 && effect->dispatcher) {
             struct { int n; void *r; VstEvent *e[MAX_MIDI]; } ev;
             ev.n = midi_count; ev.r = nullptr;
             for (int i = 0; i < midi_count; i++)
                 ev.e[i] = reinterpret_cast<VstEvent *>(&midi_queue[i]);
-            effect->dispatcher(effect, effProcessEvents, 0, 0, &ev, 0);
+            if (editor_open_in_progress) {
+                // Keep audio responsive while a long-running editor open is in flight.
+                effect->dispatcher(effect, effProcessEvents, 0, 0, &ev, 0);
+            } else {
+                std::lock_guard<std::recursive_mutex> lock(effect_mutex);
+                effect->dispatcher(effect, effProcessEvents, 0, 0, &ev, 0);
+            }
             midi_count = 0;
         }
-        if (effect->processReplacing)
-            effect->processReplacing(effect, inputs, outputs, static_cast<int>(num_frames));
+        if (effect->processReplacing) {
+            if (editor_open_in_progress) {
+                effect->processReplacing(effect, inputs, outputs, static_cast<int>(num_frames));
+            } else {
+                std::lock_guard<std::recursive_mutex> lock(effect_mutex);
+                effect->processReplacing(effect, inputs, outputs, static_cast<int>(num_frames));
+            }
+        }
     }
 
     void set_param(uint32_t index, float value) override {
-        if (effect->setParameter)
+        if (effect->setParameter) {
+            std::lock_guard<std::recursive_mutex> lock(effect_mutex);
             effect->setParameter(effect, static_cast<int>(index), value);
+        }
     }
 
     bool get_param_info(uint32_t index, IpcParamInfoResponse &resp) override {
         if (static_cast<int>(index) >= effect->numParams) return false;
         resp.index = index;
-        resp.current_value = effect->getParameter
-            ? effect->getParameter(effect, static_cast<int>(index)) : 0.0f;
+        if (effect->getParameter) {
+            std::lock_guard<std::recursive_mutex> lock(effect_mutex);
+            resp.current_value = effect->getParameter(effect, static_cast<int>(index));
+        } else {
+            resp.current_value = 0.0f;
+        }
         if (effect->dispatcher) {
+            std::lock_guard<std::recursive_mutex> lock(effect_mutex);
             effect->dispatcher(effect, effGetParamName, static_cast<int>(index),
                                 0, resp.name, 0);
             effect->dispatcher(effect, effGetParamLabel, static_cast<int>(index),
@@ -178,17 +206,23 @@ public:
     std::vector<uint8_t> get_chunk() override {
         if (!effect->dispatcher) return {};
         void *chunk = nullptr;
-        intptr_t size = effect->dispatcher(effect, effGetChunk, 0, 0, &chunk, 0);
+        intptr_t size = 0;
+        {
+            std::lock_guard<std::recursive_mutex> lock(effect_mutex);
+            size = effect->dispatcher(effect, effGetChunk, 0, 0, &chunk, 0);
+        }
         if (size <= 0 || !chunk) return {};
         return {static_cast<uint8_t *>(chunk),
                 static_cast<uint8_t *>(chunk) + size};
     }
 
     void set_chunk(const uint8_t *data, size_t size) override {
-        if (effect->dispatcher)
+        if (effect->dispatcher) {
+            std::lock_guard<std::recursive_mutex> lock(effect_mutex);
             effect->dispatcher(effect, effSetChunk, 0,
                                 static_cast<intptr_t>(size),
                                 const_cast<uint8_t *>(data), 0);
+        }
     }
 
     bool has_editor() override { return (effect->flags & effFlagsHasEditor) != 0; }
@@ -209,8 +243,11 @@ public:
 #endif
         keepsake_debug_log("bridge/vst2: effEditOpen begin parent=%p effect=%p thread=%lu\n",
                            parent, static_cast<void *>(effect), thread_id);
-        intptr_t result =
-            effect->dispatcher(effect, effEditOpen, 0, 0, parent, 0.0f);
+        intptr_t result = 0;
+        {
+            std::lock_guard<std::recursive_mutex> lock(effect_mutex);
+            result = effect->dispatcher(effect, effEditOpen, 0, 0, parent, 0.0f);
+        }
         keepsake_debug_log("bridge/vst2: effEditOpen end result=%lld parent=%p edit_depth=%d\n",
                            static_cast<long long>(result), parent,
                            s_editor_open_edit_depth.load());
@@ -225,13 +262,17 @@ public:
     }
 
     void close_editor() override {
-        if (effect && effect->dispatcher)
+        if (effect && effect->dispatcher) {
+            std::lock_guard<std::recursive_mutex> lock(effect_mutex);
             effect->dispatcher(effect, effEditClose, 0, 0, nullptr, 0.0f);
+        }
     }
 
     void editor_idle() override {
-        if (effect && effect->dispatcher)
+        if (effect && effect->dispatcher) {
+            std::lock_guard<std::recursive_mutex> lock(effect_mutex);
             effect->dispatcher(effect, effEditIdle, 0, 0, nullptr, 0.0f);
+        }
     }
 
     bool get_editor_rect(int &w, int &h) override {
@@ -258,8 +299,10 @@ public:
                            0UL,
 #endif
                            w, h);
-        if (effect->dispatcher)
+        if (effect->dispatcher) {
+            std::lock_guard<std::recursive_mutex> lock(effect_mutex);
             effect->dispatcher(effect, effEditGetRect, 0, 0, &rect, 0);
+        }
         keepsake_debug_log("bridge/vst2: effEditGetRect end rect=%p\n",
                            static_cast<void *>(rect));
         if (!rect) return false;
@@ -281,6 +324,7 @@ public:
 
     void close() override {
         if (effect) {
+            std::lock_guard<std::recursive_mutex> lock(effect_mutex);
             if (active)
                 effect->dispatcher(effect, effMainsChanged, 0, 0, nullptr, 0);
             effect->dispatcher(effect, effClose, 0, 0, nullptr, 0);

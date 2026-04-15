@@ -8,6 +8,9 @@ bool keepsake_state_save(const clap_plugin_t *plugin,
                           const clap_ostream_t *stream) {
     auto *kp = get(plugin);
     if (kp->crashed || !kp->bridge_ok) return false;
+    if (kp->processing || kp->editor_open || kp->editor_open_pending) {
+        return false;
+    }
 
     std::vector<uint8_t> chunk_data;
     if (!send_and_wait(kp, IPC_OP_GET_CHUNK, nullptr, 0, &chunk_data))
@@ -29,6 +32,9 @@ bool keepsake_state_load(const clap_plugin_t *plugin,
                           const clap_istream_t *stream) {
     auto *kp = get(plugin);
     if (kp->crashed || !kp->bridge_ok) return false;
+    if (kp->processing || kp->editor_open || kp->editor_open_pending) {
+        return false;
+    }
 
     uint32_t size = 0;
     if (stream->read(stream, &size, sizeof(size)) != sizeof(size))
