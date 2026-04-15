@@ -72,6 +72,9 @@ struct KeepsakePlugin {
     int32_t editor_height = 0;
     int32_t last_requested_gui_width = 0;
     int32_t last_requested_gui_height = 0;
+    uint32_t last_seen_editor_resize_serial = 0;
+    bool saw_direct_editor_resize = false;
+    uint64_t last_direct_resize_request_ms = 0;
     uint64_t last_gui_poll_ms = 0;
     uint64_t last_host_resize_request_ms = 0;
     std::atomic<bool> gui_callback_requested{false};

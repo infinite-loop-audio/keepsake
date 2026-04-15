@@ -280,6 +280,9 @@ struct ShmTransportInfo {
 struct ShmProcessControl {
     volatile uint32_t state;       // SHM_STATE_*
     volatile uint32_t editor_state; // SHM_EDITOR_*
+    volatile uint32_t editor_resize_serial; // increments when plugin requests a new size
+    int32_t editor_resize_width;
+    int32_t editor_resize_height;
     uint32_t num_frames;           // frames to process this cycle
     uint32_t midi_count;           // number of MIDI events this cycle
     uint32_t param_count;          // number of param changes this cycle
@@ -297,6 +300,9 @@ struct ShmProcessControl {
 static inline bool shm_init_sync(ShmProcessControl *ctrl) {
     ctrl->state = SHM_STATE_IDLE;
     ctrl->editor_state = SHM_EDITOR_CLOSED;
+    ctrl->editor_resize_serial = 0;
+    ctrl->editor_resize_width = 0;
+    ctrl->editor_resize_height = 0;
 #ifndef _WIN32
     pthread_mutexattr_t mattr;
     pthread_mutexattr_init(&mattr);

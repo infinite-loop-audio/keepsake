@@ -30,6 +30,7 @@ bool gui_stage_editor_parent(BridgeLoader *loader, uint64_t native_handle);
 bool gui_has_pending_work();
 void gui_get_editor_status(bool &open, bool &pending);
 void gui_set_status_shm(void *shm_ptr);
+void gui_publish_resize_request(int width, int height);
 
 // Set the transient/owner window for a floating editor.
 void gui_set_editor_transient(uint64_t native_handle);

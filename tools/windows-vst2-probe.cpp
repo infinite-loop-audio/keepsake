@@ -37,6 +37,8 @@ struct ProbeOptions {
     bool bridge_gate_mode = false;
     bool bridge_marshal_mode = false;
     bool async_open_marshal_mode = false;
+    bool host_resize_sweep = false;
+    bool host_resize_child = false;
     ParentMode parent_mode = ParentMode::Child;
     ThreadMode load_thread_mode = ThreadMode::Current;
     ThreadMode rect_thread_mode = ThreadMode::Current;
@@ -56,6 +58,7 @@ struct ProbeOptions {
     int callback_delay_ms = 0;
     int get_time_delay_ms = 0;
     int gate_delay_ms = 0;
+    int resize_step_ms = 400;
 };
 
 struct HostConfig {
@@ -67,6 +70,10 @@ struct HostConfig {
 
 HostConfig g_host_config;
 std::timed_mutex g_bridge_gate;
+HWND g_host_resize_target = nullptr;
+HWND g_host_resize_top = nullptr;
+int g_host_resize_last_w = 0;
+int g_host_resize_last_h = 0;
 
 struct ProbeState {
     AEffect *effect = nullptr;
@@ -250,6 +257,33 @@ intptr_t __cdecl host_callback(
         }
         break;
     case audioMasterSizeWindow:
+        if (g_host_resize_target) {
+            int width = index;
+            int height = static_cast<int>(value);
+            g_host_resize_last_w = width;
+            g_host_resize_last_h = height;
+            if (g_host_resize_top && g_host_resize_top != g_host_resize_target) {
+                RECT child_rect = {};
+                GetWindowRect(g_host_resize_target, &child_rect);
+                RECT top_rect = {};
+                GetWindowRect(g_host_resize_top, &top_rect);
+                int extra_w = (top_rect.right - top_rect.left) - (child_rect.right - child_rect.left);
+                int extra_h = (top_rect.bottom - top_rect.top) - (child_rect.bottom - child_rect.top);
+                MoveWindow(g_host_resize_target, 0, 0, width, height, TRUE);
+                MoveWindow(g_host_resize_top,
+                           top_rect.left,
+                           top_rect.top,
+                           width + extra_w,
+                           height + extra_h,
+                           TRUE);
+            } else {
+                MoveWindow(g_host_resize_target, 0, 0, width, height, TRUE);
+            }
+            std::printf("[host-resize] audioMasterSizeWindow request=%dx%d target=%p top=%p\n",
+                        width, height, g_host_resize_target, g_host_resize_top);
+        }
+        result = 1;
+        break;
     case audioMasterUpdateDisplay:
     case audioMasterBeginEdit:
     case audioMasterEndEdit:
@@ -281,6 +315,48 @@ LRESULT CALLBACK ProbeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_DESTROY: return 0;
     default: return DefWindowProcA(hwnd, msg, wParam, lParam);
     }
+}
+
+BOOL CALLBACK LogChildWindowsProc(HWND hwnd, LPARAM lParam) {
+    int depth = static_cast<int>(lParam);
+    char class_name[128] = {};
+    GetClassNameA(hwnd, class_name, static_cast<int>(sizeof(class_name)));
+    RECT rect = {};
+    GetWindowRect(hwnd, &rect);
+    RECT client = {};
+    GetClientRect(hwnd, &client);
+    std::printf("[window-tree] depth=%d hwnd=%p class='%s' rect=%ld,%ld,%ld,%ld client=%ldx%ld visible=%d\n",
+                depth,
+                hwnd,
+                class_name,
+                rect.left, rect.top, rect.right, rect.bottom,
+                client.right - client.left,
+                client.bottom - client.top,
+                IsWindowVisible(hwnd) ? 1 : 0);
+    EnumChildWindows(hwnd, LogChildWindowsProc, static_cast<LPARAM>(depth + 1));
+    return TRUE;
+}
+
+struct FirstChildSearch {
+    HWND first = nullptr;
+};
+
+BOOL CALLBACK FindFirstChildProc(HWND hwnd, LPARAM lParam) {
+    auto *search = reinterpret_cast<FirstChildSearch *>(lParam);
+    if (!search->first) search->first = hwnd;
+    return search->first ? FALSE : TRUE;
+}
+
+HWND find_first_child(HWND parent) {
+    FirstChildSearch search = {};
+    EnumChildWindows(parent, FindFirstChildProc, reinterpret_cast<LPARAM>(&search));
+    return search.first;
+}
+
+void log_window_tree(HWND root, const char *label) {
+    if (!root) return;
+    std::printf("[window-tree] label=%s root=%p\n", label, root);
+    LogChildWindowsProc(root, 0);
 }
 
 bool ensure_window_class() {
@@ -376,6 +452,8 @@ bool parse_args(int argc, char **argv, ProbeOptions &opts) {
         else if (strcmp(argv[i], "--bridge-gate-mode") == 0) opts.bridge_gate_mode = true;
         else if (strcmp(argv[i], "--bridge-marshal-mode") == 0) opts.bridge_marshal_mode = true;
         else if (strcmp(argv[i], "--async-open-marshal-mode") == 0) opts.async_open_marshal_mode = true;
+        else if (strcmp(argv[i], "--host-resize-sweep") == 0) opts.host_resize_sweep = true;
+        else if (strcmp(argv[i], "--host-resize-child") == 0) opts.host_resize_child = true;
         else if (strcmp(argv[i], "--parent") == 0 && i + 1 < argc) {
             const char *value = argv[++i];
             if (strcmp(value, "child") == 0) opts.parent_mode = ParentMode::Child;
@@ -420,6 +498,7 @@ bool parse_args(int argc, char **argv, ProbeOptions &opts) {
         else if (strcmp(argv[i], "--callback-delay-ms") == 0 && i + 1 < argc) opts.callback_delay_ms = std::atoi(argv[++i]);
         else if (strcmp(argv[i], "--get-time-delay-ms") == 0 && i + 1 < argc) opts.get_time_delay_ms = std::atoi(argv[++i]);
         else if (strcmp(argv[i], "--gate-delay-ms") == 0 && i + 1 < argc) opts.gate_delay_ms = std::atoi(argv[++i]);
+        else if (strcmp(argv[i], "--resize-step-ms") == 0 && i + 1 < argc) opts.resize_step_ms = std::atoi(argv[++i]);
         else return false;
     }
     return true;
@@ -438,8 +517,26 @@ void print_usage(const char *argv0) {
                  "       [--open-during-process] [--editor-chunk-during-process]\n"
                  "       [--bridge-host-mode] [--callback-delay-ms N] [--get-time-delay-ms N]\n"
                  "       [--bridge-gate-mode] [--gate-delay-ms N]\n"
-                 "       [--bridge-marshal-mode] [--async-open-marshal-mode]\n",
+                 "       [--bridge-marshal-mode] [--async-open-marshal-mode]\n"
+                 "       [--host-resize-sweep] [--host-resize-child] [--resize-step-ms N]\n",
                  argv0);
+}
+
+void apply_host_resize(HWND parent, int width, int height) {
+    if (!parent) return;
+    HWND top = GetAncestor(parent, GA_ROOT);
+    if (top && top != parent) {
+        RECT parent_rect = {};
+        GetWindowRect(parent, &parent_rect);
+        RECT top_rect = {};
+        GetWindowRect(top, &top_rect);
+        int extra_w = (top_rect.right - top_rect.left) - (parent_rect.right - parent_rect.left);
+        int extra_h = (top_rect.bottom - top_rect.top) - (parent_rect.bottom - parent_rect.top);
+        MoveWindow(parent, 0, 0, width, height, TRUE);
+        MoveWindow(top, top_rect.left, top_rect.top, width + extra_w, height + extra_h, TRUE);
+    } else {
+        MoveWindow(parent, 0, 0, width, height, TRUE);
+    }
 }
 
 bool load_plugin_on_current_thread(const ProbeOptions &opts, ProbeState &state) {
@@ -610,6 +707,50 @@ void pump_messages_and_idle(const ProbeOptions &opts, ProbeState &state, int dur
             });
         }
         Sleep(16);
+    }
+}
+
+void run_host_resize_sweep(const ProbeOptions &opts, ProbeState &state, HWND parent, int base_width, int base_height) {
+    if (!parent) return;
+    const int widths[] = {
+        base_width,
+        base_width + (base_width / 4),
+        base_width + (base_width / 2),
+        base_width + (base_width / 8),
+        base_width
+    };
+    const int heights[] = {
+        base_height,
+        base_height + (base_height / 6),
+        base_height + (base_height / 3),
+        base_height + (base_height / 10),
+        base_height
+    };
+
+    for (size_t i = 0; i < sizeof(widths) / sizeof(widths[0]); ++i) {
+        int width = widths[i];
+        int height = heights[i];
+        std::printf("[host-resize] step=%zu apply=%dx%d parent=%p\n", i, width, height, parent);
+        apply_host_resize(parent, width, height);
+        if (opts.host_resize_child) {
+            HWND child = find_first_child(parent);
+            if (child) {
+                MoveWindow(child, 0, 0, width, height, TRUE);
+                SendMessageA(child, WM_SIZE, SIZE_RESTORED, MAKELPARAM(width, height));
+                std::printf("[host-resize] step=%zu child_resize=%dx%d child=%p\n", i, width, height, child);
+            }
+        }
+        pump_messages_and_idle(opts, state, opts.resize_step_ms);
+        int rect_w = 0;
+        int rect_h = 0;
+        if (query_editor_rect(opts, state, "resize-rect", rect_w, rect_h)) {
+            std::printf("[host-resize] step=%zu rect_after=%dx%d audioMasterSizeWindow_last=%dx%d\n",
+                        i, rect_w, rect_h, g_host_resize_last_w, g_host_resize_last_h);
+        } else {
+            std::printf("[host-resize] step=%zu rect_after=<none> audioMasterSizeWindow_last=%dx%d\n",
+                        i, g_host_resize_last_w, g_host_resize_last_h);
+        }
+        log_window_tree(parent, "host-resize");
     }
 }
 
@@ -1189,6 +1330,8 @@ int main(int argc, char **argv) {
     std::printf("bridge_gate_mode=%d\n", opts.bridge_gate_mode ? 1 : 0);
     std::printf("bridge_marshal_mode=%d\n", opts.bridge_marshal_mode ? 1 : 0);
     std::printf("async_open_marshal_mode=%d\n", opts.async_open_marshal_mode ? 1 : 0);
+    std::printf("host_resize_sweep=%d\n", opts.host_resize_sweep ? 1 : 0);
+    std::printf("host_resize_child=%d\n", opts.host_resize_child ? 1 : 0);
     std::printf("parent_mode=%s\n", opts.parent_mode == ParentMode::Child ? "child" : opts.parent_mode == ParentMode::Top ? "top" : "none");
     std::printf("load_thread_mode=%s\n", thread_mode_name(opts.load_thread_mode));
     std::printf("rect_thread_mode=%s\n", thread_mode_name(opts.rect_thread_mode));
@@ -1202,6 +1345,7 @@ int main(int argc, char **argv) {
     std::printf("callback_delay_ms=%d\n", opts.callback_delay_ms);
     std::printf("get_time_delay_ms=%d\n", opts.get_time_delay_ms);
     std::printf("gate_delay_ms=%d\n", opts.gate_delay_ms);
+    std::printf("resize_step_ms=%d\n", opts.resize_step_ms);
 
     g_host_config.bridge_host_mode = opts.bridge_host_mode;
     g_host_config.callback_delay_ms = opts.callback_delay_ms;
@@ -1278,9 +1422,17 @@ int main(int argc, char **argv) {
         if (opts.open_editor && !opts.open_during_process && !opts.editor_chunk_during_process) {
             HWND parent = create_parent_window(opts.parent_mode, rect_ok ? width : 640, rect_ok ? height : 480);
             std::printf("parent_hwnd=%p\n", parent);
+            g_host_resize_target = parent;
+            g_host_resize_top = parent ? GetAncestor(parent, GA_ROOT) : nullptr;
+            g_host_resize_last_w = rect_ok ? width : 640;
+            g_host_resize_last_h = rect_ok ? height : 480;
             bool open_ok = open_editor(state, parent, opts);
             std::printf("editor_open_ok=%d\n", open_ok ? 1 : 0);
             if (open_ok) {
+                log_window_tree(parent, "after-open");
+                if (opts.host_resize_sweep) {
+                    run_host_resize_sweep(opts, state, parent, rect_ok ? width : 640, rect_ok ? height : 480);
+                }
                 pump_messages_and_idle(opts, state, opts.idle_ms);
                 if (state.effect && state.effect->dispatcher) {
                     state.effect->dispatcher(state.effect, effEditClose, 0, 0, nullptr, 0.0f);
@@ -1290,6 +1442,8 @@ int main(int argc, char **argv) {
                 HWND top = GetAncestor(parent, GA_ROOT);
                 if (top) DestroyWindow(top);
             }
+            g_host_resize_target = nullptr;
+            g_host_resize_top = nullptr;
         }
 
         std::vector<uint8_t> chunk;

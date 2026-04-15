@@ -938,6 +938,18 @@ void gui_set_status_shm(void *shm_ptr) {
     g_gui_status_ctrl = shm_ptr ? shm_control(shm_ptr) : nullptr;
 }
 
+void gui_publish_resize_request(int width, int height) {
+    if (!g_gui_status_ctrl || width <= 0 || height <= 0) return;
+    g_gui_status_ctrl->editor_resize_width = width;
+    g_gui_status_ctrl->editor_resize_height = height;
+    uint32_t serial = shm_load_acquire(&g_gui_status_ctrl->editor_resize_serial);
+    shm_store_release(&g_gui_status_ctrl->editor_resize_serial, serial + 1);
+    keepsake_debug_log("bridge: published editor resize raw=%dx%d serial=%u\n",
+                       width,
+                       height,
+                       serial + 1);
+}
+
 void gui_set_editor_transient(uint64_t native_handle) {
     gui_call_sync([=]() {
         g_owner_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(native_handle));

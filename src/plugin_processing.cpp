@@ -9,13 +9,62 @@
 
 #ifdef _WIN32
 #include <windows.h>
-static const uint64_t GUI_SIZE_POLL_INTERVAL_MS = 16;
+static const uint64_t GUI_SIZE_POLL_INTERVAL_MS = 100;
 static const int GUI_EMBED_HEADER_HEIGHT = 28;
 static const uint64_t GUI_HOST_RESIZE_MIN_INTERVAL_MS = 33;
+static const uint64_t GUI_DIRECT_RESIZE_FALLBACK_SUPPRESS_MS = 500;
 #endif
 
 static void maybe_request_gui_main_thread(KeepsakePlugin *kp);
 static void request_gui_main_thread_once(KeepsakePlugin *kp);
+
+#ifdef _WIN32
+static bool maybe_apply_editor_resize_request(KeepsakePlugin *kp, ShmProcessControl *ctrl) {
+    if (!kp || !ctrl || !kp->editor_open || kp->editor_open_pending || kp->gui_is_floating ||
+        !kp->host_gui || !kp->host_gui->request_resize) {
+        return false;
+    }
+
+    const uint32_t resize_serial = shm_load_acquire(&ctrl->editor_resize_serial);
+    if (resize_serial == 0 || resize_serial == kp->last_seen_editor_resize_serial) {
+        return false;
+    }
+
+    const int32_t raw_width = ctrl->editor_resize_width;
+    const int32_t raw_height = ctrl->editor_resize_height;
+    if (raw_width <= 0 || raw_height <= 0) {
+        kp->last_seen_editor_resize_serial = resize_serial;
+        return false;
+    }
+
+    const int32_t host_width = raw_width;
+    const int32_t host_height = raw_height + GUI_EMBED_HEADER_HEIGHT;
+    const uint64_t now_ms = GetTickCount64();
+    if ((host_width == kp->last_requested_gui_width &&
+         host_height == kp->last_requested_gui_height) ||
+        (now_ms - kp->last_host_resize_request_ms < GUI_HOST_RESIZE_MIN_INTERVAL_MS)) {
+        return false;
+    }
+
+    keepsake_debug_log("keepsake: request_resize direct raw=%dx%d host=%dx%d serial=%u\n",
+                       raw_width, raw_height, host_width, host_height, resize_serial);
+    if (!kp->host_gui->request_resize(kp->host,
+                                      static_cast<uint32_t>(host_width),
+                                      static_cast<uint32_t>(host_height))) {
+        return false;
+    }
+
+    kp->editor_width = raw_width;
+    kp->editor_height = raw_height;
+    kp->last_requested_gui_width = host_width;
+    kp->last_requested_gui_height = host_height;
+    kp->saw_direct_editor_resize = true;
+    kp->last_direct_resize_request_ms = now_ms;
+    kp->last_host_resize_request_ms = now_ms;
+    kp->last_seen_editor_resize_serial = resize_serial;
+    return true;
+}
+#endif
 
 static void output_silence(const clap_process_t *process) {
     for (uint32_t i = 0; i < process->audio_outputs_count; i++) {
@@ -319,31 +368,39 @@ void plugin_on_main_thread(const clap_plugin_t *plugin) {
 #ifdef _WIN32
     if (kp->editor_open && !kp->editor_open_pending && !kp->gui_is_floating &&
         kp->host_gui && kp->host_gui->request_resize) {
-        std::vector<uint8_t> payload;
-        if (send_and_wait(kp, IPC_OP_EDITOR_GET_RECT, nullptr, 0, &payload, 10) &&
-            payload.size() >= sizeof(IpcEditorRect)) {
-            IpcEditorRect rect{};
-            memcpy(&rect, payload.data(), sizeof(rect));
-            if (rect.width > 0 && rect.height > 0 &&
-                (rect.width != kp->editor_width || rect.height != kp->editor_height)) {
-                const int32_t host_width = rect.width;
-                const int32_t host_height = rect.height + GUI_EMBED_HEADER_HEIGHT;
-                const uint64_t now_ms = GetTickCount64();
-                if ((host_width == kp->last_requested_gui_width &&
-                     host_height == kp->last_requested_gui_height) ||
-                    (now_ms - kp->last_host_resize_request_ms < GUI_HOST_RESIZE_MIN_INTERVAL_MS)) {
-                    return;
-                }
-                keepsake_debug_log("keepsake: request_resize raw=%dx%d host=%dx%d\n",
-                                   rect.width, rect.height, host_width, host_height);
-                if (kp->host_gui->request_resize(kp->host,
-                                                 static_cast<uint32_t>(host_width),
-                                                 static_cast<uint32_t>(host_height))) {
-                    kp->editor_width = rect.width;
-                    kp->editor_height = rect.height;
-                    kp->last_requested_gui_width = host_width;
-                    kp->last_requested_gui_height = host_height;
-                    kp->last_host_resize_request_ms = now_ms;
+        if (!maybe_apply_editor_resize_request(kp, ctrl)) {
+            if (kp->saw_direct_editor_resize) {
+                return;
+            }
+            const uint64_t now_ms = GetTickCount64();
+            if (now_ms - kp->last_direct_resize_request_ms < GUI_DIRECT_RESIZE_FALLBACK_SUPPRESS_MS) {
+                return;
+            }
+            std::vector<uint8_t> payload;
+            if (send_and_wait(kp, IPC_OP_EDITOR_GET_RECT, nullptr, 0, &payload, 10) &&
+                payload.size() >= sizeof(IpcEditorRect)) {
+                IpcEditorRect rect{};
+                memcpy(&rect, payload.data(), sizeof(rect));
+                if (rect.width > 0 && rect.height > 0 &&
+                    (rect.width != kp->editor_width || rect.height != kp->editor_height)) {
+                    const int32_t host_width = rect.width;
+                    const int32_t host_height = rect.height + GUI_EMBED_HEADER_HEIGHT;
+                    if ((host_width == kp->last_requested_gui_width &&
+                         host_height == kp->last_requested_gui_height) ||
+                        (now_ms - kp->last_host_resize_request_ms < GUI_HOST_RESIZE_MIN_INTERVAL_MS)) {
+                        return;
+                    }
+                    keepsake_debug_log("keepsake: request_resize polled raw=%dx%d host=%dx%d\n",
+                                       rect.width, rect.height, host_width, host_height);
+                    if (kp->host_gui->request_resize(kp->host,
+                                                     static_cast<uint32_t>(host_width),
+                                                     static_cast<uint32_t>(host_height))) {
+                        kp->editor_width = rect.width;
+                        kp->editor_height = rect.height;
+                        kp->last_requested_gui_width = host_width;
+                        kp->last_requested_gui_height = host_height;
+                        kp->last_host_resize_request_ms = now_ms;
+                    }
                 }
             }
         }
@@ -389,6 +446,13 @@ static void maybe_request_gui_main_thread(KeepsakePlugin *kp) {
 
 #ifdef _WIN32
     if (kp->editor_open && !kp->gui_is_floating) {
+        if (kp->shm.ptr) {
+            auto *ctrl = shm_control(kp->shm.ptr);
+            if (shm_load_acquire(&ctrl->editor_resize_serial) != kp->last_seen_editor_resize_serial) {
+                request_gui_main_thread_once(kp);
+                return;
+            }
+        }
         uint64_t now_ms = GetTickCount64();
         if (now_ms - kp->last_gui_poll_ms >= GUI_SIZE_POLL_INTERVAL_MS) {
             kp->last_gui_poll_ms = now_ms;

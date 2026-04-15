@@ -14,6 +14,8 @@ param(
   [switch]$BridgeGateMode,
   [switch]$BridgeMarshalMode,
   [switch]$AsyncOpenMarshalMode,
+  [switch]$HostResizeSweep,
+  [switch]$HostResizeChild,
   [ValidateSet("child", "top", "none")]
   [string]$Parent = "child",
   [ValidateSet("current", "worker")]
@@ -38,7 +40,8 @@ param(
   [int]$BlockSize = 512,
   [int]$CallbackDelayMs = 0,
   [int]$GetTimeDelayMs = 0,
-  [int]$GateDelayMs = 0
+  [int]$GateDelayMs = 0,
+  [int]$ResizeStepMs = 400
 )
 
 $ErrorActionPreference = "Stop"
@@ -65,6 +68,8 @@ if ($BridgeHostMode) { $args += "--bridge-host-mode" }
 if ($BridgeGateMode) { $args += "--bridge-gate-mode" }
 if ($BridgeMarshalMode) { $args += "--bridge-marshal-mode" }
 if ($AsyncOpenMarshalMode) { $args += "--async-open-marshal-mode" }
+if ($HostResizeSweep) { $args += "--host-resize-sweep" }
+if ($HostResizeChild) { $args += "--host-resize-child" }
 $args += @("--parent", $Parent,
   "--load-thread", $LoadThread,
   "--rect-thread", $RectThread,
@@ -83,7 +88,8 @@ $args += @("--parent", $Parent,
   "--block-size", "$BlockSize",
   "--callback-delay-ms", "$CallbackDelayMs",
   "--get-time-delay-ms", "$GetTimeDelayMs",
-  "--gate-delay-ms", "$GateDelayMs")
+  "--gate-delay-ms", "$GateDelayMs",
+  "--resize-step-ms", "$ResizeStepMs")
 
 Write-Host "probe_exe=$probeExe"
 Write-Host "vst_path=$VstPath"
@@ -104,12 +110,15 @@ Write-Host "bridge_host_mode=" + ($(if ($BridgeHostMode) { 1 } else { 0 }))
 Write-Host "bridge_gate_mode=" + ($(if ($BridgeGateMode) { 1 } else { 0 }))
 Write-Host "bridge_marshal_mode=" + ($(if ($BridgeMarshalMode) { 1 } else { 0 }))
 Write-Host "async_open_marshal_mode=" + ($(if ($AsyncOpenMarshalMode) { 1 } else { 0 }))
+Write-Host "host_resize_sweep=" + ($(if ($HostResizeSweep) { 1 } else { 0 }))
+Write-Host "host_resize_child=" + ($(if ($HostResizeChild) { 1 } else { 0 }))
 Write-Host "process_blocks=$ProcessBlocks"
 Write-Host "sample_rate=$SampleRate"
 Write-Host "block_size=$BlockSize"
 Write-Host "callback_delay_ms=$CallbackDelayMs"
 Write-Host "get_time_delay_ms=$GetTimeDelayMs"
 Write-Host "gate_delay_ms=$GateDelayMs"
+Write-Host "resize_step_ms=$ResizeStepMs"
 
 & $probeExe @args
 $exitCode = $LASTEXITCODE

@@ -3,6 +3,7 @@
 //
 
 #include "bridge_loader.h"
+#include "bridge_gui.h"
 #include "debug_log.h"
 
 #include <vestige/vestige.h>
@@ -148,7 +149,10 @@ intptr_t __cdecl vst2_host_callback(
         else result = 0;
         break;
     case audioMasterGetLanguage: result = kVstLangEnglish; break;
-    case audioMasterSizeWindow: result = 1; break;
+    case audioMasterSizeWindow:
+        gui_publish_resize_request(index, static_cast<int32_t>(value));
+        result = 1;
+        break;
     case audioMasterUpdateDisplay: result = 1; break;
     case audioMasterBeginEdit:
         s_editor_open_edit_depth.fetch_add(1);

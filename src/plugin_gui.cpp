@@ -77,6 +77,8 @@ static bool gui_refresh_size(KeepsakePlugin *kp) {
 static bool gui_open_floating(KeepsakePlugin *kp) {
     kp->gui_is_floating = true;
     kp->editor_open_pending = false;
+    kp->last_seen_editor_resize_serial = 0;
+    kp->saw_direct_editor_resize = false;
     if (kp->shm.ptr) {
         shm_store_release(&shm_control(kp->shm.ptr)->editor_state, SHM_EDITOR_CLOSED);
     }
@@ -205,6 +207,8 @@ static void gui_destroy(const clap_plugin_t *plugin) {
         kp->editor_open = false;
     }
     kp->editor_open_pending = false;
+    kp->last_seen_editor_resize_serial = 0;
+    kp->saw_direct_editor_resize = false;
     if (kp->shm.ptr) {
         shm_store_release(&shm_control(kp->shm.ptr)->editor_state, SHM_EDITOR_CLOSED);
     }
@@ -301,6 +305,8 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
                        reinterpret_cast<void *>(static_cast<uintptr_t>(handle)),
                        kp->gui_is_floating ? 1 : 0, kp->editor_open ? 1 : 0);
     kp->editor_open_pending = false;
+    kp->last_seen_editor_resize_serial = 0;
+    kp->saw_direct_editor_resize = false;
     gui_wait_for_win32_parent_ready(handle, GUI_PARENT_READY_TIMEOUT_MS);
 
     if (kp->gui_embed_failed) {
@@ -412,6 +418,8 @@ static bool gui_show(const clap_plugin_t *plugin) {
         if (kp->gui_is_floating) {
             kp->editor_open = true;
             kp->editor_open_pending = false;
+            kp->last_seen_editor_resize_serial = 0;
+            kp->saw_direct_editor_resize = false;
             if (kp->shm.ptr) {
                 shm_store_release(&shm_control(kp->shm.ptr)->editor_state, SHM_EDITOR_OPEN);
             }
@@ -436,8 +444,11 @@ void gui_complete_pending_open(KeepsakePlugin *kp) {
     kp->editor_open_pending = false;
     kp->editor_open = true;
     if (kp->shm.ptr) {
+        kp->last_seen_editor_resize_serial =
+            shm_load_acquire(&shm_control(kp->shm.ptr)->editor_resize_serial);
         shm_store_release(&shm_control(kp->shm.ptr)->editor_state, SHM_EDITOR_OPEN);
     }
+    kp->saw_direct_editor_resize = false;
 #ifdef _WIN32
     gui_resume_processing_after_editor(kp);
 #endif
@@ -457,6 +468,8 @@ static bool gui_hide(const clap_plugin_t *plugin) {
         kp->editor_open = false;
     }
     kp->editor_open_pending = false;
+    kp->last_seen_editor_resize_serial = 0;
+    kp->saw_direct_editor_resize = false;
     if (kp->shm.ptr) {
         shm_store_release(&shm_control(kp->shm.ptr)->editor_state, SHM_EDITOR_CLOSED);
     }
