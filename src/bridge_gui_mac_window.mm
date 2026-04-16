@@ -7,6 +7,7 @@
 #include "debug_log.h"
 
 #include <atomic>
+#include <cstdlib>
 #include <thread>
 #include <unistd.h>
 
@@ -242,9 +243,30 @@ static bool open_floating_editor(BridgeLoader *loader,
     return true;
 }
 
+static bool gui_mac_should_force_parentless_open(const EditorHeaderInfo &header) {
+    const char *env = std::getenv("KEEPSAKE_MAC_PARENTLESS_OPEN");
+    if (env && env[0]) {
+        if (std::strcmp(env, "1") == 0 ||
+            std::strcmp(env, "true") == 0 ||
+            std::strcmp(env, "on") == 0 ||
+            std::strcmp(env, "always") == 0) {
+            return true;
+        }
+        if (std::strcmp(env, "0") == 0 ||
+            std::strcmp(env, "false") == 0 ||
+            std::strcmp(env, "off") == 0 ||
+            std::strcmp(env, "never") == 0) {
+            return false;
+        }
+    }
+    if (header.architecture == "x64") {
+        return true;
+    }
+    return false;
+}
+
 bool gui_open_windowed_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
-    const bool use_parentless_open =
-        header.plugin_name == "Ample Percussion Cloudrum";
+    const bool use_parentless_open = gui_mac_should_force_parentless_open(header);
     if (use_parentless_open) return open_parentless_editor(loader, header);
     return open_floating_editor(loader, header);
 }
