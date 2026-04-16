@@ -445,6 +445,9 @@ void plugin_on_main_thread(const clap_plugin_t *plugin) {
         if (editor_state == SHM_EDITOR_CLOSED || editor_state == SHM_EDITOR_FAILED) {
             keepsake_debug_log("keepsake: floating editor externally closed state=%u instance=%u\n",
                                editor_state, kp->instance_id);
+            if (kp->host_gui && kp->host_gui->closed) {
+                kp->host_gui->closed(kp->host, false);
+            }
             keepsake_gui_session_mark_closed(kp);
             return;
         }

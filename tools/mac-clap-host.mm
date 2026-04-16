@@ -99,6 +99,7 @@ struct HostState {
     bool delayed_parent_attached = false;
     bool parent_swapped = false;
     std::atomic<bool> window_closed{false};
+    double last_main_thread_poll_ms = 0.0;
 };
 
 struct BitmapSample {
@@ -313,8 +314,15 @@ bool host_gui_request_hide(const clap_host_t *host) {
     return true;
 }
 
-void host_gui_closed(const clap_host_t *, bool was_destroyed) {
+void host_gui_closed(const clap_host_t *host, bool was_destroyed) {
+    auto *state = static_cast<HostState *>(host->host_data);
     log_line("[host.closed] destroyed=%d\n", was_destroyed ? 1 : 0);
+    if (!state) return;
+    state->window_closed.store(true, std::memory_order_release);
+    if (state->window) {
+        [state->window orderOut:nil];
+    }
+    [NSApp terminate:nil];
 }
 
 void init_host(HostState &state) {
@@ -492,8 +500,11 @@ void update_host_mode(HostState &host) {
 void run_callbacks(const clap_plugin_t *plugin, HostState &host) {
     pump_app_events();
     update_host_mode(host);
-    if (host.callback_requested) {
+    const bool should_poll_main_thread =
+        !host.window && (now_ms() - host.last_main_thread_poll_ms) >= 50.0;
+    if (host.callback_requested || should_poll_main_thread) {
         host.callback_requested = false;
+        host.last_main_thread_poll_ms = now_ms();
         plugin->on_main_thread(plugin);
     }
 }

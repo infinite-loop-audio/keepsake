@@ -80,6 +80,55 @@ static void clamp_parentless_plugin_window_to_visible_screen(NSWindow *window,
     }
 }
 
+static void layout_parentless_wrapped_window(NSWindow *window) {
+    if (!window || !g_editor_container || !g_header) return;
+    NSView *content = [window contentView];
+    if (!content) return;
+    const CGFloat width = NSWidth(content.bounds);
+    const CGFloat height = NSHeight(content.bounds);
+    const CGFloat editor_height = std::max<CGFloat>(0.0, height - HEADER_HEIGHT);
+    [g_header setFrame:NSMakeRect(0, 0, width, HEADER_HEIGHT)];
+    [g_editor_container setFrame:NSMakeRect(0, HEADER_HEIGHT, width, editor_height)];
+    [g_header setNeedsDisplay:YES];
+}
+
+static void install_parentless_wrapped_content(NSWindow *window,
+                                               const EditorHeaderInfo &header) {
+    if (!window) return;
+    NSView *plugin_content = [window contentView];
+    if (!plugin_content) return;
+    if (g_editor_container == plugin_content && g_header && [g_header superview] == [window contentView]) {
+        layout_parentless_wrapped_window(window);
+        return;
+    }
+
+    const NSRect plugin_frame = [plugin_content frame];
+    const CGFloat width = NSWidth(plugin_frame);
+    const CGFloat height = NSHeight(plugin_frame);
+
+    NSView *wrapper = gui_mac_make_content_view(static_cast<int>(width),
+                                                static_cast<int>(height));
+    g_editor_container = plugin_content;
+    g_header = gui_mac_make_header_view(static_cast<int>(width), header);
+
+    [g_editor_container removeFromSuperviewWithoutNeedingDisplay];
+    [wrapper addSubview:g_editor_container];
+    [wrapper addSubview:g_header];
+    [window setContentView:wrapper];
+
+    NSRect frame = [window frame];
+    NSRect content_rect = [window contentRectForFrameRect:frame];
+    const CGFloat desired_content_height = height + HEADER_HEIGHT;
+    const CGFloat delta = desired_content_height - NSHeight(content_rect);
+    if (std::fabs(delta) > 0.5) {
+        frame.size.height += delta;
+        frame.origin.y -= delta;
+        [window setFrame:frame display:YES];
+    }
+
+    layout_parentless_wrapped_window(window);
+}
+
 static NSInteger score_parentless_candidate_window(NSWindow *window) {
     if (!window) return NSIntegerMin;
     const NSRect frame = [window frame];
@@ -155,6 +204,7 @@ static void install_parentless_window_observers(NSWindow *window) {
                              queue:nil
                         usingBlock:^(__unused NSNotification *note) {
                             clamp_parentless_plugin_window_to_visible_screen(window, "did-resize");
+                            layout_parentless_wrapped_window(window);
                         }];
     g_parentless_window_did_move_observer =
         [center addObserverForName:NSWindowDidMoveNotification
@@ -177,12 +227,13 @@ static void style_parentless_plugin_window(NSWindow *window,
                                            const EditorHeaderInfo &header) {
     if (!window) return;
 
-    const char *presentation = header.presentation.empty()
-        ? "Editor"
-        : header.presentation.c_str();
-    NSString *title = [NSString stringWithFormat:@"Keepsake %s — %s",
-                       presentation,
-                       header.plugin_name.c_str()];
+    NSString *plugin_name = [NSString stringWithUTF8String:header.plugin_name.c_str()];
+    NSString *format = [NSString stringWithUTF8String:header.format.c_str()];
+    NSString *arch = [NSString stringWithUTF8String:header.architecture.c_str()];
+    NSString *presentation = [NSString stringWithUTF8String:
+        (header.presentation.empty() ? "Editor" : header.presentation.c_str())];
+    NSString *title = [NSString stringWithFormat:@"Keepsake %@ — %@ [%@ • %@]",
+                       presentation, plugin_name, format, arch];
     [window setTitle:title];
 
     NSWindowStyleMask mask = [window styleMask];
@@ -205,6 +256,7 @@ static void style_parentless_plugin_window(NSWindow *window,
         [window center];
     }
     install_window_close_button_handler(window);
+    install_parentless_wrapped_content(window, header);
     clamp_parentless_plugin_window_to_visible_screen(window, "style");
 
     [NSApp activateIgnoringOtherApps:YES];
