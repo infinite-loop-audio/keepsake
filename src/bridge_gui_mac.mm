@@ -3,6 +3,10 @@
 #include "debug_log.h"
 #include "ipc.h"
 
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+
 NSWindow *g_window = nil;
 NSWindow *g_parentless_plugin_window = nil;
 NSView *g_header = nil;
@@ -20,6 +24,68 @@ static bool g_last_window_key = false;
 static bool g_last_window_main = false;
 static id g_app_did_become_active_observer = nil;
 static id g_app_did_resign_active_observer = nil;
+static uint64_t g_last_editor_idle_us = 0;
+static uint64_t g_last_periodic_capture_us = 0;
+static uint64_t g_last_burst_capture_us = 0;
+static int g_capture_burst_remaining = 0;
+
+static bool gui_env_flag_enabled(const char *name, bool default_value) {
+    const char *value = std::getenv(name);
+    if (!value || !value[0]) return default_value;
+    if (std::strcmp(value, "0") == 0 ||
+        std::strcmp(value, "false") == 0 ||
+        std::strcmp(value, "off") == 0) {
+        return false;
+    }
+    if (std::strcmp(value, "1") == 0 ||
+        std::strcmp(value, "true") == 0 ||
+        std::strcmp(value, "on") == 0) {
+        return true;
+    }
+    return default_value;
+}
+
+static bool gui_periodic_editor_idle_enabled() {
+    return gui_env_flag_enabled("KEEPSAKE_MAC_PERIODIC_EDITOR_IDLE", true);
+}
+
+static uint64_t gui_editor_idle_interval_us() {
+    const char *value = std::getenv("KEEPSAKE_MAC_EDITOR_IDLE_INTERVAL_US");
+    if (!value || !value[0]) return 16000;
+    const unsigned long long parsed = std::strtoull(value, nullptr, 10);
+    return parsed > 0 ? static_cast<uint64_t>(parsed) : 16000;
+}
+
+static bool gui_periodic_capture_enabled() {
+    return gui_env_flag_enabled("KEEPSAKE_MAC_PERIODIC_CAPTURE", true);
+}
+
+static uint64_t gui_periodic_capture_interval_us() {
+    const char *value = std::getenv("KEEPSAKE_MAC_CAPTURE_INTERVAL_US");
+    if (!value || !value[0]) return 0;
+    const unsigned long long parsed = std::strtoull(value, nullptr, 10);
+    return static_cast<uint64_t>(parsed);
+}
+
+static uint64_t gui_now_us() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<uint64_t>(ts.tv_sec) * 1000000ULL +
+           static_cast<uint64_t>(ts.tv_nsec) / 1000ULL;
+}
+
+static int gui_capture_burst_frames() {
+    const char *value = std::getenv("KEEPSAKE_MAC_CAPTURE_BURST_FRAMES");
+    if (!value || !value[0]) return 6;
+    return std::max(0, std::atoi(value));
+}
+
+static uint64_t gui_capture_burst_interval_us() {
+    const char *value = std::getenv("KEEPSAKE_MAC_CAPTURE_BURST_INTERVAL_US");
+    if (!value || !value[0]) return 33333;
+    const unsigned long long parsed = std::strtoull(value, nullptr, 10);
+    return parsed > 0 ? static_cast<uint64_t>(parsed) : 33333;
+}
 
 static void gui_log_focus_state(const char *phase) {
     const bool app_active = [NSApp isActive];
@@ -118,6 +184,12 @@ void gui_publish_resize_request(int width, int height) {
     shm_store_release(&g_gui_status_ctrl->editor_resize_serial, serial + 1);
 }
 
+void gui_request_capture_burst() {
+    const int frames = gui_capture_burst_frames();
+    if (frames <= 0) return;
+    g_capture_burst_remaining = std::max(g_capture_burst_remaining, frames);
+}
+
 void gui_set_editor_transient(uint64_t) {}
 
 void gui_close_editor(BridgeLoader *loader) {
@@ -130,6 +202,10 @@ void gui_close_editor(BridgeLoader *loader) {
     gui_close_iosurface_state();
     g_active_loader = nil;
     g_editor_open = false;
+    g_last_editor_idle_us = 0;
+    g_last_periodic_capture_us = 0;
+    g_last_burst_capture_us = 0;
+    g_capture_burst_remaining = 0;
     gui_store_editor_state(SHM_EDITOR_CLOSED);
     gui_log_focus_state("close");
 }
@@ -147,8 +223,33 @@ void gui_idle(BridgeLoader *loader) {
 
     BridgeLoader *active = loader ? loader : g_active_loader;
     if (active) {
-        active->editor_idle();
-        gui_capture_iosurface_if_needed();
+        const uint64_t now_us = gui_now_us();
+        if (gui_periodic_editor_idle_enabled()) {
+            const uint64_t interval_us = gui_editor_idle_interval_us();
+            if (g_last_editor_idle_us == 0 ||
+                now_us - g_last_editor_idle_us >= interval_us) {
+                active->editor_idle();
+                g_last_editor_idle_us = now_us;
+            }
+        }
+        if (gui_periodic_capture_enabled()) {
+            const uint64_t interval_us = gui_periodic_capture_interval_us();
+            if (interval_us == 0 ||
+                g_last_periodic_capture_us == 0 ||
+                now_us - g_last_periodic_capture_us >= interval_us) {
+                gui_capture_iosurface_if_needed();
+                g_last_periodic_capture_us = now_us;
+            }
+        } else if (g_capture_burst_remaining > 0) {
+            const uint64_t now_us = gui_now_us();
+            const uint64_t interval_us = gui_capture_burst_interval_us();
+            if (g_last_burst_capture_us == 0 ||
+                now_us - g_last_burst_capture_us >= interval_us) {
+                gui_capture_iosurface_if_needed();
+                g_last_burst_capture_us = now_us;
+                g_capture_burst_remaining -= 1;
+            }
+        }
     }
 
     if (g_window && ![g_window isVisible]) {

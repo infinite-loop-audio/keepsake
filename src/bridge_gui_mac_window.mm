@@ -14,7 +14,11 @@ static void style_parentless_plugin_window(NSWindow *window,
                                            const EditorHeaderInfo &header) {
     if (!window) return;
 
-    NSString *title = [NSString stringWithFormat:@"Keepsake — %s",
+    const char *presentation = header.presentation.empty()
+        ? "Editor"
+        : header.presentation.c_str();
+    NSString *title = [NSString stringWithFormat:@"Keepsake %s — %s",
+                       presentation,
                        header.plugin_name.c_str()];
     [window setTitle:title];
 
@@ -38,7 +42,9 @@ static void style_parentless_plugin_window(NSWindow *window,
         [window center];
     }
 
-    [window orderFront:nil];
+    [NSApp activateIgnoringOtherApps:YES];
+    [window makeKeyAndOrderFront:nil];
+    [window orderFrontRegardless];
     keepsake_debug_log("bridge/mac: parentless window shown key=%d main=%d visible=%d\n",
                        [window isKeyWindow] ? 1 : 0,
                        [window isMainWindow] ? 1 : 0,
@@ -126,6 +132,14 @@ static void update_window_size_after_open(BridgeLoader *loader, int &w, int &h) 
         w = newW;
         h = newH;
     }
+    if (g_window) {
+        NSSize fixed = NSMakeSize(w, h + HEADER_HEIGHT);
+        NSRect frame = [g_window frameRectForContentRect:NSMakeRect(0, 0, fixed.width, fixed.height)];
+        [g_window setContentMinSize:fixed];
+        [g_window setContentMaxSize:fixed];
+        [g_window setMinSize:frame.size];
+        [g_window setMaxSize:frame.size];
+    }
     g_current_width = w;
     g_current_height = h;
 }
@@ -136,27 +150,26 @@ static bool open_floating_editor(BridgeLoader *loader,
     int h = DEFAULT_EDITOR_HEIGHT;
     CGFloat totalH = h + HEADER_HEIGHT;
     NSRect frame = NSMakeRect(200, 200, w, totalH);
-    g_window = [[NSPanel alloc]
+    g_window = [[NSWindow alloc]
         initWithContentRect:frame
                   styleMask:(NSWindowStyleMaskTitled |
                              NSWindowStyleMaskClosable |
-                             NSWindowStyleMaskMiniaturizable |
-                             NSWindowStyleMaskNonactivatingPanel)
+                             NSWindowStyleMaskMiniaturizable)
                     backing:NSBackingStoreBuffered
                       defer:NO];
 
-    NSString *title = [NSString stringWithFormat:@"Keepsake — %s",
+    const char *presentation = header.presentation.empty()
+        ? "Editor"
+        : header.presentation.c_str();
+    NSString *title = [NSString stringWithFormat:@"Keepsake %s — %s",
+                       presentation,
                        header.plugin_name.c_str()];
     [g_window setTitle:title];
     [g_window setReleasedWhenClosed:NO];
     [g_window setLevel:NSNormalWindowLevel];
-    if ([g_window isKindOfClass:[NSPanel class]]) {
-        NSPanel *panel = (NSPanel *)g_window;
-        [panel setFloatingPanel:NO];
-        [panel setBecomesKeyOnlyIfNeeded:YES];
-        [panel setHidesOnDeactivate:NO];
-        [panel setWorksWhenModal:YES];
-    }
+    [g_window setHidesOnDeactivate:NO];
+    [g_window setStyleMask:([g_window styleMask] & ~NSWindowStyleMaskResizable)];
+    [g_window center];
 
     NSView *content = gui_mac_make_content_view(w, h);
     [g_window setContentView:content];
@@ -167,7 +180,9 @@ static bool open_floating_editor(BridgeLoader *loader,
     g_header = gui_mac_make_header_view(w, header);
     [content addSubview:g_header];
 
-    [g_window orderFront:nil];
+    [NSApp activateIgnoringOtherApps:YES];
+    [g_window makeKeyAndOrderFront:nil];
+    [g_window orderFrontRegardless];
     [g_window displayIfNeeded];
     keepsake_debug_log("bridge/mac: floating window shown key=%d main=%d visible=%d\n",
                        [g_window isKeyWindow] ? 1 : 0,
@@ -211,6 +226,10 @@ static bool open_floating_editor(BridgeLoader *loader,
     g_active_loader = loader;
     install_frame_observer();
     update_window_size_after_open(loader, w, h);
+    [NSApp activateIgnoringOtherApps:YES];
+    [g_window makeKeyAndOrderFront:nil];
+    [g_window orderFrontRegardless];
+    [g_window displayIfNeeded];
 
     for (int i = 0; i < 8; i++) {
         loader->editor_idle();

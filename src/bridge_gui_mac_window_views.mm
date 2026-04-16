@@ -16,6 +16,7 @@
 @property (nonatomic, strong) NSString *formatBadge;
 @property (nonatomic, strong) NSString *archBadge;
 @property (nonatomic, strong) NSString *isolationBadge;
+@property (nonatomic, strong) NSString *presentationBadge;
 @end
 
 @implementation KeepsakeHeaderView
@@ -66,6 +67,8 @@
               [NSColor colorWithRed:0.3 green:0.45 blue:0.3 alpha:1.0]);
     drawBadge(self.formatBadge,
               [NSColor colorWithRed:0.45 green:0.3 blue:0.2 alpha:1.0]);
+    drawBadge(self.presentationBadge,
+              [NSColor colorWithRed:0.2 green:0.38 blue:0.55 alpha:1.0]);
 }
 
 @end
@@ -90,6 +93,7 @@ NSView *gui_mac_make_header_view(int w, const EditorHeaderInfo &header) {
     headerView.formatBadge = [NSString stringWithUTF8String:header.format.c_str()];
     headerView.archBadge = [NSString stringWithUTF8String:header.architecture.c_str()];
     headerView.isolationBadge = [NSString stringWithUTF8String:header.isolation.c_str()];
+    headerView.presentationBadge = [NSString stringWithUTF8String:header.presentation.c_str()];
     [headerView setWantsLayer:YES];
     return headerView;
 }

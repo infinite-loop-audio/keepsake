@@ -5,6 +5,9 @@ They set the realized constraints roadmap batches must honor.
 
 ## Files
 
+- [`macos-bridged-ui-options.md`](macos-bridged-ui-options.md) — architecture
+  decision brief for macOS bridged editor presentation after the embedded-input
+  cutoff
 - [`system-architecture.md`](system-architecture.md) — component layout and
   CLAP/VeSTige seams
 - [`system-inventory.md`](system-inventory.md) — execution-relevant surfaces

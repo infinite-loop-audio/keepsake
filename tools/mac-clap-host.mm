@@ -8,6 +8,7 @@
 #import <QuartzCore/QuartzCore.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -15,9 +16,41 @@
 #include <cstring>
 #include <dlfcn.h>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <thread>
 #include <vector>
+
+@interface KeepsakeHarnessAppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate> {
+@public
+    std::atomic<bool> *_window_closed;
+}
+- (instancetype)initWithWindowClosedFlag:(std::atomic<bool> *)window_closed;
+@end
+
+@implementation KeepsakeHarnessAppDelegate
+
+- (instancetype)initWithWindowClosedFlag:(std::atomic<bool> *)window_closed {
+    self = [super init];
+    if (!self) return nil;
+    _window_closed = window_closed;
+    return self;
+}
+
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
+    (void)sender;
+    return YES;
+}
+
+- (void)windowWillClose:(NSNotification *)notification {
+    (void)notification;
+    if (_window_closed) {
+        _window_closed->store(true, std::memory_order_release);
+    }
+    [NSApp terminate:nil];
+}
+
+@end
 
 namespace fs = std::filesystem;
 
@@ -27,7 +60,7 @@ struct Options {
     std::string clap_path;
     std::string plugin_id;
     std::string vst_path;
-    std::string ui_mode = "iosurface";
+    std::string ui_mode = "auto";
     std::string host_mode = "stable";
     std::string attach_target = "auto";
     bool open_ui = false;
@@ -42,6 +75,12 @@ struct Options {
     int sample_rate = 44100;
     int block_size = 512;
     int process_blocks = 96;
+    bool periodic_editor_idle = true;
+    bool periodic_capture = true;
+    int gui_idle_interval_us = 16000;
+    int capture_interval_us = 0;
+    int capture_burst_frames = 6;
+    int capture_burst_interval_us = 33333;
 };
 
 struct HostState {
@@ -59,6 +98,7 @@ struct HostState {
     double ui_opened_ms = 0.0;
     bool delayed_parent_attached = false;
     bool parent_swapped = false;
+    std::atomic<bool> window_closed{false};
 };
 
 struct BitmapSample {
@@ -72,6 +112,12 @@ struct MidiEventList {
     clap_input_events_t iface = {};
     std::vector<clap_event_midi_t> events;
     std::vector<const clap_event_header_t *> headers;
+};
+
+struct AudioRunState {
+    std::atomic<bool> stop{false};
+    std::atomic<float> peak{0.0f};
+    std::atomic<int> blocks{0};
 };
 
 double now_ms() {
@@ -140,6 +186,26 @@ bool parse_args(int argc, char *argv[], Options &opts) {
             opts.block_size = std::atoi(argv[++i]);
         } else if (std::strcmp(arg, "--process-blocks") == 0 && i + 1 < argc) {
             opts.process_blocks = std::atoi(argv[++i]);
+        } else if (std::strcmp(arg, "--periodic-editor-idle") == 0 && i + 1 < argc) {
+            const char *value = argv[++i];
+            opts.periodic_editor_idle =
+                std::strcmp(value, "0") != 0 &&
+                std::strcmp(value, "off") != 0 &&
+                std::strcmp(value, "false") != 0;
+        } else if (std::strcmp(arg, "--periodic-capture") == 0 && i + 1 < argc) {
+            const char *value = argv[++i];
+            opts.periodic_capture =
+                std::strcmp(value, "0") != 0 &&
+                std::strcmp(value, "off") != 0 &&
+                std::strcmp(value, "false") != 0;
+        } else if (std::strcmp(arg, "--gui-idle-us") == 0 && i + 1 < argc) {
+            opts.gui_idle_interval_us = std::atoi(argv[++i]);
+        } else if (std::strcmp(arg, "--capture-interval-us") == 0 && i + 1 < argc) {
+            opts.capture_interval_us = std::atoi(argv[++i]);
+        } else if (std::strcmp(arg, "--capture-burst-frames") == 0 && i + 1 < argc) {
+            opts.capture_burst_frames = std::atoi(argv[++i]);
+        } else if (std::strcmp(arg, "--capture-burst-interval-us") == 0 && i + 1 < argc) {
+            opts.capture_burst_interval_us = std::atoi(argv[++i]);
         } else {
             return false;
         }
@@ -564,7 +630,10 @@ void dispatch_scripted_input(const Options &opts, const clap_plugin_t *plugin, H
     run_callbacks(plugin, host);
 }
 
-float process_audio(const clap_plugin_t *plugin, const Options &opts, HostState &host) {
+float process_audio(const clap_plugin_t *plugin,
+                    const Options &opts,
+                    HostState &host,
+                    int duration_ms = 0) {
     std::vector<float> out_l(static_cast<size_t>(opts.block_size), 0.0f);
     std::vector<float> out_r(static_cast<size_t>(opts.block_size), 0.0f);
     float *out_ptrs[2] = { out_l.data(), out_r.data() };
@@ -583,10 +652,17 @@ float process_audio(const clap_plugin_t *plugin, const Options &opts, HostState 
     process.in_events = &midi.iface;
 
     float peak = 0.0f;
-    for (int i = 0; i < opts.process_blocks; ++i) {
+    const double deadline_ms = duration_ms > 0 ? now_ms() + duration_ms : 0.0;
+    const bool use_duration = duration_ms > 0;
+    const int max_blocks = use_duration ? std::numeric_limits<int>::max() : opts.process_blocks;
+    for (int i = 0; i < max_blocks; ++i) {
         midi_clear(midi);
-        if (i == 0) midi_add_note(midi, true, 60, 100);
-        if (i == 24) midi_add_note(midi, false, 60, 0);
+        if (i == 0) {
+            midi_add_note(midi, true, 60, 100);
+        } else if ((!use_duration && i == 24) ||
+                   (use_duration && now_ms() + 50.0 >= deadline_ms)) {
+            midi_add_note(midi, false, 60, 0);
+        }
 
         std::fill(out_l.begin(), out_l.end(), 0.0f);
         std::fill(out_r.begin(), out_r.end(), 0.0f);
@@ -599,7 +675,7 @@ float process_audio(const clap_plugin_t *plugin, const Options &opts, HostState 
             block_peak = std::max(block_peak, std::fabs(out_r[static_cast<size_t>(s)]));
         }
         peak = std::max(peak, block_peak);
-        if (i < 4 || block_peak > 0.001f || (i % 24) == 0) {
+        if (i < 4 || block_peak > 0.001f || (i % 128) == 0) {
             log_line("[process %03d] %.1f ms status=%d peak=%.6f\n",
                      i, now_ms() - t0, static_cast<int>(status), block_peak);
         }
@@ -607,8 +683,80 @@ float process_audio(const clap_plugin_t *plugin, const Options &opts, HostState 
         run_callbacks(plugin, host);
         std::this_thread::sleep_for(std::chrono::milliseconds(
             std::max(1, static_cast<int>((1000LL * opts.block_size) / std::max(1, opts.sample_rate)))));
+
+        if (use_duration && now_ms() >= deadline_ms) {
+            break;
+        }
     }
     return peak;
+}
+
+void run_audio_thread(const clap_plugin_t *plugin,
+                      const Options &opts,
+                      AudioRunState &state) {
+    std::vector<float> out_l(static_cast<size_t>(opts.block_size), 0.0f);
+    std::vector<float> out_r(static_cast<size_t>(opts.block_size), 0.0f);
+    float *out_ptrs[2] = { out_l.data(), out_r.data() };
+
+    clap_audio_buffer_t out_buf = {};
+    out_buf.channel_count = 2;
+    out_buf.data32 = out_ptrs;
+
+    MidiEventList midi;
+    init_midi_list(midi);
+
+    clap_process_t process = {};
+    process.frames_count = static_cast<uint32_t>(opts.block_size);
+    process.audio_outputs = &out_buf;
+    process.audio_outputs_count = 1;
+    process.in_events = &midi.iface;
+
+    bool note_on_sent = false;
+    bool note_off_sent = false;
+    const auto block_sleep = std::chrono::milliseconds(
+        std::max(1, static_cast<int>((1000LL * opts.block_size) / std::max(1, opts.sample_rate))));
+
+    while (!state.stop.load(std::memory_order_acquire)) {
+        midi_clear(midi);
+        if (!note_on_sent) {
+            midi_add_note(midi, true, 60, 100);
+            note_on_sent = true;
+        }
+
+        std::fill(out_l.begin(), out_l.end(), 0.0f);
+        std::fill(out_r.begin(), out_r.end(), 0.0f);
+
+        const double t0 = now_ms();
+        const clap_process_status status = plugin->process(plugin, &process);
+        float block_peak = 0.0f;
+        for (int s = 0; s < opts.block_size; ++s) {
+            block_peak = std::max(block_peak, std::fabs(out_l[static_cast<size_t>(s)]));
+            block_peak = std::max(block_peak, std::fabs(out_r[static_cast<size_t>(s)]));
+        }
+
+        float observed_peak = state.peak.load(std::memory_order_relaxed);
+        while (block_peak > observed_peak &&
+               !state.peak.compare_exchange_weak(observed_peak, block_peak,
+                                                 std::memory_order_release,
+                                                 std::memory_order_relaxed)) {
+        }
+
+        const int block_index = state.blocks.fetch_add(1, std::memory_order_acq_rel);
+        if (block_index < 4 || block_peak > 0.001f || (block_index % 128) == 0) {
+            log_line("[process %03d] %.1f ms status=%d peak=%.6f\n",
+                     block_index, now_ms() - t0, static_cast<int>(status), block_peak);
+        }
+
+        std::this_thread::sleep_for(block_sleep);
+    }
+
+    if (note_on_sent && !note_off_sent) {
+        midi_clear(midi);
+        midi_add_note(midi, false, 60, 0);
+        std::fill(out_l.begin(), out_l.end(), 0.0f);
+        std::fill(out_r.begin(), out_r.end(), 0.0f);
+        plugin->process(plugin, &process);
+    }
 }
 
 std::string clap_binary_path(const std::string &clap_path) {
@@ -623,7 +771,7 @@ int main(int argc, char *argv[]) {
     Options opts;
     if (!parse_args(argc, argv, opts)) {
         std::fprintf(stderr,
-                     "usage: %s <clap-bundle> <plugin-id> [--vst-path PATH] [--ui-mode iosurface|floating] [--host-mode stable|delayed-parent|swap-parent] [--attach-target auto|requested-parent|content-view|frame-superview] [--open-ui] [--run-transport] [--script-click-center] [--script-text TEXT] [--script-delay-ms N] [--width N] [--height N] [--ui-seconds N] [--telemetry-seconds N] [--sample-rate N] [--block-size N] [--process-blocks N]\n",
+                     "usage: %s <clap-bundle> <plugin-id> [--vst-path PATH] [--ui-mode auto|live|preview|iosurface|floating] [--host-mode stable|delayed-parent|swap-parent] [--attach-target auto|requested-parent|content-view|frame-superview] [--open-ui] [--run-transport] [--script-click-center] [--script-text TEXT] [--script-delay-ms N] [--width N] [--height N] [--ui-seconds N] [--telemetry-seconds N] [--sample-rate N] [--block-size N] [--process-blocks N] [--periodic-editor-idle on|off] [--periodic-capture on|off] [--gui-idle-us N] [--capture-interval-us N] [--capture-burst-frames N] [--capture-burst-interval-us N]\n",
                      argv[0]);
         return 1;
     }
@@ -634,6 +782,24 @@ int main(int argc, char *argv[]) {
     }
     setenv("KEEPSAKE_MAC_UI_MODE", opts.ui_mode.c_str(), 1);
     setenv("KEEPSAKE_MAC_EMBED_ATTACH_TARGET", opts.attach_target.c_str(), 1);
+    setenv("KEEPSAKE_MAC_PERIODIC_EDITOR_IDLE", opts.periodic_editor_idle ? "1" : "0", 1);
+    setenv("KEEPSAKE_MAC_PERIODIC_CAPTURE", opts.periodic_capture ? "1" : "0", 1);
+    {
+        const std::string gui_idle_interval = std::to_string(opts.gui_idle_interval_us);
+        setenv("KEEPSAKE_MAC_GUI_IDLE_INTERVAL_US", gui_idle_interval.c_str(), 1);
+    }
+    {
+        const std::string capture_interval = std::to_string(opts.capture_interval_us);
+        setenv("KEEPSAKE_MAC_CAPTURE_INTERVAL_US", capture_interval.c_str(), 1);
+    }
+    {
+        const std::string capture_burst_frames = std::to_string(opts.capture_burst_frames);
+        setenv("KEEPSAKE_MAC_CAPTURE_BURST_FRAMES", capture_burst_frames.c_str(), 1);
+    }
+    {
+        const std::string capture_burst_interval = std::to_string(opts.capture_burst_interval_us);
+        setenv("KEEPSAKE_MAC_CAPTURE_BURST_INTERVAL_US", capture_burst_interval.c_str(), 1);
+    }
 
     [NSApplication sharedApplication];
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
@@ -654,6 +820,13 @@ int main(int argc, char *argv[]) {
     log_line("plugin_id=%s ui_mode=%s host_mode=%s attach_target=%s\n",
              opts.plugin_id.c_str(), opts.ui_mode.c_str(), opts.host_mode.c_str(),
              opts.attach_target.c_str());
+    log_line("periodic_editor_idle=%d periodic_capture=%d gui_idle_us=%d capture_interval_us=%d burst_frames=%d burst_interval_us=%d\n",
+             opts.periodic_editor_idle ? 1 : 0,
+             opts.periodic_capture ? 1 : 0,
+             opts.gui_idle_interval_us,
+             opts.capture_interval_us,
+             opts.capture_burst_frames,
+             opts.capture_burst_interval_us);
 
     if (!entry->init(opts.clap_path.c_str())) {
         std::fprintf(stderr, "entry.init failed\n");
@@ -687,6 +860,9 @@ int main(int argc, char *argv[]) {
     HostState host;
     init_host(host);
     host.host_mode = opts.host_mode;
+    KeepsakeHarnessAppDelegate *app_delegate =
+        [[KeepsakeHarnessAppDelegate alloc] initWithWindowClosedFlag:&host.window_closed];
+    [NSApp setDelegate:app_delegate];
 
     const clap_plugin_t *plugin = factory->create_plugin(factory, &host.host, desc->id);
     if (!plugin) {
@@ -725,7 +901,12 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        if (!gui->create(plugin, CLAP_WINDOW_API_COCOA, false)) {
+        const bool request_floating =
+            opts.ui_mode == "live" ||
+            opts.ui_mode == "floating" ||
+            opts.ui_mode == "auto";
+
+        if (!gui->create(plugin, CLAP_WINDOW_API_COCOA, request_floating)) {
             std::fprintf(stderr, "gui.create failed\n");
             plugin->stop_processing(plugin);
             plugin->deactivate(plugin);
@@ -737,42 +918,45 @@ int main(int argc, char *argv[]) {
             log_line("[gui.get_size] %ux%u\n", ui_w, ui_h);
         }
 
-        NSRect contentRect = NSMakeRect(200, 200, ui_w, ui_h);
-        host.window = [[NSWindow alloc]
-            initWithContentRect:contentRect
-                      styleMask:(NSWindowStyleMaskTitled |
-                                 NSWindowStyleMaskClosable |
-                                 NSWindowStyleMaskResizable)
-                        backing:NSBackingStoreBuffered
-                          defer:NO];
-        host.root = make_host_parent(ui_w, ui_h);
-        host.parent = make_host_parent(ui_w, ui_h);
-        host.width = ui_w;
-        host.height = ui_h;
-        [host.window setContentView:host.root];
-        if (host.host_mode == "stable" || host.host_mode == "swap-parent") {
-            [host.root addSubview:host.parent];
-            host.delayed_parent_attached = true;
-        } else if (host.host_mode == "delayed-parent") {
-            host.delayed_parent_attached = false;
-        }
-        [host.window setTitle:[NSString stringWithUTF8String:opts.plugin_id.c_str()]];
-        [host.window makeKeyAndOrderFront:nil];
-        [NSApp activateIgnoringOtherApps:YES];
-        log_host_tree(host, "before-set-parent");
-        log_view_tree(window_search_root(host), "before-set-parent", 0, 3);
+        if (!request_floating) {
+            NSRect contentRect = NSMakeRect(200, 200, ui_w, ui_h);
+            host.window = [[NSWindow alloc]
+                initWithContentRect:contentRect
+                          styleMask:(NSWindowStyleMaskTitled |
+                                     NSWindowStyleMaskClosable |
+                                     NSWindowStyleMaskResizable)
+                            backing:NSBackingStoreBuffered
+                              defer:NO];
+            host.root = make_host_parent(ui_w, ui_h);
+            host.parent = make_host_parent(ui_w, ui_h);
+            host.width = ui_w;
+            host.height = ui_h;
+            [host.window setContentView:host.root];
+            if (host.host_mode == "stable" || host.host_mode == "swap-parent") {
+                [host.root addSubview:host.parent];
+                host.delayed_parent_attached = true;
+            } else if (host.host_mode == "delayed-parent") {
+                host.delayed_parent_attached = false;
+            }
+            [host.window setTitle:[NSString stringWithUTF8String:opts.plugin_id.c_str()]];
+            [host.window setDelegate:app_delegate];
+            [host.window makeKeyAndOrderFront:nil];
+            [NSApp activateIgnoringOtherApps:YES];
+            log_host_tree(host, "before-set-parent");
+            log_view_tree(window_search_root(host), "before-set-parent", 0, 3);
 
-        clap_window_t window = {};
-        window.api = CLAP_WINDOW_API_COCOA;
-        window.cocoa = (__bridge void *)host.parent;
+            clap_window_t window = {};
+            window.api = CLAP_WINDOW_API_COCOA;
+            window.cocoa = (__bridge void *)host.parent;
 
-        if (!gui->set_parent(plugin, &window)) {
-            std::fprintf(stderr, "gui.set_parent failed\n");
-            gui->destroy(plugin);
-            plugin->stop_processing(plugin);
-            plugin->deactivate(plugin);
-            plugin->destroy(plugin);
-            return 1;
+            if (!gui->set_parent(plugin, &window)) {
+                std::fprintf(stderr, "gui.set_parent failed\n");
+                gui->destroy(plugin);
+                plugin->stop_processing(plugin);
+                plugin->deactivate(plugin);
+                plugin->destroy(plugin);
+                return 1;
+            }
         }
         if (!gui->show(plugin)) {
             std::fprintf(stderr, "gui.show failed\n");
@@ -793,11 +977,26 @@ int main(int argc, char *argv[]) {
     }
 
     float peak = 0.0f;
-    if (opts.run_transport) {
-        peak = process_audio(plugin, opts, host);
+    if (opts.run_transport && opts.open_ui) {
+        AudioRunState audio_state;
+        std::thread audio_thread(run_audio_thread, plugin, std::cref(opts), std::ref(audio_state));
+
+        const double deadline = now_ms() + (opts.ui_seconds * 1000.0);
+        while (now_ms() < deadline &&
+               !host.window_closed.load(std::memory_order_acquire)) {
+            run_callbacks(plugin, host);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        audio_state.stop.store(true, std::memory_order_release);
+        audio_thread.join();
+        peak = audio_state.peak.load(std::memory_order_acquire);
+    } else if (opts.run_transport) {
+        peak = process_audio(plugin, opts, host, 0);
     } else if (opts.open_ui) {
         const double deadline = now_ms() + (opts.ui_seconds * 1000.0);
-        while (now_ms() < deadline) {
+        while (now_ms() < deadline &&
+               !host.window_closed.load(std::memory_order_acquire)) {
             run_callbacks(plugin, host);
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
@@ -816,6 +1015,7 @@ int main(int argc, char *argv[]) {
     plugin->deactivate(plugin);
     plugin->destroy(plugin);
     entry->deinit();
+    [app_delegate release];
 
     log_line("result=%s peak=%.6f\n",
              (!opts.run_transport || peak > 0.00001f) ? "PASS" : "FAIL",

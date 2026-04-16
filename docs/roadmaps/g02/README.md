@@ -11,6 +11,7 @@ Started: 2026-04-12
 | `002` | [Release Packaging, Versioning, and Install Surface](002-release-packaging-versioning-install-surface.md) | blocked on 001 |
 | `003` | [Alpha Validation Matrix and Evidence Pack](003-alpha-validation-matrix-and-evidence.md) | blocked on 001-002 |
 | `004` | [Publish v0.1-alpha](004-publish-v0.1-alpha.md) | blocked on 001-003 |
+| `005` | [macOS UI Model and Interactive Fallback Prototype](005-macos-ui-model-and-fallback-prototype.md) | in_progress |
 
 ## Sequencing Intent
 
@@ -26,7 +27,8 @@ The generation closes when:
 
 This generation is release-hardening, not feature expansion. New feature work
 should stay out unless it is directly required to make the alpha claim set
-true.
+true. `005` exists under that exception: the current macOS alpha story still
+needs a viable editor model that does not pretend universal interactive embed.
 
 ## Release Posture
 
@@ -38,6 +40,10 @@ true.
 
 ## Next Task
 
-Execute g02.001 — define the supported `v0.1-alpha` envelope, reconcile public
-docs and roadmap posture with actual proof, and produce the known-issues input
-for packaging and validation.
+Execute the highest-priority ready card for the current operator intent:
+
+- `g02.005` if the goal is to prototype the macOS editor fallback model now
+- `g02.001` if the goal is to continue release-scope/doc reconciliation first
+
+Current macOS fallback lane:
+- `g02.005` Batch 5.2 — expose the fallback mode clearly in normal host use and validate REAPER session behavior with Serum, APC, and Khords

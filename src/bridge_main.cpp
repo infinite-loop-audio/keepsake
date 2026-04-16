@@ -75,6 +75,12 @@ int main(int argc, char *argv[]) {
             has_wake_pipe ? "pipe" : "poll");
 
     uint64_t last_gui_idle_us = 0;
+    const uint64_t gui_idle_interval_us = []() -> uint64_t {
+        const char *value = std::getenv("KEEPSAKE_MAC_GUI_IDLE_INTERVAL_US");
+        if (!value || !value[0]) return 16000;
+        const unsigned long long parsed = std::strtoull(value, nullptr, 10);
+        return parsed > 0 ? static_cast<uint64_t>(parsed) : 16000;
+    }();
     auto now_us = []() -> uint64_t {
 #ifdef _WIN32
         return static_cast<uint64_t>(GetTickCount64()) * 1000;
@@ -96,14 +102,17 @@ int main(int argc, char *argv[]) {
         // GUI throttle
         if (gui_is_open() || gui_has_pending_work()) {
             uint64_t now = now_us();
-            if (now - last_gui_idle_us >= 16000) {
+            if (now - last_gui_idle_us >= gui_idle_interval_us) {
                 gui_idle(nullptr);
                 last_gui_idle_us = now;
             }
         }
 
         // Command pipe (blocking when idle, short timeout when GUI open)
-        int pipe_timeout = (gui_is_open() || gui_has_pending_work()) ? 16 : -1;
+        int pipe_timeout = (gui_is_open() || gui_has_pending_work())
+            ? static_cast<int>(gui_idle_interval_us / 1000)
+            : -1;
+        if (pipe_timeout == 0) pipe_timeout = 1;
 
 #ifndef _WIN32
         struct pollfd pfd = { g_pipe_in, POLLIN, 0 };
@@ -204,6 +213,7 @@ int main(int argc, char *argv[]) {
                                       open_req.width > 0 &&
                                       open_req.height > 0;
                 }
+                hdr.presentation = wants_iosurface ? "Preview" : "Live Editor";
 
                 if (wants_iosurface) {
                     IpcEditorSurface surface{};
@@ -213,8 +223,12 @@ int main(int argc, char *argv[]) {
                     if (surface.surface_id != 0) {
                         int actual_width = open_req.width;
                         int actual_height = open_req.height;
-                        if (gui_get_editor_rect(inst->loader, actual_width, actual_height) &&
+                        if (gui_get_editor_iosurface_size(actual_width, actual_height) &&
                             actual_width > 0 && actual_height > 0) {
+                            surface.width = actual_width;
+                            surface.height = actual_height;
+                        } else if (gui_get_editor_rect(inst->loader, actual_width, actual_height) &&
+                                   actual_width > 0 && actual_height > 0) {
                             if ((actual_width != open_req.width || actual_height != open_req.height) &&
                                 !gui_resize_editor_iosurface(actual_width, actual_height,
                                                              surface.surface_id)) {

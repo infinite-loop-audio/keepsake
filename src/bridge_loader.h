@@ -62,6 +62,9 @@ struct BridgeLoader {
     // Editor idle tick.
     virtual void editor_idle() = 0;
 
+    // Optional synchronization for editor capture/event injection.
+    virtual void lock_editor_frame() {}
+    virtual void unlock_editor_frame() {}
     // Close/unload the plugin.
     virtual void close() = 0;
 };

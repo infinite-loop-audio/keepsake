@@ -2,7 +2,7 @@
 
 Status: parked
 Owner: Infinite Loop Audio
-Updated: 2026-04-11
+Updated: 2026-04-16
 Auto-continuation: allowed within g01
 
 ## Scope
@@ -69,6 +69,32 @@ capturing the plugin's rendered content INTO the surface. Most VST2 plugins
 use a mix of CoreGraphics, OpenGL, and Core Animation that none of the
 capture APIs handle completely.
 
+2026-04-16 update:
+
+- Rendering/crop alignment is materially better than this original note
+  implies. The bridge now detects descendant content bounds and exports the
+  correct visible rect for APC/Khords/Serum-class editors.
+- Serum-class editors can render and interact partially in embedded mode, but
+  note-active animated patches still flicker under the current cross-process
+  model.
+- JUCE-based bridged editors (APC, Khords) still fail the universal embedded
+  interaction bar. Clicks reach the JUCE view, but no meaningful plugin-side
+  edit callbacks follow.
+- Tried and exhausted during this thread:
+  - requested-parent versus broader host attach targets
+  - responder-chain resolution changes
+  - `NSPanel` versus `NSWindow`
+  - offscreen versus visible bridge host windows
+  - `NSEvent` mouse synthesis
+  - `CGEvent` mouse synthesis
+
+Conclusion:
+
+The current "cross-process embedded bitmap plus injected native input" model
+is not a dependable universal macOS editor architecture for arbitrary bridged
+plugin UIs. Keep the IOSurface lane as an experimental rendering baseline, but
+do not treat incremental AppKit event tweaking as the main path forward.
+
 Promising avenues to revisit:
 - **In-process GUI loading** (Option A from earlier analysis) — load the
   plugin binary in-process just for the editor, use out-of-process for audio.
@@ -79,6 +105,9 @@ Promising avenues to revisit:
 - **CARemoteLayer** — Apple's internal mechanism for AUv3 hosting. Not public
   API but used by Logic, GarageBand, and others. May be viable with careful use.
 - Wait for Apple to provide a public cross-process view embedding API.
+- **Remote/explicit window model** — treat the bridge-owned mac editor as the
+  primary interaction surface and stop forcing arbitrary editors through a
+  synthetic embedded-input contract.
 
 The floating window approach works reliably and is the established pattern
 used by jBridge, Blue Cat's PatchWork, and other professional bridges.
@@ -88,3 +117,6 @@ used by jBridge, Blue Cat's PatchWork, and other professional bridges.
 - Plugin editor visible inside REAPER's FX window (not floating)
 - Mouse clicks on the editor work (knobs, buttons)
 - Keyboard input works where applicable
+
+Current posture: rendering evidence exists; universal interactive support does
+not.

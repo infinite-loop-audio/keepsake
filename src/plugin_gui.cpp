@@ -92,7 +92,14 @@ static bool gui_open_floating(KeepsakePlugin *kp) {
                       nullptr, 1000);
     }
 #endif
-    if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN, nullptr, 0, nullptr,
+    IpcEditorOpenRequest open_req = {};
+#ifdef __APPLE__
+    open_req.mode = IPC_EDITOR_OPEN_FLOATING;
+#endif
+    if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN,
+                       &open_req,
+                       sizeof(open_req),
+                       nullptr,
                        GUI_OPEN_TIMEOUT_MS)) {
         keepsake_debug_log("keepsake: floating fallback open failed\n");
         if (kp->bridge && platform_process_alive(kp->bridge->proc)) {
@@ -127,7 +134,7 @@ static bool gui_get_preferred_api(const clap_plugin_t *, const char **api,
                                   bool *is_floating) {
 #ifdef __APPLE__
     *api = CLAP_WINDOW_API_COCOA;
-    *is_floating = false;
+    *is_floating = gui_mac_mode_prefers_live_editor();
 #elif defined(_WIN32)
     *api = CLAP_WINDOW_API_WIN32;
     *is_floating = false;
@@ -143,7 +150,7 @@ static bool gui_create(const clap_plugin_t *plugin, const char *, bool is_floati
     if (!kp->bridge_ok && !kp->crashed) wait_async_init(kp, 1500);
     if (!kp->has_editor || kp->crashed) return false;
 #ifdef __APPLE__
-    kp->gui_is_floating = is_floating || !gui_mac_should_use_iosurface_embed();
+    kp->gui_is_floating = is_floating || gui_mac_mode_prefers_live_editor();
 #elif defined(_WIN32)
     kp->gui_is_floating = is_floating || kp->gui_embed_failed;
 #else
@@ -303,7 +310,7 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
     if (kp->crashed || !kp->has_editor || !kp->bridge || !window) return false;
 
 #ifdef __APPLE__
-    if (!kp->gui_is_floating && gui_mac_should_use_iosurface_embed()) {
+    if (!kp->gui_is_floating && gui_mac_mode_uses_iosurface_preview()) {
         int32_t width = kp->editor_width > 0 ? kp->editor_width : 960;
         int32_t height = kp->editor_height > 0 ? kp->editor_height : 640;
         IpcEditorOpenRequest open_req = {};
@@ -348,21 +355,17 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
                                          static_cast<uint32_t>(surface.height));
         }
         keepsake_gui_session_mark_open(kp);
-        gui_arm_embed_refresh_burst(kp, 45);
+        gui_arm_embed_refresh_burst(kp, 8);
         keepsake_debug_log("keepsake: gui_set_parent iosurface attached surface=%u size=%dx%d\n",
                            surface.surface_id, surface.width, surface.height);
         return true;
     }
 
-    if (!kp->editor_open) {
-        if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN, nullptr, 0, nullptr,
-                           GUI_OPEN_TIMEOUT_MS)) {
-            keepsake_debug_log("keepsake: gui_set_parent() editor open failed\n");
-            return false;
-        }
-        gui_mac_detach_iosurface(kp);
-        keepsake_gui_session_mark_open(kp);
-    }
+    gui_mac_detach_iosurface(kp);
+    kp->gui_is_floating = true;
+    keepsake_debug_log("keepsake: gui_set_parent mac live-editor mode=%s parent=%p\n",
+                       gui_mac_ui_mode().c_str(),
+                       window->cocoa);
     return true;
 #elif defined(_WIN32)
     uint64_t handle = 0;
@@ -482,11 +485,11 @@ static bool gui_show(const clap_plugin_t *plugin) {
         if (kp->gui_is_floating) {
             keepsake_gui_session_mark_open(kp);
         } else {
-            gui_arm_embed_refresh_burst(kp, 45);
+            gui_arm_embed_refresh_burst(kp, 8);
         }
     }
     if (kp->gui_iosurface_embed) {
-        gui_arm_embed_refresh_burst(kp, 45);
+        gui_arm_embed_refresh_burst(kp, 8);
     }
     keepsake_debug_log("keepsake: gui_show success seq=%llu floating=%d open=%d pending=%d\n",
                        static_cast<unsigned long long>(gui_next_lifecycle_seq()),

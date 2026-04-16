@@ -202,6 +202,7 @@ public:
         m.deltaFrames = delta;
         memcpy(m.midiData, data, 4);
         midi_count++;
+
     }
 
     std::vector<uint8_t> get_chunk() override {
@@ -276,6 +277,14 @@ public:
             std::lock_guard<std::recursive_mutex> lock(effect_mutex);
             effect->dispatcher(effect, effEditIdle, 0, 0, nullptr, 0.0f);
         }
+    }
+
+    void lock_editor_frame() override {
+        effect_mutex.lock();
+    }
+
+    void unlock_editor_frame() override {
+        effect_mutex.unlock();
     }
 
     bool get_editor_rect(int &w, int &h) override {

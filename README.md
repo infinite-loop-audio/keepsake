@@ -103,7 +103,7 @@ replace_default_vst2_paths = false
 vst2_paths = ["/extra/vst/folder"]
 
 [gui]
-mac_mode = "floating" # floating | iosurface
+mac_mode = "auto" # auto | live | preview (aliases: floating, iosurface, embedded)
 mac_attach_target = "auto" # auto | requested-parent | content-view | frame-superview
 
 [expose]
@@ -123,6 +123,16 @@ default = "per-instance"
 The intended default posture is conservative: expose bridge-required VST2 by
 default, keep native VST2 opt-in, and leave VST3/AU off until their release
 lane is stronger.
+
+On macOS, GUI mode now has an explicit split:
+
+- `mac_mode = "auto"`: prefer the bridge-owned live editor window for real interaction
+- `mac_mode = "live"`: always use the bridge-owned live editor window
+- `mac_mode = "preview"`: use the IOSurface embedded preview path
+
+`preview` preserves the current embedded rendering work, but `live`/`auto` are
+the intended interaction posture for problematic bridged editors while the
+macOS UI model is still being validated.
 
 ---
 

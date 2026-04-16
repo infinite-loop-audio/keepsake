@@ -14,6 +14,7 @@ struct EditorHeaderInfo {
     std::string format;        // "VST2", "VST3", "AU"
     std::string architecture;  // "native", "Rosetta", "32-bit"
     std::string isolation;     // "shared", "per-binary", "per-instance"
+    std::string presentation;  // "Live Editor", "Preview", etc.
 };
 
 static constexpr int KEEPSAKE_EDITOR_HEADER_HEIGHT = 28;
@@ -33,6 +34,7 @@ bool gui_has_pending_work();
 void gui_get_editor_status(bool &open, bool &pending);
 void gui_set_status_shm(void *shm_ptr);
 void gui_publish_resize_request(int width, int height);
+void gui_request_capture_burst();
 
 // Set the transient/owner window for a floating editor.
 void gui_set_editor_transient(uint64_t native_handle);
@@ -56,6 +58,7 @@ bool gui_is_open();
 // composite the editor into its window.
 uint32_t gui_open_editor_iosurface(BridgeLoader *loader, int width, int height);
 bool gui_resize_editor_iosurface(int width, int height, uint32_t &surface_id);
+bool gui_get_editor_iosurface_size(int &width, int &height);
 
 // Forward a mouse event to the offscreen editor view.
 struct IpcMouseEvent;

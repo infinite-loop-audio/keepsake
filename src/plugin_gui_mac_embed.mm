@@ -102,6 +102,22 @@ static std::string normalize_attach_target(std::string value) {
     return "auto";
 }
 
+static std::string normalize_ui_mode(std::string value) {
+    for (char &ch : value) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    if (value == "embedded" || value == "iosurface" || value == "preview") {
+        return "iosurface";
+    }
+    if (value == "floating" || value == "live" || value == "windowed") {
+        return "live";
+    }
+    if (value == "auto") {
+        return "auto";
+    }
+    return "auto";
+}
+
 static bool rect_reasonably_matches_surface(NSRect rect, int32_t surface_width, int32_t surface_height) {
     if (NSIsEmptyRect(rect)) return false;
     if (surface_width <= 0 || surface_height <= 0) return true;
@@ -131,6 +147,14 @@ static EmbedDrawBackend embed_draw_backend() {
         }
     }
     return backend;
+}
+
+static bool embed_forward_mouse_move() {
+    const char *mode = std::getenv("KEEPSAKE_MAC_EMBED_MOUSE_MOVE");
+    if (!mode || !mode[0]) return false;
+    return std::strcmp(mode, "0") != 0 &&
+           std::strcmp(mode, "false") != 0 &&
+           std::strcmp(mode, "off") != 0;
 }
 
 @interface KeepsakeIOSurfaceView : NSView {
@@ -211,11 +235,12 @@ static EmbedDrawBackend embed_draw_backend() {
     self.wantsLayer = YES;
     self.wantsLayer = NO;
     _ciContext = [[CIContext contextWithOptions:nil] retain];
-    _refreshTimer = [NSTimer scheduledTimerWithTimeInterval:(1.0 / 60.0)
-                                                     target:self
-                                                   selector:@selector(refreshSurfaceFrame)
-                                                   userInfo:nil
-                                                    repeats:YES];
+    _refreshTimer = [[NSTimer timerWithTimeInterval:(1.0 / 60.0)
+                                             target:self
+                                           selector:@selector(refreshSurfaceFrame)
+                                           userInfo:nil
+                                            repeats:YES] retain];
+    [[NSRunLoop mainRunLoop] addTimer:_refreshTimer forMode:NSRunLoopCommonModes];
     return self;
 }
 
@@ -226,6 +251,7 @@ static EmbedDrawBackend embed_draw_backend() {
     }
     if (_refreshTimer) {
         [_refreshTimer invalidate];
+        [_refreshTimer release];
         _refreshTimer = nil;
     }
     if (_ciContext) {
@@ -596,9 +622,11 @@ static EmbedDrawBackend embed_draw_backend() {
         [self removeTrackingArea:_trackingArea];
     }
     NSTrackingAreaOptions options = NSTrackingMouseEnteredAndExited |
-                                    NSTrackingMouseMoved |
                                     NSTrackingActiveInKeyWindow |
                                     NSTrackingInVisibleRect;
+    if (embed_forward_mouse_move()) {
+        options |= NSTrackingMouseMoved;
+    }
     _trackingArea = [[NSTrackingArea alloc] initWithRect:self.bounds
                                                  options:options
                                                    owner:self
@@ -640,7 +668,10 @@ static EmbedDrawBackend embed_draw_backend() {
     send_mouse_event(_plugin, mouse);
 }
 
-- (void)mouseMoved:(NSEvent *)event { [self dispatchMouseEvent:event type:0 button:0]; }
+- (void)mouseMoved:(NSEvent *)event {
+    if (!embed_forward_mouse_move()) return;
+    [self dispatchMouseEvent:event type:0 button:0];
+}
 - (void)mouseDragged:(NSEvent *)event { [self dispatchMouseEvent:event type:3 button:0]; }
 - (void)rightMouseDragged:(NSEvent *)event { [self dispatchMouseEvent:event type:3 button:1]; }
 - (void)otherMouseDragged:(NSEvent *)event { [self dispatchMouseEvent:event type:3 button:2]; }
@@ -738,22 +769,33 @@ static EmbedDrawBackend embed_draw_backend() {
 
 @end
 
-bool gui_mac_should_use_iosurface_embed() {
+std::string gui_mac_ui_mode() {
     const char *mode = std::getenv("KEEPSAKE_MAC_UI_MODE");
     if (mode && mode[0]) {
-        return std::strcmp(mode, "iosurface") == 0 ||
-               std::strcmp(mode, "embedded") == 0;
+        return normalize_ui_mode(mode);
     }
 
     static bool loaded = false;
-    static bool use_iosurface = false;
+    static std::string ui_mode = "auto";
     if (!loaded) {
         const KeepsakeConfig cfg = config_load();
-        use_iosurface = cfg.mac_ui_mode == "iosurface" ||
-                        cfg.mac_ui_mode == "embedded";
+        ui_mode = normalize_ui_mode(cfg.mac_ui_mode);
         loaded = true;
     }
-    return use_iosurface;
+    return ui_mode;
+}
+
+bool gui_mac_mode_uses_iosurface_preview() {
+    return gui_mac_ui_mode() == "iosurface";
+}
+
+bool gui_mac_mode_prefers_live_editor() {
+    const std::string mode = gui_mac_ui_mode();
+    return mode == "live" || mode == "auto";
+}
+
+bool gui_mac_should_use_iosurface_embed() {
+    return gui_mac_mode_uses_iosurface_preview();
 }
 
 std::string gui_mac_embed_attach_target() {
