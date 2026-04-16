@@ -118,6 +118,22 @@ static std::string normalize_ui_mode(std::string value) {
     return "auto";
 }
 
+static bool mac_preview_mode_enabled() {
+    const char *value = std::getenv("KEEPSAKE_MAC_ENABLE_PREVIEW");
+    if (!value || !value[0]) return false;
+    return std::strcmp(value, "0") != 0 &&
+           std::strcmp(value, "false") != 0 &&
+           std::strcmp(value, "off") != 0;
+}
+
+static std::string sanitize_ui_mode_for_posture(std::string mode) {
+    if (mode == "iosurface" && !mac_preview_mode_enabled()) {
+        keepsake_debug_log("keepsake: mac preview mode requested but disabled by posture; falling back to live\n");
+        return "live";
+    }
+    return mode;
+}
+
 static bool rect_reasonably_matches_surface(NSRect rect, int32_t surface_width, int32_t surface_height) {
     if (NSIsEmptyRect(rect)) return false;
     if (surface_width <= 0 || surface_height <= 0) return true;
@@ -772,14 +788,14 @@ static bool embed_forward_mouse_move() {
 std::string gui_mac_ui_mode() {
     const char *mode = std::getenv("KEEPSAKE_MAC_UI_MODE");
     if (mode && mode[0]) {
-        return normalize_ui_mode(mode);
+        return sanitize_ui_mode_for_posture(normalize_ui_mode(mode));
     }
 
     static bool loaded = false;
-    static std::string ui_mode = "auto";
+    static std::string ui_mode = "live";
     if (!loaded) {
         const KeepsakeConfig cfg = config_load();
-        ui_mode = normalize_ui_mode(cfg.mac_ui_mode);
+        ui_mode = sanitize_ui_mode_for_posture(normalize_ui_mode(cfg.mac_ui_mode));
         loaded = true;
     }
     return ui_mode;

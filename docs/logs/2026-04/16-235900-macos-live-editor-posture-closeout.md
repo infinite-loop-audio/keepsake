@@ -54,6 +54,10 @@ but it is no longer treated as a supported interactive product direction.
   it should move behind a more obviously diagnostic switch or be retired from
   the user-facing config surface in a later cleanup card.
 
+2026-04-16 follow-on note:
+- preview has now been moved behind an explicit operator/debug env gate rather
+  than remaining part of the normal alpha-facing config posture
+
 ## Next Task
 
 Decide whether the macOS preview mode should remain user-selectable in alpha or

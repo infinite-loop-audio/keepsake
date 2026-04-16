@@ -103,7 +103,7 @@ replace_default_vst2_paths = false
 vst2_paths = ["/extra/vst/folder"]
 
 [gui]
-mac_mode = "live" # live | auto | preview (aliases: floating, iosurface, embedded)
+mac_mode = "live" # live | auto (preview is diagnostic-only; see note below)
 mac_attach_target = "auto" # auto | requested-parent | content-view | frame-superview
 
 [expose]
@@ -129,13 +129,20 @@ clear:
 
 - `mac_mode = "live"`: use the bridge-owned live editor window for real interaction
 - `mac_mode = "auto"`: compatibility alias that still resolves to the live editor posture
-- `mac_mode = "preview"`: use the IOSurface embedded preview path for diagnostics only
 
 `live` is now the intended and validated macOS interaction posture for bridged
 VST2 editors in the strongest lane (`macOS + REAPER + VST2`, including Serum,
-APC, and Khords). `preview` preserves the IOSurface rendering work as an
-experimental inspection path, but it is no longer the active macOS product
-direction and should not be treated as a broadly supported interactive mode.
+APC, and Khords).
+
+The old IOSurface preview path is still available for diagnostics, but it is no
+longer part of the normal alpha config surface. To force it intentionally for
+operator/debug work:
+
+```sh
+KEEPSAKE_MAC_ENABLE_PREVIEW=1 KEEPSAKE_MAC_UI_MODE=preview open -a REAPER
+```
+
+Do not treat preview as a broadly supported interactive mode.
 
 ---
 

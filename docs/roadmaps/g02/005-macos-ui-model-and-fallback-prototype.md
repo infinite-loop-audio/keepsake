@@ -140,6 +140,7 @@ Acceptance:
 - [x] explicit PASS/FAIL posture for:
       - embedded preview remains diagnostic-only, not a supported interactive mode
       - live remote editor interaction mode is the macOS alpha posture
+- [x] preview no longer needs to remain part of the normal alpha config surface
 
 ## Stop Conditions
 
@@ -152,6 +153,6 @@ Acceptance:
 
 ## Next Task
 
-Promote the resulting macOS release posture into the alpha docs and known
-issues surfaces, then decide whether preview should stay user-exposed or move
-behind a more explicitly diagnostic operator flag in a later cleanup card.
+Follow with a narrower cleanup card only if the remaining diagnostic preview
+lane should be removed entirely instead of merely hidden behind operator-only
+controls.

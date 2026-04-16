@@ -167,7 +167,8 @@ Reasoning:
 
 1. Formalize the bridge-owned live editor as the primary macOS model.
 2. Keep the current IOSurface lane available only as render-only /
-   best-effort experimental presentation.
+   best-effort experimental presentation behind an explicit diagnostic/operator
+   switch.
 3. Validate the live path with the current comparison set:
    - Serum
    - APC
@@ -192,6 +193,6 @@ should assume bridge-owned live editor first, diagnostic preview only second.
 
 ## Next Task
 
-Finish the release-posture cleanup around the chosen model:
-make bridge-owned live editor the explicit macOS alpha default and narrow
-embedded-preview claims to diagnostic-only surfaces.
+Decide whether the remaining diagnostic preview lane still earns its
+maintenance cost, or whether it should be removed entirely in a later cleanup
+batch.
