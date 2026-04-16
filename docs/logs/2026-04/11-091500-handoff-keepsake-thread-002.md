@@ -89,7 +89,7 @@ The work delivered in this thread takes Keepsake from "planning documents" to "w
 - CLAP remains the outer plugin format — no VST3 outer format
 - VST3 SDK (GPLv3) must run in the bridge subprocess only (license boundary at process edge)
 - Signal integration work belongs in the Signal repo, not here
-- Follow repo constraints from [AGENTS.md](~/Dev/projects/keepsake/AGENTS.md)
+- Follow repo constraints from [AGENTS.md](../../../AGENTS.md)
 
 ## Important Context
 

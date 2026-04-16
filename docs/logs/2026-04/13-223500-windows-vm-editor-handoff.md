@@ -38,7 +38,7 @@ Windows is the weakest major release lane right now. macOS primary evidence is s
 - Do not widen into Linux, macOS, or general release-packaging work from this handoff.
 - Do not introduce plugin-name-specific hacks for APC or Serum.
 - Do not use or reference the Steinberg VST2 SDK; VST2 stays VeSTige-only.
-- Follow repo constraints from [AGENTS.md](~/Dev/projects/keepsake/AGENTS.md).
+- Follow repo constraints from [AGENTS.md](../../../AGENTS.md).
 
 ## Important Context
 

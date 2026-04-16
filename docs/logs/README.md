@@ -14,11 +14,11 @@ Logs capture dated evidence and assessments.
 
 ## Recent Evidence
 
+- [`2026-04/16-235950-macos-live-x64-strap-closeout.md`](2026-04/16-235950-macos-live-x64-strap-closeout.md) — x64 macOS live windows now carry the internal Keepsake strap and close cleanly in the harness
 - [`2026-04/16-235900-macos-live-editor-posture-closeout.md`](2026-04/16-235900-macos-live-editor-posture-closeout.md) — g02.005 closeout: Serum/APC/Khords validated in REAPER live mode; embedded preview demoted to diagnostic-only posture
 - [`2026-04/16-235500-macos-live-editor-host-batch.md`](2026-04/16-235500-macos-live-editor-host-batch.md) — g02.005 batch 5.2 partial: auto/live operator surface landed; Serum/APC live harness pass, Khords live open still failing
 - [`2026-04/16-233000-macos-live-editor-fallback-contract.md`](2026-04/16-233000-macos-live-editor-fallback-contract.md) — g02.005 batch 5.1 complete: explicit macOS preview/live/auto contract and harness proof for preview + live paths
 - [`2026-04/16-221500-mac-iosurface-embedded-ui-architecture-decision.md`](2026-04/16-221500-mac-iosurface-embedded-ui-architecture-decision.md) — accepted cutoff: current mac cross-process embedded-input model is not a universal support path
-- [`2026-04/11-091500-handoff-keepsake-thread-002.md`](2026-04/11-091500-handoff-keepsake-thread-002.md) — thread-002 handoff: 7 milestones complete, context for next thread
 - [`2026-04/11-093000-g01-009-32-bit-bridge.md`](2026-04/11-093000-g01-009-32-bit-bridge.md) — g01.009 complete: packed IPC structs, PE/ELF arch detection, 32-bit bridge routing
 - [`2026-04/11-090000-g01-008-multi-format-loaders.md`](2026-04/11-090000-g01-008-multi-format-loaders.md) — g01.008 complete: bridge loader abstraction, AU v2 scanning + loading, multi-format factory
 - [`2026-04/10-230000-g01-006-gui-forwarding.md`](2026-04/10-230000-g01-006-gui-forwarding.md) — g01.006 complete: floating window GUI, macOS Cocoa editor hosting, CLAP GUI extension

@@ -2,7 +2,7 @@
 
 Status: active
 Owner: Infinite Loop Audio
-Updated: 2026-04-12
+Updated: 2026-04-16
 
 This is the release-baseline caveat list for the first public alpha. It should
 shrink or sharpen as g02 validation runs. Do not broaden support claims around
@@ -60,6 +60,9 @@ should not imply equal confidence without fresh release-window evidence.
 - On macOS, the supported bridged-editor posture is now the bridge-owned live
   editor window. This is the path validated in the strongest current lane for
   Serum, APC, and Khords.
+- Bridged `x64` VST2 live windows on macOS now also carry the Keepsake strap
+  inside the same window above the plugin UI. Treat that as part of the live
+  baseline, not as evidence for embedded interaction.
 - The old IOSurface embedded preview path still exists in tree, but it should
   be treated as diagnostic / experimental only and is now intended for
   operator/debug use rather than normal alpha configuration. The release should

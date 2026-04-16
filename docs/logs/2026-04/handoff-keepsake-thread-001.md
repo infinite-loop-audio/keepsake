@@ -77,7 +77,7 @@ Without Keepsake, Signal users with large VST2 plugin libraries either stay on o
 - Do not begin implementation on g01.001 until `docs/contracts/002-clap-factory-interface.md` exists and the milestone itself is authored as a ready card
 - Do not treat "compiles without errors" as done — the g01.001 milestone closes when a real VST2 plugin appears in a real CLAP host with correct metadata
 - Signal integration work (Tier 2+ polish: badge, rescan trigger, detection) belongs in the Signal repo, not here; do not introduce Signal dependencies into Keepsake
-- Follow repo constraints from [AGENTS.md](~/Dev/projects/keepsake/AGENTS.md)
+- Follow repo constraints from [AGENTS.md](../../../AGENTS.md)
 
 ## Important Context
 
