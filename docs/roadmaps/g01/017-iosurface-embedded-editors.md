@@ -7,10 +7,13 @@ Auto-continuation: allowed within g01
 
 ## Scope
 
-Replace floating editor windows on macOS with true embedded editors using
-IOSurface for cross-process GPU surface sharing. The plugin editor renders
-in the bridge subprocess, the pixels appear in the host's plugin window
-via shared GPU memory.
+This card is now a parked research/evidence surface, not an active product
+direction.
+
+The original goal was to replace floating editor windows on macOS with true
+embedded editors using IOSurface for cross-process GPU surface sharing. The
+plugin editor would render in the bridge subprocess and the pixels would appear
+in the host's plugin window via shared GPU memory.
 
 ## Architecture
 
@@ -94,6 +97,11 @@ The current "cross-process embedded bitmap plus injected native input" model
 is not a dependable universal macOS editor architecture for arbitrary bridged
 plugin UIs. Keep the IOSurface lane as an experimental rendering baseline, but
 do not treat incremental AppKit event tweaking as the main path forward.
+
+Superseding posture:
+- The macOS primary path is now the bridge-owned live editor window.
+- This card remains useful only as evidence and as a potential future research
+  lane if a new architecture decision explicitly reopens embedded work.
 
 Promising avenues to revisit:
 - **In-process GUI loading** (Option A from earlier analysis) — load the

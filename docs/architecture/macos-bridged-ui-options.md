@@ -148,32 +148,31 @@ mode, while others are explicitly fallback-only or unsupported.
 
 ## Recommendation
 
-Adopt **Option A in the short term** and evaluate **Option B as the likely
-stable macOS direction**.
+Adopt **Option B as the primary macOS direction**, and keep only a narrow slice
+of **Option A** as diagnostic support.
 
 Reasoning:
 
 - Option C is still interesting, but it is no longer the right default
   execution assumption.
-- Option A preserves the useful embedded rendering baseline without claiming
-  universal interaction.
-- Option B is the strongest candidate for dependable broad compatibility if the
-  product decides that true embed is not worth the macOS-specific complexity.
+- The live bridge-owned editor path is now the strongest proven interaction
+  lane in real REAPER validation across Serum, APC, and Khords.
+- Option A still preserves the useful IOSurface rendering baseline, but it no
+  longer deserves equal product posture with the live editor path.
+- Option B is now the default macOS UI stance, not just a fallback candidate.
 - Option D should be used regardless, so public claims stay aligned to actual
   behavior.
 
 ## Proposed Prototype Sequence
 
-1. Formalize a macOS "interactive remote editor" fallback policy.
-2. Keep the current IOSurface embedded lane available as render-only /
+1. Formalize the bridge-owned live editor as the primary macOS model.
+2. Keep the current IOSurface lane available only as render-only /
    best-effort experimental presentation.
-3. Add explicit host-side affordance for switching from embedded preview to the
-   live bridge-owned editor.
-4. Validate the fallback with the current comparison set:
+3. Validate the live path with the current comparison set:
    - Serum
    - APC
    - Khords
-5. Only after a stable fallback exists, decide whether Option C deserves a
+4. Only after the live path is stable, decide whether Option C deserves a
    separate research milestone.
 
 ## Open Questions
@@ -187,16 +186,12 @@ Reasoning:
 
 ## Decision Gate
 
-Do not resume incremental embedded-input tweaking until one of the following is
-chosen explicitly:
-
-- prototype Option A as the next implementation lane
-- prototype Option B as the next implementation lane
-- or narrow release claims enough that neither embedded interaction path is
-  required for the current alpha
+Do not resume incremental embedded-input tweaking unless there is a fresh
+architecture decision that reopens that lane. The current macOS release posture
+should assume bridge-owned live editor first, diagnostic preview only second.
 
 ## Next Task
 
-Promote one macOS UI prototype lane into roadmap-ready form:
-either "render-only embed plus interactive remote fallback" or
-"bridge-owned interactive window as primary macOS editor model."
+Finish the release-posture cleanup around the chosen model:
+make bridge-owned live editor the explicit macOS alpha default and narrow
+embedded-preview claims to diagnostic-only surfaces.

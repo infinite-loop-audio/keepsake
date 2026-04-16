@@ -24,6 +24,11 @@ Started: 2026-04-10
 | `015` | [Codebase Health](015-codebase-health.md) | complete |
 | `016` | [Soundcheck Integration](016-soundcheck-integration.md) | deferred |
 
+Note:
+- `017` remains parked as an evidence/research card for macOS IOSurface
+  preview work. It is not the active macOS product direction; the live editor
+  posture was promoted in `g02.005`.
+
 ## Sequencing Intent
 
 G01 covers the work from zero to a production-capable multi-format plugin

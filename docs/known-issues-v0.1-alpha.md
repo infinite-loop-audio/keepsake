@@ -57,9 +57,13 @@ should not imply equal confidence without fresh release-window evidence.
 ### GUI/editor behavior
 
 - macOS plugin GUI handling is strongest in REAPER today.
-- Cross-process embedded editor behavior remains platform- and host-sensitive.
-  The release should not imply that every editor mode is equally settled across
-  hosts.
+- On macOS, the supported bridged-editor posture is now the bridge-owned live
+  editor window. This is the path validated in the strongest current lane for
+  Serum, APC, and Khords.
+- The old IOSurface embedded preview path still exists in tree, but it should
+  be treated as diagnostic / experimental only. The release should not imply
+  that interactive embedded editing is a settled or generally supported macOS
+  mode.
 - AU GUI handling is not yet part of the strongest proven alpha lane.
 
 ### Packaging and install surface

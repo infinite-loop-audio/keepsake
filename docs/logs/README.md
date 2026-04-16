@@ -14,6 +14,7 @@ Logs capture dated evidence and assessments.
 
 ## Recent Evidence
 
+- [`2026-04/16-235900-macos-live-editor-posture-closeout.md`](2026-04/16-235900-macos-live-editor-posture-closeout.md) — g02.005 closeout: Serum/APC/Khords validated in REAPER live mode; embedded preview demoted to diagnostic-only posture
 - [`2026-04/16-235500-macos-live-editor-host-batch.md`](2026-04/16-235500-macos-live-editor-host-batch.md) — g02.005 batch 5.2 partial: auto/live operator surface landed; Serum/APC live harness pass, Khords live open still failing
 - [`2026-04/16-233000-macos-live-editor-fallback-contract.md`](2026-04/16-233000-macos-live-editor-fallback-contract.md) — g02.005 batch 5.1 complete: explicit macOS preview/live/auto contract and harness proof for preview + live paths
 - [`2026-04/16-221500-mac-iosurface-embedded-ui-architecture-decision.md`](2026-04/16-221500-mac-iosurface-embedded-ui-architecture-decision.md) — accepted cutoff: current mac cross-process embedded-input model is not a universal support path

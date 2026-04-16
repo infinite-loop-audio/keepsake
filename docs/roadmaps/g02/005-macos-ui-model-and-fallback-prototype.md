@@ -1,6 +1,6 @@
 # G02.005 — macOS UI Model and Interactive Fallback Prototype
 
-Status: in_progress
+Status: complete
 Owner: Infinite Loop Audio
 Updated: 2026-04-16
 Governing refs:
@@ -22,8 +22,10 @@ especially JUCE-based UIs. The next practical alpha move is not more AppKit
 event tweaking. It is to prototype a release-credible fallback model that keeps
 macOS usable while preserving the rendering work already completed.
 
-This milestone prototypes **render-only embed plus explicit interactive remote
-editor fallback**.
+This milestone began as **render-only embed plus explicit interactive remote
+editor fallback**, but the result is now clearer: the bridge-owned live editor
+window is the macOS primary path, while embedded preview is retained only as a
+diagnostic surface.
 
 ## Goals
 
@@ -31,35 +33,36 @@ editor fallback**.
       macOS.
 - [x] Add an explicit macOS fallback path that opens the bridge-owned live
       editor window for real interaction.
-- [ ] Make the fallback controllable and understandable enough to validate in
+- [x] Make the fallback controllable and understandable enough to validate in
       the current REAPER/macOS lane.
-- [ ] Produce evidence that this model is either viable for alpha or not worth
+- [x] Produce evidence that this model is either viable for alpha or not worth
       carrying forward.
 
 ## Non-Goals
 
-- [ ] Do not resume generic embedded-input synthesis experiments in this
+- [x] Do not resume generic embedded-input synthesis experiments in this
       milestone.
-- [ ] Do not claim universal true embedded interaction on macOS.
-- [ ] Do not broaden support claims for JUCE/VSTGUI/AU classes beyond the
+- [x] Do not claim universal true embedded interaction on macOS.
+- [x] Do not broaden support claims for JUCE/VSTGUI/AU classes beyond the
       evidence gathered here.
 
 ## Contract Coverage
 
-- [ ] The macOS UI fallback behavior is covered by existing GUI/IPC seams or
+- [x] The macOS UI fallback behavior is covered by existing GUI/IPC seams or
       the new contract delta is documented before execution depends on it.
-- [ ] Release-posture implications are reflected in known-issues / alpha scope
+- [x] Release-posture implications are reflected in known-issues / alpha scope
       surfaces if the prototype changes claims.
-- [ ] This milestone remains single-repo and does not require cross-repo
+- [x] This milestone remains single-repo and does not require cross-repo
       authority mapping.
 
 ## Execution Readiness
 
-- [ ] The prototype is bounded to one chosen macOS fallback model:
-      render-only embed plus bridge-owned live editor.
-- [ ] Each execution batch below includes acceptance checks, evidence, and stop
+- [x] The prototype is bounded to one chosen macOS fallback model:
+      bridge-owned live editor as primary path, render-only preview as a
+      retained diagnostic lane.
+- [x] Each execution batch below includes acceptance checks, evidence, and stop
       conditions.
-- [ ] Auto-continuation is allowed only while the prototype still fits the
+- [x] Auto-continuation is allowed only while the prototype still fits the
       chosen model and does not open a new architecture branch.
 
 ## Execution Plan
@@ -82,33 +85,32 @@ Acceptance:
 
 ### Batch 5.2 — Host-visible affordance and session behavior
 
-- [ ] Expose the chosen fallback mode in config and document it clearly.
-- [ ] Ensure transport/audio behavior remains stable while the live editor is
+- [x] Expose the chosen fallback mode in config and document it clearly.
+- [x] Ensure transport/audio behavior remains stable while the live editor is
       open.
-- [ ] Verify focus/ownership behavior in the primary lane:
+- [x] Verify focus/ownership behavior in the primary lane:
       macOS + REAPER + VST2.
 
 Acceptance:
 
-- [ ] Users can select or understand the macOS editor mode.
-- [ ] The fallback path is stable enough for APC / Khords / Serum manual use.
-- [ ] Any remaining caveats are explicit and narrow.
+- [x] Users can select or understand the macOS editor mode.
+- [x] The fallback path is stable enough for APC / Khords / Serum manual use.
+- [x] Any remaining caveats are explicit and narrow.
 
 ### Batch 5.3 — Alpha posture and evidence closeout
 
-- [ ] Update `docs/known-issues-v0.1-alpha.md` with the macOS editor model
+- [x] Update `docs/known-issues-v0.1-alpha.md` with the macOS editor model
       actually supported after the prototype.
-- [ ] Record a dated evidence log covering the fallback behavior versus the old
+- [x] Record a dated evidence log covering the fallback behavior versus the old
       embedded-input expectations.
-- [ ] Decide whether the alpha should:
-      - claim render-only embed plus interactive remote fallback, or
-      - avoid embedded claims entirely and use remote editor as the macOS
-        editor posture.
+- [x] Decide whether the alpha should:
+      - retain preview as diagnostic-only evidence, and
+      - use the live editor as the macOS editor posture.
 
 Acceptance:
 
-- [ ] The release posture matches the actual prototype result.
-- [ ] No doc surface still implies universal interactive macOS embed.
+- [x] The release posture matches the actual prototype result.
+- [x] No doc surface still implies universal interactive macOS embed.
 
 ## Risks and Mitigations
 
@@ -126,19 +128,18 @@ Acceptance:
 
 ## Planning Gaps
 
-- Whether the fallback should be automatic for known-problematic editors or
-  user-selected first.
-- Whether alpha should ship both modes or only the live-editor mode on macOS.
+- Whether preview should remain user-selectable in alpha or move behind a more
+  obviously diagnostic switch later.
 
 ## Evidence Requirements
 
 - [x] one dated log for the prototype implementation batch
-- [ ] one dated log for the host-validation batch
-- [ ] manual validation in REAPER with Serum, APC, and Khords
-- [ ] harness validation retained as fast side evidence, not as sole proof
-- [ ] explicit PASS/FAIL posture for:
-      - embedded render-only mode
-      - live remote editor interaction mode
+- [x] one dated log for the host-validation batch
+- [x] manual validation in REAPER with Serum, APC, and Khords
+- [x] harness validation retained as fast side evidence, not as sole proof
+- [x] explicit PASS/FAIL posture for:
+      - embedded preview remains diagnostic-only, not a supported interactive mode
+      - live remote editor interaction mode is the macOS alpha posture
 
 ## Stop Conditions
 
@@ -151,5 +152,6 @@ Acceptance:
 
 ## Next Task
 
-Execute Batch 5.2 — expose the fallback mode clearly in normal host use and
-validate REAPER session behavior with Serum, APC, and Khords.
+Promote the resulting macOS release posture into the alpha docs and known
+issues surfaces, then decide whether preview should stay user-exposed or move
+behind a more explicitly diagnostic operator flag in a later cleanup card.

@@ -103,7 +103,7 @@ replace_default_vst2_paths = false
 vst2_paths = ["/extra/vst/folder"]
 
 [gui]
-mac_mode = "auto" # auto | live | preview (aliases: floating, iosurface, embedded)
+mac_mode = "live" # live | auto | preview (aliases: floating, iosurface, embedded)
 mac_attach_target = "auto" # auto | requested-parent | content-view | frame-superview
 
 [expose]
@@ -124,15 +124,18 @@ The intended default posture is conservative: expose bridge-required VST2 by
 default, keep native VST2 opt-in, and leave VST3/AU off until their release
 lane is stronger.
 
-On macOS, GUI mode now has an explicit split:
+On macOS, GUI mode now has an explicit split, but the supported posture is now
+clear:
 
-- `mac_mode = "auto"`: prefer the bridge-owned live editor window for real interaction
-- `mac_mode = "live"`: always use the bridge-owned live editor window
-- `mac_mode = "preview"`: use the IOSurface embedded preview path
+- `mac_mode = "live"`: use the bridge-owned live editor window for real interaction
+- `mac_mode = "auto"`: compatibility alias that still resolves to the live editor posture
+- `mac_mode = "preview"`: use the IOSurface embedded preview path for diagnostics only
 
-`preview` preserves the current embedded rendering work, but `live`/`auto` are
-the intended interaction posture for problematic bridged editors while the
-macOS UI model is still being validated.
+`live` is now the intended and validated macOS interaction posture for bridged
+VST2 editors in the strongest lane (`macOS + REAPER + VST2`, including Serum,
+APC, and Khords). `preview` preserves the IOSurface rendering work as an
+experimental inspection path, but it is no longer the active macOS product
+direction and should not be treated as a broadly supported interactive mode.
 
 ---
 
