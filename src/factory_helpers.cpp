@@ -165,14 +165,28 @@ void filter_plugins(std::vector<Vst2PluginInfo> &plugins,
     for (auto &p : plugins) {
         bool include = false;
 
-        if (cfg.expose_mode == "auto") {
-            include = p.needs_cross_arch;
-        } else if (cfg.expose_mode == "whitelist") {
+        if (cfg.expose_mode == "whitelist") {
             for (const auto &wl : cfg.whitelist) {
                 if (glob_match_simple(wl.path, p.file_path)) {
                     include = true;
                     break;
                 }
+            }
+        } else {
+            switch (p.format) {
+            case FORMAT_VST2:
+                include = p.needs_cross_arch ? cfg.expose_vst2_bridged
+                                             : cfg.expose_vst2_native;
+                break;
+            case FORMAT_VST3:
+                include = cfg.expose_vst3;
+                break;
+            case FORMAT_AU:
+                include = cfg.expose_au;
+                break;
+            default:
+                include = false;
+                break;
             }
         }
 

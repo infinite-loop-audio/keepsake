@@ -30,6 +30,33 @@ static bool is_vst2(const fs::path &p) {
 #endif
 }
 
+template <typename Fn>
+static void walk_vst2_plugins(const fs::path &root, Fn &&fn) {
+    std::error_code ec;
+    if (is_vst2(root)) {
+        fn(root);
+        return;
+    }
+    if (!fs::is_directory(root, ec)) return;
+
+    fs::recursive_directory_iterator it(
+        root,
+        fs::directory_options::follow_directory_symlink |
+            fs::directory_options::skip_permission_denied,
+        ec);
+    fs::recursive_directory_iterator end;
+    for (; it != end; it.increment(ec)) {
+        if (ec) {
+            ec.clear();
+            continue;
+        }
+        const fs::path &path = it->path();
+        if (!is_vst2(path)) continue;
+        fn(path);
+        it.disable_recursion_pending();
+    }
+}
+
 // Extract filename stem from path
 static std::string stem(const std::string &path) {
     size_t sep = path.find_last_of("/\\");
@@ -73,19 +100,15 @@ int main(int argc, char *argv[]) {
     int native = 0, cross = 0, fail = 0;
 
     for (const auto &dir : vst2_paths) {
-        std::error_code ec;
-        if (!fs::is_directory(dir, ec)) continue;
-
-        for (const auto &entry : fs::directory_iterator(dir, ec)) {
-            if (!is_vst2(entry.path())) continue;
-            std::string path = entry.path().string();
+        walk_vst2_plugins(dir, [&](const fs::path &entry_path) {
+            std::string path = entry_path.string();
 
             // Try native in-process load (fast)
             Vst2PluginInfo info;
             info.format = FORMAT_VST2;
             if (vst2_load_metadata(path, info)) {
                 native++;
-                continue; // Host handles this natively
+                return; // Host handles this natively
             }
 
             // Native failed — this is a candidate for Keepsake
@@ -103,16 +126,17 @@ int main(int argc, char *argv[]) {
                            results.back().name.c_str(),
                            results.back().vendor.c_str(),
                            path.c_str());
-                    continue;
+                    return;
                 }
             }
 
             // Quick mode: use filename as name, minimal metadata
-            Vst2PluginInfo quick;
+            Vst2PluginInfo quick{};
             quick.format = FORMAT_VST2;
             quick.file_path = path;
             quick.name = stem(path);
             quick.vendor = "Unknown";
+            quick.binary_arch = vst2_detect_binary_arch(path);
             quick.needs_cross_arch = true;
             quick.unique_id = 0; // will be assigned a hash-based ID
             // Generate a stable ID from the path
@@ -122,7 +146,7 @@ int main(int argc, char *argv[]) {
             results.push_back(std::move(quick));
             printf("  [x86_64] %s — %s\n", results.back().name.c_str(),
                    path.c_str());
-        }
+        });
     }
 
     printf("\n");

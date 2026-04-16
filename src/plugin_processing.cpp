@@ -3,10 +3,16 @@
 //
 
 #include "plugin_internal.h"
+#ifdef __APPLE__
+#include "plugin_gui_mac_embed.h"
+#endif
 #include "bridge_gui.h"
 #include "debug_log.h"
 
 #include <clap/events.h>
+#ifndef _WIN32
+#include <ctime>
+#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -16,6 +22,15 @@ static const uint64_t GUI_DIRECT_RESIZE_FALLBACK_SUPPRESS_MS = 500;
 #endif
 
 static void maybe_request_gui_main_thread(KeepsakePlugin *kp);
+
+#ifndef _WIN32
+static uint64_t monotonic_now_ms() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<uint64_t>(ts.tv_sec) * 1000u +
+           static_cast<uint64_t>(ts.tv_nsec) / 1000000u;
+}
+#endif
 
 #ifdef _WIN32
 static bool maybe_apply_editor_resize_request(KeepsakePlugin *kp, ShmProcessControl *ctrl) {
@@ -365,6 +380,20 @@ void plugin_on_main_thread(const clap_plugin_t *plugin) {
     keepsake_gui_session_clear_callback_request(kp);
 
     auto *ctrl = shm_control(kp->shm.ptr);
+#ifdef __APPLE__
+    if (kp->gui_iosurface_embed) {
+        if (kp->gui_embed_refresh_burst_remaining > 0) {
+            if (!send_and_wait(kp, IPC_OP_EDITOR_REFRESH, nullptr, 0, nullptr, 200)) {
+                keepsake_debug_log("keepsake: editor_refresh failed during embed warmup\n");
+            }
+        }
+        gui_mac_refresh_iosurface(kp);
+    }
+#endif
+    if (kp->gui_iosurface_embed && kp->gui_embed_refresh_burst_remaining > 0) {
+        kp->gui_embed_refresh_burst_remaining -= 1;
+        keepsake_gui_session_request_callback_once(kp);
+    }
 #ifdef _WIN32
     if (keepsake_gui_session_can_host_resize(kp)) {
         if (!maybe_apply_editor_resize_request(kp, ctrl)) {
@@ -439,6 +468,27 @@ static void maybe_request_gui_main_thread(KeepsakePlugin *kp) {
         keepsake_gui_session_request_callback_once(kp);
         return;
     }
+
+#ifdef __APPLE__
+    if (kp->editor_open && kp->gui_iosurface_embed) {
+        uint64_t now_ms = 0;
+#ifdef _WIN32
+        now_ms = GetTickCount64();
+#else
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        now_ms = static_cast<uint64_t>(ts.tv_sec) * 1000u +
+                 static_cast<uint64_t>(ts.tv_nsec) / 1000000u;
+#endif
+        if (now_ms - kp->last_gui_poll_ms >= 16) {
+            kp->last_gui_poll_ms = now_ms;
+            keepsake_gui_session_request_callback_once(kp);
+        }
+        if (kp->gui_embed_refresh_burst_remaining > 0) {
+            keepsake_gui_session_request_callback_once(kp);
+        }
+    }
+#endif
 
 #ifdef _WIN32
     if (kp->editor_open && !kp->gui_is_floating) {

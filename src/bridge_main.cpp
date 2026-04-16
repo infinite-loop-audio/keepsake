@@ -196,12 +196,50 @@ int main(int argc, char *argv[]) {
                 else
                     hdr.plugin_name = "Plugin";
 
-                if (gui_open_editor(inst->loader, hdr)) {
+                IpcEditorOpenRequest open_req{};
+                bool wants_iosurface = false;
+                if (payload.size() >= sizeof(open_req)) {
+                    memcpy(&open_req, payload.data(), sizeof(open_req));
+                    wants_iosurface = open_req.mode == IPC_EDITOR_OPEN_IOSURFACE &&
+                                      open_req.width > 0 &&
+                                      open_req.height > 0;
+                }
+
+                if (wants_iosurface) {
+                    IpcEditorSurface surface{};
+                    surface.surface_id = gui_open_editor_iosurface(inst->loader,
+                                                                   open_req.width,
+                                                                   open_req.height);
+                    if (surface.surface_id != 0) {
+                        int actual_width = open_req.width;
+                        int actual_height = open_req.height;
+                        if (gui_get_editor_rect(inst->loader, actual_width, actual_height) &&
+                            actual_width > 0 && actual_height > 0) {
+                            if ((actual_width != open_req.width || actual_height != open_req.height) &&
+                                !gui_resize_editor_iosurface(actual_width, actual_height,
+                                                             surface.surface_id)) {
+                                keepsake_debug_log("bridge: iosurface resize failed, keeping provisional surface size=%dx%d actual=%dx%d\n",
+                                                   open_req.width, open_req.height,
+                                                   actual_width, actual_height);
+                            }
+                            surface.width = actual_width;
+                            surface.height = actual_height;
+                        } else {
+                            surface.width = open_req.width;
+                            surface.height = open_req.height;
+                        }
+                        ipc_write_ok(g_pipe_out, &surface, sizeof(surface));
+                    } else {
+                        keepsake_debug_log("bridge: editor iosurface open FAILED instance=%u size=%dx%d\n",
+                                           instance_id, open_req.width, open_req.height);
+                        ipc_write_error(g_pipe_out, "EDITOR_OPEN: iosurface failed");
+                    }
+                } else if (gui_open_editor(inst->loader, hdr)) {
                     ipc_write_ok(g_pipe_out);
                 } else {
-                keepsake_debug_log("bridge: editor open FAILED instance=%u\n",
-                                   instance_id);
-                ipc_write_error(g_pipe_out, "EDITOR_OPEN: failed");
+                    keepsake_debug_log("bridge: editor open FAILED instance=%u\n",
+                                       instance_id);
+                    ipc_write_error(g_pipe_out, "EDITOR_OPEN: failed");
                 }
             } else {
                 ipc_write_error(g_pipe_out, "EDITOR_OPEN: no editor");
@@ -218,6 +256,7 @@ int main(int argc, char *argv[]) {
                 memcpy(&mev, payload.data(), sizeof(mev));
                 gui_forward_mouse(mev);
             }
+            ipc_write_ok(g_pipe_out);
             break;
         case IPC_OP_EDITOR_KEY:
             if (gui_is_iosurface_mode() && payload.size() >= sizeof(IpcKeyEvent)) {
@@ -225,6 +264,7 @@ int main(int argc, char *argv[]) {
                 memcpy(&kev, payload.data(), sizeof(kev));
                 gui_forward_key(kev);
             }
+            ipc_write_ok(g_pipe_out);
             break;
         case IPC_OP_EDITOR_GET_RECT: handle_editor_get_rect(inst); break;
         case IPC_OP_EDITOR_GET_STATUS: {
@@ -235,6 +275,10 @@ int main(int argc, char *argv[]) {
             ipc_write_ok(g_pipe_out, &status, sizeof(status));
             break;
         }
+        case IPC_OP_EDITOR_REFRESH:
+            gui_idle(inst->loader);
+            ipc_write_ok(g_pipe_out);
+            break;
         case IPC_OP_EDITOR_SET_PARENT:
             if (inst->loader && payload.size() >= 8) {
                 gui_set_status_shm(inst->shm.ptr);

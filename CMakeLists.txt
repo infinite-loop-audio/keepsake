@@ -101,7 +101,9 @@ set_target_properties(keepsake PROPERTIES
 # --- Platform-specific configuration ---
 
 if(APPLE)
-    target_sources(keepsake PRIVATE src/plugin_gui.cpp)
+    target_sources(keepsake PRIVATE
+        src/plugin_gui.cpp
+        src/plugin_gui_mac_embed.mm)
     set_target_properties(keepsake PROPERTIES
         BUNDLE TRUE
         BUNDLE_EXTENSION clap
@@ -229,6 +231,7 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
     # Build an x86_64 bridge binary for loading x86_64 VST2 plugins
     add_executable(keepsake-bridge-x86_64
         src/bridge_main.cpp
+        src/plugin_labels.cpp
         src/bridge_runtime.cpp
         src/bridge_runtime_init.cpp
         src/bridge_runtime_audio.cpp
@@ -348,4 +351,14 @@ if(APPLE OR UNIX)
 
     add_executable(host-test-threaded tools/host-test-threaded.cpp)
     target_link_libraries(host-test-threaded PRIVATE clap dl)
+
+    if(APPLE)
+        add_executable(mac-clap-host tools/mac-clap-host.mm)
+        target_link_libraries(mac-clap-host PRIVATE
+            clap
+            dl
+            "-framework Cocoa"
+            "-framework QuartzCore"
+        )
+    endif()
 endif()

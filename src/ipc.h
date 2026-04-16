@@ -32,7 +32,7 @@ static constexpr uint32_t IPC_OP_MIDI_EVENT    = 0x0A;
 static constexpr uint32_t IPC_OP_GET_PARAM_INFO = 0x0B; // payload: uint32_t index
 static constexpr uint32_t IPC_OP_GET_CHUNK      = 0x0C;  // no payload
 static constexpr uint32_t IPC_OP_SET_CHUNK      = 0x0D;  // payload: chunk bytes
-static constexpr uint32_t IPC_OP_EDITOR_OPEN    = 0x10;  // no payload
+static constexpr uint32_t IPC_OP_EDITOR_OPEN    = 0x10;  // optional payload: IpcEditorOpenRequest
 static constexpr uint32_t IPC_OP_EDITOR_CLOSE   = 0x11;  // no payload
 static constexpr uint32_t IPC_OP_EDITOR_GET_RECT = 0x12; // no payload
 static constexpr uint32_t IPC_OP_EDITOR_SET_PARENT  = 0x13; // payload: uint64_t native_handle
@@ -40,6 +40,7 @@ static constexpr uint32_t IPC_OP_EDITOR_MOUSE       = 0x14; // payload: IpcMouse
 static constexpr uint32_t IPC_OP_EDITOR_KEY          = 0x15; // payload: IpcKeyEvent
 static constexpr uint32_t IPC_OP_EDITOR_SET_TRANSIENT = 0x16; // payload: uint64_t native_handle
 static constexpr uint32_t IPC_OP_EDITOR_GET_STATUS    = 0x17; // no payload
+static constexpr uint32_t IPC_OP_EDITOR_REFRESH       = 0x18; // no payload
 
 // Bridge → Host
 static constexpr uint32_t IPC_OP_OK           = 0x81;
@@ -105,6 +106,11 @@ struct IpcPluginInfo {
 struct IpcEditorStatus {
     uint32_t open;
     uint32_t pending;
+};
+
+enum IpcEditorOpenMode : uint32_t {
+    IPC_EDITOR_OPEN_FLOATING = 0,
+    IPC_EDITOR_OPEN_IOSURFACE = 1,
 };
 
 // --- Pipe I/O helpers ---
@@ -188,6 +194,12 @@ struct IpcKeyEvent {
     char pad[3];
 };
 
+struct IpcEditorOpenRequest {
+    uint32_t mode;   // IpcEditorOpenMode
+    int32_t width;
+    int32_t height;
+};
+
 // IOSurface ID response (bridge → host, in OK payload for EDITOR_OPEN)
 struct IpcEditorSurface {
     uint32_t surface_id;  // IOSurfaceID for cross-process GPU sharing
@@ -213,6 +225,7 @@ static_assert(sizeof(IpcMidiEventPayload) == 8, "IpcMidiEventPayload size mismat
 static_assert(sizeof(IpcPluginInfo) == 28, "IpcPluginInfo size mismatch");
 static_assert(sizeof(IpcParamInfoResponse) == 88, "IpcParamInfoResponse size mismatch");
 static_assert(sizeof(IpcEditorRect) == 8, "IpcEditorRect size mismatch");
+static_assert(sizeof(IpcEditorOpenRequest) == 12, "IpcEditorOpenRequest size mismatch");
 
 // --- Instance-aware message helpers ---
 // For multi-instance bridges, the instance_id is the first 4 bytes of

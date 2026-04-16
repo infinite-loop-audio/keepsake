@@ -15,7 +15,7 @@ struct IsolationOverride {
 };
 
 // Exposure mode: which plugins does Keepsake make visible to the host?
-//   "auto"      — only plugins the host can't load natively (arch mismatch)
+//   "auto"      — apply the explicit expose.* booleans below
 //   "whitelist" — only explicitly listed plugins
 //   "all"       — everything found (development/testing only)
 struct WhitelistEntry {
@@ -26,9 +26,15 @@ struct KeepsakeConfig {
     bool replace_default_vst2_paths = false;
     std::vector<std::string> extra_vst2_paths;
     bool force_rescan = false;
+    std::string mac_ui_mode = "floating"; // "floating", "iosurface"
+    std::string mac_embed_attach_target = "auto"; // "auto", "requested-parent", "content-view", "frame-superview"
     std::string isolation_default = "per-instance";
     std::vector<IsolationOverride> isolation_overrides;
     std::string expose_mode = "auto"; // "auto", "whitelist", "all"
+    bool expose_vst2_bridged = true;
+    bool expose_vst2_native = false;
+    bool expose_vst3 = false;
+    bool expose_au = false;
     std::vector<WhitelistEntry> whitelist;
 };
 

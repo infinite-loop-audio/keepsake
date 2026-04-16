@@ -20,12 +20,38 @@ bool is_vst3_file(const fs::path &p) {
     return p.extension() == ".vst3";
 }
 
+template <typename Fn>
+void walk_vst2_plugins(const fs::path &root, Fn &&fn) {
+    std::error_code ec;
+    if (is_vst2_file(root)) {
+        fn(root);
+        return;
+    }
+    if (!fs::is_directory(root, ec)) return;
+
+    fs::recursive_directory_iterator it(
+        root,
+        fs::directory_options::follow_directory_symlink |
+            fs::directory_options::skip_permission_denied,
+        ec);
+    fs::recursive_directory_iterator end;
+    for (; it != end; it.increment(ec)) {
+        if (ec) {
+            ec.clear();
+            continue;
+        }
+        const fs::path &path = it->path();
+        if (!is_vst2_file(path)) continue;
+        fn(path);
+        it.disable_recursion_pending();
+    }
+}
+
 } // namespace
 
 void scan_vst2_entry(const std::string &entry_path,
                      std::vector<Vst2PluginInfo> &results,
                      bool targeted_vst2_override) {
-    std::error_code ec;
     fs::path entry(entry_path);
 
     auto try_scan_plugin = [&](const fs::path &plugin_path) {
@@ -40,6 +66,12 @@ void scan_vst2_entry(const std::string &entry_path,
 #ifdef _WIN32
         if (binary_arch == "x86" && !s_bridge_32_path.empty()) {
             bridge_binary = s_bridge_32_path;
+        }
+#endif
+#ifdef __APPLE__
+        if (bridge_binary.empty() &&
+            binary_arch == "x86_64" && !s_bridge_x86_64_path.empty()) {
+            bridge_binary = s_bridge_x86_64_path;
         }
 #endif
         if (bridge_binary.empty() &&
@@ -58,17 +90,7 @@ void scan_vst2_entry(const std::string &entry_path,
         }
     };
 
-    if (is_vst2_file(entry)) {
-        try_scan_plugin(entry);
-        return;
-    }
-
-    if (!fs::is_directory(entry, ec)) return;
-    for (const auto &dir_entry : fs::directory_iterator(entry, ec)) {
-        if (ec) break;
-        if (!is_vst2_file(dir_entry.path())) continue;
-        try_scan_plugin(dir_entry.path());
-    }
+    walk_vst2_plugins(entry, try_scan_plugin);
 }
 
 #ifdef __APPLE__

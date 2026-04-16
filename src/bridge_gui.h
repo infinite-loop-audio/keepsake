@@ -55,6 +55,7 @@ bool gui_is_open();
 // Returns the IOSurfaceID (or 0 on failure) which the host uses to
 // composite the editor into its window.
 uint32_t gui_open_editor_iosurface(BridgeLoader *loader, int width, int height);
+bool gui_resize_editor_iosurface(int width, int height, uint32_t &surface_id);
 
 // Forward a mouse event to the offscreen editor view.
 struct IpcMouseEvent;

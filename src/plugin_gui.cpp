@@ -5,6 +5,9 @@
 #include "plugin_internal.h"
 #include "bridge_gui.h"
 #include "debug_log.h"
+#ifdef __APPLE__
+#include "plugin_gui_mac_embed.h"
+#endif
 
 #include <atomic>
 #include <cmath>
@@ -140,7 +143,7 @@ static bool gui_create(const clap_plugin_t *plugin, const char *, bool is_floati
     if (!kp->bridge_ok && !kp->crashed) wait_async_init(kp, 1500);
     if (!kp->has_editor || kp->crashed) return false;
 #ifdef __APPLE__
-    kp->gui_is_floating = true;
+    kp->gui_is_floating = is_floating || !gui_mac_should_use_iosurface_embed();
 #elif defined(_WIN32)
     kp->gui_is_floating = is_floating || kp->gui_embed_failed;
 #else
@@ -203,6 +206,9 @@ static void gui_destroy(const clap_plugin_t *plugin) {
         keepsake_gui_session_mark_closed(kp);
     }
     keepsake_gui_session_mark_closed(kp);
+#ifdef __APPLE__
+    gui_mac_detach_iosurface(kp);
+#endif
 #ifdef _WIN32
     keepsake_gui_session_clear_callback_request(kp);
     gui_resume_processing_after_editor(kp);
@@ -222,6 +228,17 @@ static bool gui_set_scale(const clap_plugin_t *plugin, double scale) {
 static bool gui_get_size(const clap_plugin_t *plugin, uint32_t *w, uint32_t *h) {
     auto *kp = get(plugin);
     if (!kp->bridge_ok && !kp->crashed) wait_async_init(kp, 1500);
+#ifdef __APPLE__
+    if (gui_mac_should_use_iosurface_embed() &&
+        !kp->editor_open &&
+        kp->editor_width <= 0 &&
+        kp->editor_height <= 0) {
+        *w = 960;
+        *h = 640;
+        keepsake_debug_log("keepsake: gui_get_size default-iosurface %ux%u\n", *w, *h);
+        return true;
+    }
+#endif
     gui_refresh_size(kp);
     if (kp->editor_width > 0 && kp->editor_height > 0) {
 #ifdef _WIN32
@@ -272,18 +289,78 @@ static bool gui_set_size(const clap_plugin_t *, uint32_t w, uint32_t h) {
     return false;
 }
 
+static void gui_arm_embed_refresh_burst(KeepsakePlugin *kp, uint32_t frames) {
+    if (!kp || !kp->gui_iosurface_embed) return;
+    if (frames > kp->gui_embed_refresh_burst_remaining) {
+        kp->gui_embed_refresh_burst_remaining = frames;
+    }
+    keepsake_gui_session_request_callback_once(kp);
+}
+
 static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *window) {
     auto *kp = get(plugin);
     if (!kp->bridge_ok && !kp->crashed) wait_async_init(kp, 1500);
     if (kp->crashed || !kp->has_editor || !kp->bridge || !window) return false;
 
 #ifdef __APPLE__
+    if (!kp->gui_is_floating && gui_mac_should_use_iosurface_embed()) {
+        int32_t width = kp->editor_width > 0 ? kp->editor_width : 960;
+        int32_t height = kp->editor_height > 0 ? kp->editor_height : 640;
+        IpcEditorOpenRequest open_req = {};
+        open_req.mode = IPC_EDITOR_OPEN_IOSURFACE;
+        open_req.width = width;
+        open_req.height = height;
+
+        std::vector<uint8_t> payload;
+        if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN,
+                           &open_req, sizeof(open_req),
+                           &payload, GUI_OPEN_TIMEOUT_MS)) {
+            keepsake_debug_log("keepsake: gui_set_parent() iosurface open failed\n");
+            return false;
+        }
+        if (payload.size() < sizeof(IpcEditorSurface)) {
+            keepsake_debug_log("keepsake: gui_set_parent() iosurface short payload=%zu\n",
+                               payload.size());
+            return false;
+        }
+
+        IpcEditorSurface surface = {};
+        memcpy(&surface, payload.data(), sizeof(surface));
+        if (!gui_mac_attach_iosurface(kp, window, surface)) {
+            keepsake_debug_log("keepsake: gui_set_parent() iosurface attach failed surface=%u\n",
+                               surface.surface_id);
+            send_and_wait(kp, IPC_OP_EDITOR_CLOSE, nullptr, 0, nullptr, 1000);
+            keepsake_gui_session_mark_closed(kp);
+            return false;
+        }
+
+        kp->gui_is_floating = false;
+        kp->editor_width = surface.width;
+        kp->editor_height = surface.height;
+        if (kp->host_gui && kp->host_gui->request_resize &&
+            surface.width > 0 && surface.height > 0 &&
+            (static_cast<int32_t>(width) != surface.width ||
+             static_cast<int32_t>(height) != surface.height)) {
+            keepsake_debug_log("keepsake: gui_set_parent iosurface request_resize %dx%d -> %dx%d\n",
+                               width, height, surface.width, surface.height);
+            kp->host_gui->request_resize(kp->host,
+                                         static_cast<uint32_t>(surface.width),
+                                         static_cast<uint32_t>(surface.height));
+        }
+        keepsake_gui_session_mark_open(kp);
+        gui_arm_embed_refresh_burst(kp, 45);
+        keepsake_debug_log("keepsake: gui_set_parent iosurface attached surface=%u size=%dx%d\n",
+                           surface.surface_id, surface.width, surface.height);
+        return true;
+    }
+
     if (!kp->editor_open) {
         if (!send_and_wait(kp, IPC_OP_EDITOR_OPEN, nullptr, 0, nullptr,
                            GUI_OPEN_TIMEOUT_MS)) {
             keepsake_debug_log("keepsake: gui_set_parent() editor open failed\n");
             return false;
         }
+        gui_mac_detach_iosurface(kp);
         keepsake_gui_session_mark_open(kp);
     }
     return true;
@@ -405,8 +482,11 @@ static bool gui_show(const clap_plugin_t *plugin) {
         if (kp->gui_is_floating) {
             keepsake_gui_session_mark_open(kp);
         } else {
-            keepsake_gui_session_request_callback_once(kp);
+            gui_arm_embed_refresh_burst(kp, 45);
         }
+    }
+    if (kp->gui_iosurface_embed) {
+        gui_arm_embed_refresh_burst(kp, 45);
     }
     keepsake_debug_log("keepsake: gui_show success seq=%llu floating=%d open=%d pending=%d\n",
                        static_cast<unsigned long long>(gui_next_lifecycle_seq()),
@@ -439,6 +519,10 @@ static bool gui_hide(const clap_plugin_t *plugin) {
         keepsake_gui_session_mark_closed(kp);
     }
     keepsake_gui_session_mark_closed(kp);
+#ifdef __APPLE__
+    gui_mac_detach_iosurface(kp);
+    kp->gui_embed_refresh_burst_remaining = 0;
+#endif
 #ifdef _WIN32
     keepsake_gui_session_clear_callback_request(kp);
     gui_resume_processing_after_editor(kp);

@@ -94,9 +94,35 @@ On first load, Keepsake scans the standard plugin locations for each format on y
 The alpha known limitations and support caveats live in
 [`docs/known-issues-v0.1-alpha.md`](docs/known-issues-v0.1-alpha.md).
 
-The exact `config.toml` schema and install-grade configuration docs are part of
-the active alpha release stream and will be finalized before `v0.1-alpha`
-publishes.
+Current practical `config.toml` keys:
+
+```toml
+[scan]
+rescan = false
+replace_default_vst2_paths = false
+vst2_paths = ["/extra/vst/folder"]
+
+[gui]
+mac_mode = "floating" # floating | iosurface
+mac_attach_target = "auto" # auto | requested-parent | content-view | frame-superview
+
+[expose]
+mode = "auto"          # auto | whitelist | all
+vst2_bridged = true    # x86_64-on-arm64, 32-bit, or other bridge-required VST2
+vst2_native = false    # native-loadable VST2 such as arm64 VST2 on Apple Silicon
+vst3 = false
+au = false
+
+[[expose.plugin]]
+path = "/Library/Audio/Plug-Ins/VST/My Plugin.vst"
+
+[isolation]
+default = "per-instance"
+```
+
+The intended default posture is conservative: expose bridge-required VST2 by
+default, keep native VST2 opt-in, and leave VST3/AU off until their release
+lane is stronger.
 
 ---
 

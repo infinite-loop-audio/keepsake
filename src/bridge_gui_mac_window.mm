@@ -4,6 +4,8 @@
 
 #import "bridge_gui_mac_internal.h"
 
+#include "debug_log.h"
+
 #include <atomic>
 #include <thread>
 #include <unistd.h>
@@ -36,8 +38,11 @@ static void style_parentless_plugin_window(NSWindow *window,
         [window center];
     }
 
-    [window makeKeyAndOrderFront:nil];
-    [NSApp activateIgnoringOtherApps:YES];
+    [window orderFront:nil];
+    keepsake_debug_log("bridge/mac: parentless window shown key=%d main=%d visible=%d\n",
+                       [window isKeyWindow] ? 1 : 0,
+                       [window isMainWindow] ? 1 : 0,
+                       [window isVisible] ? 1 : 0);
 }
 
 static bool open_parentless_editor(BridgeLoader *loader,
@@ -131,11 +136,12 @@ static bool open_floating_editor(BridgeLoader *loader,
     int h = DEFAULT_EDITOR_HEIGHT;
     CGFloat totalH = h + HEADER_HEIGHT;
     NSRect frame = NSMakeRect(200, 200, w, totalH);
-    g_window = [[NSWindow alloc]
+    g_window = [[NSPanel alloc]
         initWithContentRect:frame
                   styleMask:(NSWindowStyleMaskTitled |
                              NSWindowStyleMaskClosable |
-                             NSWindowStyleMaskMiniaturizable)
+                             NSWindowStyleMaskMiniaturizable |
+                             NSWindowStyleMaskNonactivatingPanel)
                     backing:NSBackingStoreBuffered
                       defer:NO];
 
@@ -143,7 +149,14 @@ static bool open_floating_editor(BridgeLoader *loader,
                        header.plugin_name.c_str()];
     [g_window setTitle:title];
     [g_window setReleasedWhenClosed:NO];
-    [g_window setLevel:NSFloatingWindowLevel];
+    [g_window setLevel:NSNormalWindowLevel];
+    if ([g_window isKindOfClass:[NSPanel class]]) {
+        NSPanel *panel = (NSPanel *)g_window;
+        [panel setFloatingPanel:NO];
+        [panel setBecomesKeyOnlyIfNeeded:YES];
+        [panel setHidesOnDeactivate:NO];
+        [panel setWorksWhenModal:YES];
+    }
 
     NSView *content = gui_mac_make_content_view(w, h);
     [g_window setContentView:content];
@@ -154,9 +167,12 @@ static bool open_floating_editor(BridgeLoader *loader,
     g_header = gui_mac_make_header_view(w, header);
     [content addSubview:g_header];
 
-    [g_window makeKeyAndOrderFront:nil];
-    [NSApp activateIgnoringOtherApps:YES];
+    [g_window orderFront:nil];
     [g_window displayIfNeeded];
+    keepsake_debug_log("bridge/mac: floating window shown key=%d main=%d visible=%d\n",
+                       [g_window isKeyWindow] ? 1 : 0,
+                       [g_window isMainWindow] ? 1 : 0,
+                       [g_window isVisible] ? 1 : 0);
     gui_pump_pending_events([NSDate dateWithTimeIntervalSinceNow:0.0]);
 
     void *editor_parent = (__bridge void *)g_editor_container;
