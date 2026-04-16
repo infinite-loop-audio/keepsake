@@ -11,6 +11,168 @@
 #include <thread>
 #include <unistd.h>
 
+@interface KeepsakeMacWindowCloseHandler : NSObject
+- (void)handleWindowClose:(id)sender;
+@end
+
+static id g_parentless_window_will_close_observer = nil;
+static id g_parentless_window_did_resize_observer = nil;
+static id g_parentless_window_did_move_observer = nil;
+static KeepsakeMacWindowCloseHandler *g_window_close_handler = nil;
+
+@implementation KeepsakeMacWindowCloseHandler
+- (void)handleWindowClose:(id)__unused sender {
+    keepsake_debug_log("bridge/mac: titlebar close requested parentless=%d floating=%d\n",
+                       g_parentless_plugin_window ? 1 : 0,
+                       g_window ? 1 : 0);
+    gui_close_editor(g_active_loader);
+}
+@end
+
+static KeepsakeMacWindowCloseHandler *window_close_handler() {
+    if (!g_window_close_handler) {
+        g_window_close_handler = [KeepsakeMacWindowCloseHandler new];
+    }
+    return g_window_close_handler;
+}
+
+static void clear_parentless_window_observers() {
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    if (g_parentless_window_will_close_observer) {
+        [center removeObserver:g_parentless_window_will_close_observer];
+        g_parentless_window_will_close_observer = nil;
+    }
+    if (g_parentless_window_did_resize_observer) {
+        [center removeObserver:g_parentless_window_did_resize_observer];
+        g_parentless_window_did_resize_observer = nil;
+    }
+    if (g_parentless_window_did_move_observer) {
+        [center removeObserver:g_parentless_window_did_move_observer];
+        g_parentless_window_did_move_observer = nil;
+    }
+}
+
+static void clamp_parentless_plugin_window_to_visible_screen(NSWindow *window,
+                                                             const char *phase) {
+    if (!window) return;
+    NSScreen *screen = [window screen] ?: [NSScreen mainScreen];
+    if (!screen) return;
+
+    const NSRect visible = [screen visibleFrame];
+    NSRect frame = [window frame];
+    const NSRect original = frame;
+
+    const CGFloat max_x = NSMaxX(visible) - frame.size.width;
+    if (frame.origin.x < visible.origin.x) frame.origin.x = visible.origin.x;
+    if (frame.origin.x > max_x) frame.origin.x = max_x;
+
+    const CGFloat max_y = NSMaxY(visible) - frame.size.height;
+    if (frame.origin.y > max_y) frame.origin.y = max_y;
+
+    if (!NSEqualRects(frame, original)) {
+        [window setFrameOrigin:frame.origin];
+        keepsake_debug_log("bridge/mac: parentless window clamped phase=%s old=%.0fx%.0f@%.0f,%.0f new=%.0fx%.0f@%.0f,%.0f\n",
+                           phase,
+                           original.size.width, original.size.height,
+                           original.origin.x, original.origin.y,
+                           frame.size.width, frame.size.height,
+                           frame.origin.x, frame.origin.y);
+    }
+}
+
+static NSInteger score_parentless_candidate_window(NSWindow *window) {
+    if (!window) return NSIntegerMin;
+    const NSRect frame = [window frame];
+    NSInteger score = static_cast<NSInteger>(frame.size.width * frame.size.height);
+    if ([window isVisible]) score += 100000000;
+    if ([window isMiniaturized]) score -= 100000000;
+    if ([window canBecomeKeyWindow]) score += 1000000;
+    if ([window isKeyWindow]) score += 500000;
+    if ([window isMainWindow]) score += 250000;
+    if ([window title] && [[window title] length] > 0) score += 10000;
+    if ([window level] == NSNormalWindowLevel) score += 1000;
+    return score;
+}
+
+static void log_parentless_candidate_window(NSWindow *window,
+                                            const char *phase,
+                                            NSInteger score) {
+    if (!window) return;
+    NSString *title = [window title] ?: @"";
+    const char *title_utf8 = [title UTF8String] ? [title UTF8String] : "";
+    const NSRect frame = [window frame];
+    keepsake_debug_log(
+        "bridge/mac: parentless candidate phase=%s window=%p class=%s title='%s' "
+        "visible=%d key=%d main=%d level=%ld frame=%.0fx%.0f@%.0f,%.0f score=%ld\n",
+        phase,
+        window,
+        object_getClassName(window),
+        title_utf8,
+        [window isVisible] ? 1 : 0,
+        [window isKeyWindow] ? 1 : 0,
+        [window isMainWindow] ? 1 : 0,
+        static_cast<long>([window level]),
+        frame.size.width,
+        frame.size.height,
+        frame.origin.x,
+        frame.origin.y,
+        static_cast<long>(score));
+}
+
+static NSWindow *select_best_parentless_plugin_window(NSSet<NSWindow *> *windows_before,
+                                                      const char *phase) {
+    NSArray<NSWindow *> *windows_after = [NSApp windows];
+    NSWindow *best = nil;
+    NSInteger best_score = NSIntegerMin;
+    for (NSWindow *candidate in windows_after) {
+        if ([windows_before containsObject:candidate]) continue;
+        const NSInteger score = score_parentless_candidate_window(candidate);
+        log_parentless_candidate_window(candidate, phase, score);
+        if (!best || score > best_score) {
+            best = candidate;
+            best_score = score;
+        }
+    }
+    return best;
+}
+
+static void install_parentless_window_observers(NSWindow *window) {
+    clear_parentless_window_observers();
+    if (!window) return;
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    g_parentless_window_will_close_observer =
+        [center addObserverForName:NSWindowWillCloseNotification
+                            object:window
+                             queue:nil
+                        usingBlock:^(__unused NSNotification *note) {
+                            keepsake_debug_log("bridge/mac: parentless window will close window=%p title='%s'\n",
+                                               window,
+                                               [[window title] UTF8String] ? [[window title] UTF8String] : "");
+                        }];
+    g_parentless_window_did_resize_observer =
+        [center addObserverForName:NSWindowDidResizeNotification
+                            object:window
+                             queue:nil
+                        usingBlock:^(__unused NSNotification *note) {
+                            clamp_parentless_plugin_window_to_visible_screen(window, "did-resize");
+                        }];
+    g_parentless_window_did_move_observer =
+        [center addObserverForName:NSWindowDidMoveNotification
+                            object:window
+                             queue:nil
+                        usingBlock:^(__unused NSNotification *note) {
+                            clamp_parentless_plugin_window_to_visible_screen(window, "did-move");
+                        }];
+}
+
+static void install_window_close_button_handler(NSWindow *window) {
+    if (!window) return;
+    NSButton *close_button = [window standardWindowButton:NSWindowCloseButton];
+    if (!close_button) return;
+    [close_button setTarget:window_close_handler()];
+    [close_button setAction:@selector(handleWindowClose:)];
+}
+
 static void style_parentless_plugin_window(NSWindow *window,
                                            const EditorHeaderInfo &header) {
     if (!window) return;
@@ -42,6 +204,8 @@ static void style_parentless_plugin_window(NSWindow *window,
     } else {
         [window center];
     }
+    install_window_close_button_handler(window);
+    clamp_parentless_plugin_window_to_visible_screen(window, "style");
 
     [NSApp activateIgnoringOtherApps:YES];
     [window makeKeyAndOrderFront:nil];
@@ -54,7 +218,7 @@ static void style_parentless_plugin_window(NSWindow *window,
 
 static bool open_parentless_editor(BridgeLoader *loader,
                                    const EditorHeaderInfo &header) {
-    NSArray<NSWindow *> *windows_before = [[NSApp windows] copy];
+    NSSet<NSWindow *> *windows_before = [NSSet setWithArray:[NSApp windows]];
     bool open_ok = loader->open_editor(nullptr);
     if (!open_ok) {
         fprintf(stderr, "bridge: loader->open_editor() failed\n");
@@ -64,16 +228,38 @@ static bool open_parentless_editor(BridgeLoader *loader,
         return false;
     }
 
-    NSArray<NSWindow *> *windows_after = [NSApp windows];
     g_parentless_plugin_window = nil;
-    for (NSWindow *candidate in windows_after) {
-        if ([windows_before containsObject:candidate]) continue;
-        g_parentless_plugin_window = candidate;
-        break;
+    for (int i = 0; i < 24; i++) {
+        gui_pump_pending_events([NSDate dateWithTimeIntervalSinceNow:0.0]);
+        NSWindow *best = select_best_parentless_plugin_window(windows_before,
+                                                              "open-scan");
+        if (best) {
+            g_parentless_plugin_window = best;
+        }
+        if (i + 1 < 24) usleep(16000);
     }
 
     if (g_parentless_plugin_window) {
+        install_parentless_window_observers(g_parentless_plugin_window);
         style_parentless_plugin_window(g_parentless_plugin_window, header);
+        for (int i = 0; i < 24; i++) {
+            gui_pump_pending_events([NSDate dateWithTimeIntervalSinceNow:0.0]);
+            if (![g_parentless_plugin_window isVisible]) {
+                keepsake_debug_log("bridge/mac: tracked parentless window became hidden, rescanning\n");
+                NSWindow *replacement = select_best_parentless_plugin_window(windows_before,
+                                                                             "settle-rescan");
+                if (replacement && replacement != g_parentless_plugin_window) {
+                    keepsake_debug_log("bridge/mac: parentless window switched old=%p new=%p\n",
+                                       g_parentless_plugin_window, replacement);
+                    g_parentless_plugin_window = replacement;
+                    install_parentless_window_observers(g_parentless_plugin_window);
+                    style_parentless_plugin_window(g_parentless_plugin_window, header);
+                }
+            }
+            if (i + 1 < 24) usleep(16000);
+        }
+    } else {
+        keepsake_debug_log("bridge/mac: no parentless plugin window discovered after open\n");
     }
 
     g_active_loader = loader;
@@ -171,6 +357,7 @@ static bool open_floating_editor(BridgeLoader *loader,
     [g_window setHidesOnDeactivate:NO];
     [g_window setStyleMask:([g_window styleMask] & ~NSWindowStyleMaskResizable)];
     [g_window center];
+    install_window_close_button_handler(g_window);
 
     NSView *content = gui_mac_make_content_view(w, h);
     [g_window setContentView:content];
@@ -276,6 +463,7 @@ void gui_close_window_state() {
         [[NSNotificationCenter defaultCenter] removeObserver:g_frame_change_observer];
         g_frame_change_observer = nil;
     }
+    clear_parentless_window_observers();
     if (g_parentless_plugin_window) {
         [g_parentless_plugin_window orderOut:nil];
         g_parentless_plugin_window = nil;

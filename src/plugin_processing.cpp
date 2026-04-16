@@ -24,6 +24,9 @@ static const uint64_t GUI_DIRECT_RESIZE_FALLBACK_SUPPRESS_MS = 500;
 static void maybe_request_gui_main_thread(KeepsakePlugin *kp);
 
 #ifndef _WIN32
+#ifdef __APPLE__
+static const uint64_t GUI_FLOATING_STATE_POLL_INTERVAL_MS = 100;
+#endif
 static uint64_t monotonic_now_ms() {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -436,6 +439,18 @@ void plugin_on_main_thread(const clap_plugin_t *plugin) {
     }
 #endif
 
+#ifdef __APPLE__
+    if (kp->editor_open && kp->gui_is_floating && !kp->gui_iosurface_embed) {
+        const uint32_t editor_state = shm_load_acquire(&ctrl->editor_state);
+        if (editor_state == SHM_EDITOR_CLOSED || editor_state == SHM_EDITOR_FAILED) {
+            keepsake_debug_log("keepsake: floating editor externally closed state=%u instance=%u\n",
+                               editor_state, kp->instance_id);
+            keepsake_gui_session_mark_closed(kp);
+            return;
+        }
+    }
+#endif
+
     if (!kp->editor_open_pending) return;
 
     const KeepsakeGuiPendingState pending_state =
@@ -469,6 +484,13 @@ static void maybe_request_gui_main_thread(KeepsakePlugin *kp) {
 #ifdef __APPLE__
     if (kp->editor_open && kp->gui_iosurface_embed) {
         if (kp->gui_embed_refresh_burst_remaining > 0) {
+            keepsake_gui_session_request_callback_once(kp);
+        }
+    }
+    if (kp->editor_open && kp->gui_is_floating && !kp->gui_iosurface_embed) {
+        const uint64_t now_ms = monotonic_now_ms();
+        if (now_ms - kp->last_gui_poll_ms >= GUI_FLOATING_STATE_POLL_INTERVAL_MS) {
+            kp->last_gui_poll_ms = now_ms;
             keepsake_gui_session_request_callback_once(kp);
         }
     }
