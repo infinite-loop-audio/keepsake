@@ -2,7 +2,7 @@
 
 Status: active
 Owner: Infinite Loop Audio
-Updated: 2026-04-12
+Updated: 2026-04-17
 
 ## Coverage Rules
 
@@ -44,6 +44,5 @@ boundary:
 
 ## Next Task
 
-Execute g02.001 — lock the alpha support envelope, then decide whether the
-platform config schema needs promotion into its own contract before packaging
-and install docs close.
+Execute g02.002 — decide whether the platform config schema needs promotion
+into its own contract before packaging and install docs close.

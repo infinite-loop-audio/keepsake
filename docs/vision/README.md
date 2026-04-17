@@ -35,5 +35,5 @@ can prove in a fresh release window.
 
 ## Next Task
 
-Execute g02.001 — define the `v0.1-alpha` support envelope and reconcile the
-front-door docs so the repo's public claims match the proof on hand.
+Execute g02.002 — package the `v0.1-alpha` lane around the now-defined support
+envelope: versioning, artifacts, install surface, and release scaffolding.

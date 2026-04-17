@@ -2,7 +2,7 @@
 
 Status: active
 Owner: Infinite Loop Audio
-Updated: 2026-04-12
+Updated: 2026-04-17
 Vision refs: docs/vision/001-keepsake-vision.md
 
 ## Overview
@@ -16,9 +16,9 @@ VST3, AudioToolbox for AU v2) running in isolated subprocesses. The subprocess
 model provides both crash isolation and bitness bridging — 32-bit plugins run
 in a 32-bit helper process while the host stays 64-bit.
 
-The architecture is now ahead of the first public release posture. For
-`v0.1-alpha`, support claims should be based on fresh validation, not on the
-mere existence of code paths.
+The architecture is intentionally broader than the first public release
+posture. For `v0.1-alpha`, support claims are based on fresh validation, not on
+the mere existence of code paths.
 
 ## Component Layout
 
@@ -65,6 +65,7 @@ keepsake-bridge-32 (helper binary, 32-bit — where platform supports it)
 | IPC / subprocess model | Pipe protocol + shared memory | Governed by `docs/contracts/004-ipc-bridge-protocol.md`; current implementation also multiplexes instances inside shared bridges |
 | Bridge helper binaries | `keepsake-bridge`, `keepsake-bridge-x86_64`, future `keepsake-bridge-32` | Native helper plus cross-arch helper where needed; 32-bit still needs release-grade proof before claiming support |
 | Scan path config | config + cache files per platform | Runtime exists; user-facing schema/docs still need alpha release hardening |
+| macOS editor posture | Bridge-owned live editor window | Primary validated interaction path for the current alpha lane; IOSurface preview remains diagnostic-only |
 
 ## Platform Notes
 
@@ -84,6 +85,5 @@ keepsake-bridge-32 (helper binary, 32-bit — where platform supports it)
 
 ## Next Task
 
-Use g02.001 to align this architecture doc with the alpha support envelope so
-the public release posture distinguishes implemented structure from validated
-support claims.
+Use g02.002 to turn this now-aligned architecture posture into release-shaped
+artifacts and install guidance without broadening the claim set.

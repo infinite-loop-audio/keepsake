@@ -1,8 +1,8 @@
 # G02.001 — Alpha Scope, Claims, and Docs Reconciliation
 
-Status: ready
+Status: complete
 Owner: Infinite Loop Audio
-Updated: 2026-04-12
+Updated: 2026-04-17
 Governing refs:
   - docs/contracts/001-working-rules.md
   - docs/contracts/002-clap-factory-interface.md
@@ -106,6 +106,27 @@ Acceptance:
 - stop if the alpha scope cannot be stated honestly without fresh validation
 - stop if missing contract work is needed before docs can truthfully describe a
   boundary
+
+## Closeout
+
+This milestone is now effectively complete in repo posture terms.
+
+Outcome:
+
+- the alpha support envelope is explicit in the release matrix, README, and
+  known-issues surface
+- the strongest claimed lane is now clearly `macOS + REAPER + VST2`
+- macOS editor posture is explicitly the bridge-owned live editor path
+- preview / IOSurface is demoted to diagnostic-only posture
+- roadmap front doors now point forward into packaging instead of back into
+  scope-definition work
+
+Primary evidence:
+
+- `docs/releases/v0.1-alpha-validation-matrix.md`
+- `docs/known-issues-v0.1-alpha.md`
+- `docs/logs/2026-04/16-235900-macos-live-editor-posture-closeout.md`
+- `docs/logs/2026-04/17-071000-macos-preview-lane-audit.md`
 
 ## Next Task
 

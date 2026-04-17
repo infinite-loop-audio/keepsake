@@ -1,6 +1,6 @@
 # G02 — v0.1 Alpha Release Stream
 
-Status: planning
+Status: active
 Started: 2026-04-12
 
 ## Milestones
@@ -8,9 +8,9 @@ Started: 2026-04-12
 | Milestone | Title | Status |
 |---|---|---|
 | `001` | [Alpha Scope, Claims, and Docs Reconciliation](001-alpha-scope-claims-and-docs.md) | ready |
-| `002` | [Release Packaging, Versioning, and Install Surface](002-release-packaging-versioning-install-surface.md) | blocked on 001 |
-| `003` | [Alpha Validation Matrix and Evidence Pack](003-alpha-validation-matrix-and-evidence.md) | blocked on 001-002 |
-| `004` | [Publish v0.1-alpha](004-publish-v0.1-alpha.md) | blocked on 001-003 |
+| `002` | [Release Packaging, Versioning, and Install Surface](002-release-packaging-versioning-install-surface.md) | ready |
+| `003` | [Alpha Validation Matrix and Evidence Pack](003-alpha-validation-matrix-and-evidence.md) | blocked on 002 |
+| `004` | [Publish v0.1-alpha](004-publish-v0.1-alpha.md) | blocked on 002-003 |
 | `005` | [macOS UI Model and Interactive Fallback Prototype](005-macos-ui-model-and-fallback-prototype.md) | complete |
 
 ## Sequencing Intent
@@ -40,10 +40,11 @@ needs a viable editor model that does not pretend universal interactive embed.
 
 ## Next Task
 
-Execute the highest-priority ready card for the current operator intent:
+Execute `g02.002` — versioning, artifacts, install surface, and release-note
+scaffolding for the now-locked alpha support envelope.
 
-- `g02.005` if the goal is to prototype the macOS editor fallback model now
-- `g02.001` if the goal is to continue release-scope/doc reconciliation first
-
-Current macOS editor posture outcome:
-- `g02.005` complete — macOS now defaults to the bridge-owned live editor path; IOSurface preview remains diagnostic-only
+Current release posture outcome:
+- `g02.001` effectively closed in docs posture: the alpha scope/claims baseline
+  is now explicit
+- `g02.005` complete — macOS defaults to the bridge-owned live editor path;
+  IOSurface preview remains diagnostic-only

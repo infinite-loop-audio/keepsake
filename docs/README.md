@@ -51,3 +51,12 @@ G02 is active. This is the `v0.1-alpha` release stream:
 The strongest current proof is still the macOS + REAPER + VST2 lane. Treat
 broader platform/format support as experimental until g02 validation says
 otherwise.
+
+`g02.001` is now effectively closed in posture terms: the alpha support
+envelope, known-issues baseline, and macOS live-editor stance are explicit.
+The next active release lane is packaging / install surface hardening.
+
+## Next Task
+
+Execute `g02.002` — package the alpha around the now-defined scope: versioning,
+artifacts, install surface, and release-note scaffolding.

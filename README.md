@@ -15,7 +15,7 @@ The strongest current evidence lane is:
 - macOS
 - REAPER
 - VST2 bridging
-- real-plugin validation with APC and Serum
+- real-plugin validation with APC, Serum, and Khords
 
 Current alpha posture:
 
@@ -205,7 +205,7 @@ surface.
 
 ## Contributing
 
-Contributions are welcome. The project is in its early stages — the most useful contributions right now are:
+Contributions are welcome. The most useful contributions right now are:
 
 - Platform testing and bug reports
 - VST2 edge case coverage (parameter handling, MIDI, GUI lifecycle)

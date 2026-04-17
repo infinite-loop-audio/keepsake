@@ -40,5 +40,5 @@ evidence, and publishing from explicit known-issues posture.
 
 ## Next Task
 
-Ship g02.001 — lock the `v0.1-alpha` scope and claims before packaging or
-publication work proceeds.
+Ship g02.002 — turn the now-defined `v0.1-alpha` scope into versioned
+artifacts, install surface, and release-note scaffolding.
