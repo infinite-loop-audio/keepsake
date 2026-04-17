@@ -40,23 +40,24 @@ If `specs/` exists, treat it as provisional planning that should promote into
 G01 is complete. The core bridge lanes exist: config → scan → cache → factory
 → bridge → audio, plus GUI, CI, and codebase-health follow-through.
 
-G02 is active. This is the `v0.1-alpha` release stream:
+`v0.1-alpha` is now published.
 
-- define the honest support envelope
-- close docs drift
-- package artifacts
-- collect release-window evidence
-- publish from a known-issues posture
+G03 is active. This is the short post-alpha stabilization stream:
+
+- take real release-window bug reports seriously
+- correct claims quickly if public wording outruns evidence
+- tighten install/runtime behavior on the published artifact surface
+- refresh evidence only where the public posture actually moves
 
 The strongest current proof is still the macOS + REAPER + VST2 lane. Treat
 broader platform/format support as experimental until g02 validation says
 otherwise.
 
-`g02.001` is now effectively closed in posture terms: the alpha support
-envelope, known-issues baseline, and macOS live-editor stance are explicit.
-The next active release lane is packaging / install surface hardening.
+The strongest current proof is still the published `macOS + REAPER + VST2`
+lane. Treat broader platform/format support as experimental until fresh
+stabilization evidence says otherwise.
 
 ## Next Task
 
-Execute `g02.002` — package the alpha around the now-defined scope: versioning,
-artifacts, install surface, and release-note scaffolding.
+Execute `g03.001` — absorb the first post-alpha report cluster into a real
+stabilization batch.

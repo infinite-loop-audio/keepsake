@@ -14,6 +14,7 @@ Logs capture dated evidence and assessments.
 
 ## Recent Evidence
 
+- [`2026-04/17-081500-g03-post-alpha-rollover.md`](2026-04/17-081500-g03-post-alpha-rollover.md) — opened `g03` after `v0.1-alpha` publication and moved the active lane onto post-alpha stabilization
 - [`2026-04/17-080000-v0.1-alpha-release-checkpoint.md`](2026-04/17-080000-v0.1-alpha-release-checkpoint.md) — `v0.1-alpha` is tagged and published; records the real release workflow, public artifact checksums, and post-publication macOS REAPER smoke from the downloaded release zip
 - [`2026-04/17-075000-g02-004-release-artifact-proof.md`](2026-04/17-075000-g02-004-release-artifact-proof.md) — proved the release-binaries workflow on the current candidate commit, recorded the exact artifact set and checksums, and moved g02.004 onto the final tag/publish step
 - [`2026-04/17-074232-g02-003-alpha-evidence-refresh.md`](2026-04/17-074232-g02-003-alpha-evidence-refresh.md) — refreshed the release matrix and known-issues posture from packaged-artifact REAPER smoke on APC, Serum, and Khords plus current green CI

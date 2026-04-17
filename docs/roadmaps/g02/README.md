@@ -1,6 +1,6 @@
 # G02 — v0.1 Alpha Release Stream
 
-Status: active
+Status: complete
 Started: 2026-04-12
 
 ## Milestones
@@ -40,8 +40,8 @@ needs a viable editor model that does not pretend universal interactive embed.
 
 ## Next Task
 
-Open the post-alpha stabilization lane: bug intake, claim corrections, and
-install/runtime polish against the now-published `v0.1-alpha` surface.
+Treat `g02` as closed. Route follow-up through `g03.001` post-alpha
+stabilization instead of reopening the release stream.
 
 Current release posture outcome:
 - `g02.001` effectively closed in docs posture: the alpha scope/claims baseline

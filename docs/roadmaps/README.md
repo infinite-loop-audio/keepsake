@@ -5,8 +5,8 @@ contracts.
 
 ## Active Generation
 
-- `g02` — `v0.1-alpha` release stream: support envelope, packaging, validation,
-  and publication
+- `g03` — post-alpha stabilization: release-window bug intake, claim
+  corrections, and install/runtime hardening on top of the published alpha
 
 ## Generation Index
 
@@ -16,6 +16,7 @@ contracts.
 
 - `g01/` — first generation milestones
 - `g02/` — alpha release generation
+- `g03/` — post-alpha stabilization generation
 - `generation-index.md` — active generation and rollover history
 - `backlog/` — deferred items with promotion criteria
 - `templates/roadmap-milestone-template.md` — milestone starter contract
@@ -26,10 +27,11 @@ contracts.
 codebase-health lanes are complete enough to justify a release-focused
 generation rollover.
 
-**g02 is now active.** This generation does not assume broad support claims by
-default. It converts the current working state into an honest alpha release by
-defining supported scope, closing docs drift, packaging artifacts, collecting
-evidence, and publishing from explicit known-issues posture.
+**g02 is complete.** `v0.1-alpha` is now published.
+
+**g03 is now active.** This generation is the short post-release stabilization
+lane: bug intake, claim corrections, install/runtime friction, and targeted
+evidence refresh without pretending the next step is immediate scope widening.
 
 ## Batch and Logging Rule
 
@@ -40,5 +42,5 @@ evidence, and publishing from explicit known-issues posture.
 
 ## Next Task
 
-Execute g02.004 — publish `v0.1-alpha` from the now-aligned release surface and
-evidence pack.
+Execute `g03.001` — capture the first post-alpha stabilization batch from the
+published `v0.1-alpha` surface.

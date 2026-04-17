@@ -5,12 +5,12 @@ published artifacts actually claim.
 
 ## Files
 
-- [`v0.1-alpha.md`](v0.1-alpha.md) — draft release notes, artifact plan, and
-  install surface for the first public alpha
+- [`v0.1-alpha.md`](v0.1-alpha.md) — published release notes, artifact plan,
+  and install surface for the first public alpha
 - [`v0.1-alpha-validation-matrix.md`](v0.1-alpha-validation-matrix.md) —
   release-window support matrix and evidence posture
 - [`v0.1-alpha-publish-checklist.md`](v0.1-alpha-publish-checklist.md) —
-  step-by-step publication gate for the first alpha
+  completed publication gate for the first alpha
 - [`../logs/templates/release-checkpoint-template.md`](../logs/templates/release-checkpoint-template.md) —
   one dated closeout log template for the actual release cut
 
@@ -24,6 +24,7 @@ published artifacts actually claim.
   - `.github/workflows/release-binaries.yml`
 - treat CI-built artifacts as the release source of truth
 - leave one dated release checkpoint log when the tag is cut
+- once published, treat the release page plus checkpoint log as the authority
 
 ## Rule
 
@@ -37,5 +38,6 @@ Do not publish from chat memory alone. Releases should be backed by:
 
 ## Next Task
 
-Use the publish checklist during g02.004 now that the release surface and
-validation evidence are aligned.
+Use the published `v0.1-alpha` release and checkpoint log as the authority, and
+route follow-up through `g03` stabilization rather than reopening release-cut
+work.
