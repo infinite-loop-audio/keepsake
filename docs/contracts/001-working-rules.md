@@ -103,10 +103,14 @@ guardrails and done-ness criteria are only aspirational.
 
 ### Generation posture
 
-- Treat roadmap generations as substantial sequencing eras, not one-or-two-file
-  buckets.
-- Keep one generation active across many milestones until the sequencing
-  baseline itself needs a reset.
+- Treat roadmap generations as substantial sequencing eras, not one-or-two-file buckets.
+- Keep one generation active across many milestones until the sequencing baseline itself needs a reset.
+- Treat roughly 20 to 40 milestones as the normal scale of a healthy generation before rollover is even worth discussing.
+- Treat rollover as full generation closeout:
+  - every roadmap in the old generation must be explicitly closed, superseded, or moved to backlog
+  - the roadmap front doors must reflect that closed state before the next generation opens
+  - stale specs and batch cards from the closing generation must be archived or removed from `docs/specs/`
+- If those closeout conditions are not satisfied, repair the current generation instead of opening a new one.
 
 ### Stop conditions
 
