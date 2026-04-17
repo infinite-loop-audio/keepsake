@@ -7,6 +7,8 @@ struct KeepsakePlugin;
 #include <clap/ext/gui.h>
 #include "ipc.h"
 
+// Diagnostic-only preview helpers for the retained macOS IOSurface lane.
+// Normal macOS interaction should use the live editor path instead.
 std::string gui_mac_ui_mode();
 bool gui_mac_mode_uses_iosurface_preview();
 bool gui_mac_mode_prefers_live_editor();

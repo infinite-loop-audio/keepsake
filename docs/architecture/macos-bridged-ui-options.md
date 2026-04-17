@@ -193,6 +193,7 @@ should assume bridge-owned live editor first, diagnostic preview only second.
 
 ## Next Task
 
-Decide whether the remaining diagnostic preview lane still earns its
-maintenance cost, or whether it should be removed entirely in a later cleanup
-batch.
+Keep the preview lane on an explicit later-disposition track rather than
+treating it as an implied cleanup:
+
+- backlog: [docs/roadmaps/backlog/001-macos-preview-lane-disposition.md](../roadmaps/backlog/001-macos-preview-lane-disposition.md)

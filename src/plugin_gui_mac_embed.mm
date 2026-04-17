@@ -2,6 +2,10 @@
 
 #ifdef __APPLE__
 
+// Diagnostic-only macOS IOSurface preview lane.
+// This remains in-tree for operator/debug work, not as a supported interactive
+// editor posture. The bridge-owned live editor path is the real macOS baseline.
+
 #import <Cocoa/Cocoa.h>
 #import <CoreImage/CoreImage.h>
 #import <IOSurface/IOSurface.h>

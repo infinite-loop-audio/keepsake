@@ -8,7 +8,9 @@ them are complete.
 
 ## Items
 
-No backlog items yet.
+- [`001-macos-preview-lane-disposition.md`](001-macos-preview-lane-disposition.md)
+  — decide whether the retained macOS IOSurface preview lane stays as
+  operator-only diagnostics or moves onto a later removal/simplification track
 
 ## Promotion Rule
 
