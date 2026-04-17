@@ -37,5 +37,5 @@ Do not publish from chat memory alone. Releases should be backed by:
 
 ## Next Task
 
-Execute g02.003 first so the publish checklist is fed by fresh release-window
-evidence, not the earlier draft validation posture.
+Use the publish checklist during g02.004 now that the release surface and
+validation evidence are aligned.

@@ -9,7 +9,7 @@ Started: 2026-04-12
 |---|---|---|
 | `001` | [Alpha Scope, Claims, and Docs Reconciliation](001-alpha-scope-claims-and-docs.md) | complete |
 | `002` | [Release Packaging, Versioning, and Install Surface](002-release-packaging-versioning-install-surface.md) | complete |
-| `003` | [Alpha Validation Matrix and Evidence Pack](003-alpha-validation-matrix-and-evidence.md) | blocked on 002 |
+| `003` | [Alpha Validation Matrix and Evidence Pack](003-alpha-validation-matrix-and-evidence.md) | complete |
 | `004` | [Publish v0.1-alpha](004-publish-v0.1-alpha.md) | blocked on 002-003 |
 | `005` | [macOS UI Model and Interactive Fallback Prototype](005-macos-ui-model-and-fallback-prototype.md) | complete |
 
@@ -40,8 +40,8 @@ needs a viable editor model that does not pretend universal interactive embed.
 
 ## Next Task
 
-Execute `g02.003` — refresh the alpha validation matrix and evidence pack
-against the now-locked release surface.
+Execute `g02.004` — publish `v0.1-alpha` from the now-aligned release notes,
+artifact surface, validation matrix, and known-issues gate.
 
 Current release posture outcome:
 - `g02.001` effectively closed in docs posture: the alpha scope/claims baseline
@@ -49,5 +49,8 @@ Current release posture outcome:
 - `g02.002` effectively closed in release posture: version, changelog, install
   surface, release notes, and artifact naming are now aligned to the current
   support envelope
+- `g02.003` effectively closed in evidence posture: packaged-artifact REAPER
+  smoke is fresh on the supported macOS lane, and the release matrix/known
+  issues are updated to current reality
 - `g02.005` complete — macOS defaults to the bridge-owned live editor path;
   IOSurface preview remains diagnostic-only

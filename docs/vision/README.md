@@ -35,5 +35,5 @@ can prove in a fresh release window.
 
 ## Next Task
 
-Execute g02.003 — validate the now-packaged `v0.1-alpha` support envelope with
-fresh release-window evidence.
+Execute g02.004 — publish the conservative `v0.1-alpha` support envelope only
+if the release notes, artifacts, matrix, and known issues still agree.

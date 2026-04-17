@@ -40,5 +40,5 @@ evidence, and publishing from explicit known-issues posture.
 
 ## Next Task
 
-Execute g02.003 — refresh the `v0.1-alpha` validation matrix and evidence pack
-against the now-locked release surface.
+Execute g02.004 — publish `v0.1-alpha` from the now-aligned release surface and
+evidence pack.

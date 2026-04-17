@@ -14,6 +14,7 @@ Logs capture dated evidence and assessments.
 
 ## Recent Evidence
 
+- [`2026-04/17-074232-g02-003-alpha-evidence-refresh.md`](2026-04/17-074232-g02-003-alpha-evidence-refresh.md) — refreshed the release matrix and known-issues posture from packaged-artifact REAPER smoke on APC, Serum, and Khords plus current green CI
 - [`2026-04/17-073558-g02-002-release-surface-closeout.md`](2026-04/17-073558-g02-002-release-surface-closeout.md) — closed the packaging/versioning/install lane, fixed the local release-candidate script, and moved the alpha stream onto fresh validation work
 - [`2026-04/17-073000-g02-001-alpha-scope-closeout.md`](2026-04/17-073000-g02-001-alpha-scope-closeout.md) — closed the remaining posture gap around g02.001 and moved the active release lane cleanly onto packaging/install work
 - [`2026-04/17-071000-macos-preview-lane-audit.md`](2026-04/17-071000-macos-preview-lane-audit.md) — audited the retained macOS preview code, marked it as diagnostic-only, and put the remove-vs-retain decision onto an explicit backlog track
@@ -39,5 +40,5 @@ Logs capture dated evidence and assessments.
 
 ## Next Task
 
-Add the next g02 release-window evidence as meaningful batch logs: refreshed
-validation matrix runs, release-candidate proof, and final publication proof.
+Add the next g02 release-window evidence as meaningful batch logs: final
+publish-checkpoint proof and post-release verification.

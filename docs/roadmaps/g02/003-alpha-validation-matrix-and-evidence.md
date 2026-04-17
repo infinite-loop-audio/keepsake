@@ -1,8 +1,8 @@
 # G02.003 — Alpha Validation Matrix and Evidence Pack
 
-Status: blocked on g02.001-002
+Status: complete
 Owner: Infinite Loop Audio
-Updated: 2026-04-12
+Updated: 2026-04-17
 Governing refs:
   - docs/contracts/001-working-rules.md
   - docs/contracts/002-clap-factory-interface.md
@@ -104,6 +104,15 @@ Acceptance:
 - CI run reference for the release candidate commit
 - commands and hosts actually used
 - explicit PASS/FAIL/unsupported status per lane
+
+## Closeout
+
+Closed by:
+
+- packaged macOS candidate artifact smoke in REAPER for APC, Serum, and Khords
+- refreshed `docs/releases/v0.1-alpha-validation-matrix.md`
+- refreshed `docs/known-issues-v0.1-alpha.md`
+- current green push CI at `24551205423`
 
 ## Stop Conditions
 
