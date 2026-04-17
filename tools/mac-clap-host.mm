@@ -782,7 +782,8 @@ int main(int argc, char *argv[]) {
     Options opts;
     if (!parse_args(argc, argv, opts)) {
         std::fprintf(stderr,
-                     "usage: %s <clap-bundle> <plugin-id> [--vst-path PATH] [--ui-mode auto|live|preview|iosurface|floating] [--host-mode stable|delayed-parent|swap-parent] [--attach-target auto|requested-parent|content-view|frame-superview] [--open-ui] [--run-transport] [--script-click-center] [--script-text TEXT] [--script-delay-ms N] [--width N] [--height N] [--ui-seconds N] [--telemetry-seconds N] [--sample-rate N] [--block-size N] [--process-blocks N] [--periodic-editor-idle on|off] [--periodic-capture on|off] [--gui-idle-us N] [--capture-interval-us N] [--capture-burst-frames N] [--capture-burst-interval-us N]\n",
+                     "usage: %s <clap-bundle> <plugin-id> [--vst-path PATH] [--ui-mode auto|live|preview|iosurface|floating] [--host-mode stable|delayed-parent|swap-parent] [--attach-target auto|requested-parent|content-view|frame-superview] [--open-ui] [--run-transport] [--script-click-center] [--script-text TEXT] [--script-delay-ms N] [--width N] [--height N] [--ui-seconds N] [--telemetry-seconds N] [--sample-rate N] [--block-size N] [--process-blocks N] [--periodic-editor-idle on|off] [--periodic-capture on|off] [--gui-idle-us N] [--capture-interval-us N] [--capture-burst-frames N] [--capture-burst-interval-us N]\n"
+                     "note: preview/iosurface is diagnostic-only on macOS; live is the supported interaction posture.\n",
                      argv[0]);
         return 1;
     }

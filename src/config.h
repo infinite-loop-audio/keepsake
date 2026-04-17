@@ -26,7 +26,7 @@ struct KeepsakeConfig {
     bool replace_default_vst2_paths = false;
     std::vector<std::string> extra_vst2_paths;
     bool force_rescan = false;
-    std::string mac_ui_mode = "live"; // "live"/"floating", "preview"/"iosurface", "auto"
+    std::string mac_ui_mode = "live"; // "live"/"floating", "auto"; "preview"/"iosurface" are diagnostic-only
     std::string mac_embed_attach_target = "auto"; // "auto", "requested-parent", "content-view", "frame-superview"
     std::string isolation_default = "per-instance";
     std::vector<IsolationOverride> isolation_overrides;
