@@ -144,6 +144,16 @@ KEEPSAKE_MAC_ENABLE_PREVIEW=1 KEEPSAKE_MAC_UI_MODE=preview open -a REAPER
 
 Do not treat preview as a broadly supported interactive mode.
 
+The macOS live-editor path still retains a narrow diagnostic surface for hard
+host/plugin issues:
+
+- `KEEPSAKE_MAC_FLOATING_STATE_POLL=1`: re-enable floating/live close-state polling
+  if you need to compare host-callback behavior against the current default
+- `KEEPSAKE_MAC_PARENTLESS_RESIZE_TRACE=1`: emit bounded resize trace logs for
+  bridged parentless `x64` windows during resize/debug investigation
+
+Those are diagnostic hooks, not normal runtime knobs.
+
 ---
 
 ## Docs

@@ -14,6 +14,7 @@ Logs capture dated evidence and assessments.
 
 ## Recent Evidence
 
+- [`2026-04/17-064500-macos-live-editor-stabilization-cleanup.md`](2026-04/17-064500-macos-live-editor-stabilization-cleanup.md) — cleaned up the temporary macOS parentless mutation matrix and narrowed the remaining live-editor diagnostics to the hooks that still matter
 - [`2026-04/16-235950-macos-live-x64-strap-closeout.md`](2026-04/16-235950-macos-live-x64-strap-closeout.md) — x64 macOS live windows now carry the internal Keepsake strap and close cleanly in the harness
 - [`2026-04/16-235900-macos-live-editor-posture-closeout.md`](2026-04/16-235900-macos-live-editor-posture-closeout.md) — g02.005 closeout: Serum/APC/Khords validated in REAPER live mode; embedded preview demoted to diagnostic-only posture
 - [`2026-04/16-235500-macos-live-editor-host-batch.md`](2026-04/16-235500-macos-live-editor-host-batch.md) — g02.005 batch 5.2 partial: auto/live operator surface landed; Serum/APC live harness pass, Khords live open still failing

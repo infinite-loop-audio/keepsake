@@ -7,7 +7,6 @@
 #include "debug_log.h"
 
 #include <atomic>
-#include <cstdarg>
 #include <cstdlib>
 #include <thread>
 #include <unistd.h>
@@ -26,38 +25,6 @@ static bool parentless_env_flag_enabled(const char *name, bool default_value) {
         return true;
     }
     return default_value;
-}
-
-static bool parentless_apply_title() {
-    return parentless_env_flag_enabled("KEEPSAKE_MAC_PARENTLESS_SET_TITLE", true);
-}
-
-static bool parentless_apply_stylemask() {
-    return parentless_env_flag_enabled("KEEPSAKE_MAC_PARENTLESS_SET_STYLEMASK", true);
-}
-
-static bool parentless_apply_frame() {
-    return parentless_env_flag_enabled("KEEPSAKE_MAC_PARENTLESS_SET_FRAME", true);
-}
-
-static bool parentless_apply_activate() {
-    return parentless_env_flag_enabled("KEEPSAKE_MAC_PARENTLESS_ACTIVATE", true);
-}
-
-static bool parentless_apply_make_key() {
-    return parentless_env_flag_enabled("KEEPSAKE_MAC_PARENTLESS_MAKE_KEY", true);
-}
-
-static bool parentless_apply_order_front() {
-    return parentless_env_flag_enabled("KEEPSAKE_MAC_PARENTLESS_ORDER_FRONT", true);
-}
-
-static bool parentless_apply_close_handler() {
-    return parentless_env_flag_enabled("KEEPSAKE_MAC_PARENTLESS_CLOSE_HANDLER", true);
-}
-
-static bool parentless_apply_observers() {
-    return parentless_env_flag_enabled("KEEPSAKE_MAC_PARENTLESS_OBSERVERS", true);
 }
 
 static bool parentless_resize_trace_enabled() {
@@ -79,18 +46,6 @@ static bool g_parentless_layout_in_progress = false;
 static bool g_parentless_clamp_in_progress = false;
 static bool g_editor_frame_change_in_progress = false;
 static int g_parentless_resize_trace_budget = 120;
-
-static void parentless_resize_trace(const char *fmt, ...) {
-    if (!parentless_resize_trace_enabled()) return;
-    if (g_parentless_resize_trace_budget <= 0) return;
-    g_parentless_resize_trace_budget -= 1;
-    char buffer[1024];
-    va_list args;
-    va_start(args, fmt);
-    std::vsnprintf(buffer, sizeof(buffer), fmt, args);
-    va_end(args);
-    keepsake_debug_log("%s", buffer);
-}
 
 @implementation KeepsakeMacWindowCloseHandler
 - (void)handleWindowClose:(id)__unused sender {
@@ -142,14 +97,16 @@ static void clamp_parentless_plugin_window_to_visible_screen(NSWindow *window,
     const CGFloat max_y = NSMaxY(visible) - frame.size.height;
     if (frame.origin.y > max_y) frame.origin.y = max_y;
 
-    parentless_resize_trace(
-        "bridge/mac: resize-trace clamp phase=%s frame=%.0fx%.0f@%.0f,%.0f visible=%.0fx%.0f@%.0f,%.0f changed=%d\n",
-        phase,
-        original.size.width, original.size.height,
-        original.origin.x, original.origin.y,
-        visible.size.width, visible.size.height,
-        visible.origin.x, visible.origin.y,
-        !NSEqualRects(frame, original) ? 1 : 0);
+    if (parentless_resize_trace_enabled() && g_parentless_resize_trace_budget-- > 0) {
+        keepsake_debug_log(
+            "bridge/mac: resize-trace clamp phase=%s frame=%.0fx%.0f@%.0f,%.0f visible=%.0fx%.0f@%.0f,%.0f changed=%d\n",
+            phase,
+            original.size.width, original.size.height,
+            original.origin.x, original.origin.y,
+            visible.size.width, visible.size.height,
+            visible.origin.x, visible.origin.y,
+            !NSEqualRects(frame, original) ? 1 : 0);
+    }
 
     if (!NSEqualRects(frame, original)) {
         g_parentless_clamp_in_progress = true;
@@ -175,17 +132,19 @@ static void layout_parentless_wrapped_window(NSWindow *window) {
     const CGFloat editor_height = std::max<CGFloat>(0.0, height - HEADER_HEIGHT);
     const NSRect desired_header_frame = NSMakeRect(0, 0, width, HEADER_HEIGHT);
     const NSRect desired_editor_frame = NSMakeRect(0, HEADER_HEIGHT, width, editor_height);
-    parentless_resize_trace(
-        "bridge/mac: resize-trace layout content=%.0fx%.0f header-old=%.0fx%.0f@%.0f,%.0f editor-old=%.0fx%.0f@%.0f,%.0f header-new=%.0fx%.0f@%.0f,%.0f editor-new=%.0fx%.0f@%.0f,%.0f\n",
-        width, height,
-        [g_header frame].size.width, [g_header frame].size.height,
-        [g_header frame].origin.x, [g_header frame].origin.y,
-        [g_editor_container frame].size.width, [g_editor_container frame].size.height,
-        [g_editor_container frame].origin.x, [g_editor_container frame].origin.y,
-        desired_header_frame.size.width, desired_header_frame.size.height,
-        desired_header_frame.origin.x, desired_header_frame.origin.y,
-        desired_editor_frame.size.width, desired_editor_frame.size.height,
-        desired_editor_frame.origin.x, desired_editor_frame.origin.y);
+    if (parentless_resize_trace_enabled() && g_parentless_resize_trace_budget-- > 0) {
+        keepsake_debug_log(
+            "bridge/mac: resize-trace layout content=%.0fx%.0f header-old=%.0fx%.0f@%.0f,%.0f editor-old=%.0fx%.0f@%.0f,%.0f header-new=%.0fx%.0f@%.0f,%.0f editor-new=%.0fx%.0f@%.0f,%.0f\n",
+            width, height,
+            [g_header frame].size.width, [g_header frame].size.height,
+            [g_header frame].origin.x, [g_header frame].origin.y,
+            [g_editor_container frame].size.width, [g_editor_container frame].size.height,
+            [g_editor_container frame].origin.x, [g_editor_container frame].origin.y,
+            desired_header_frame.size.width, desired_header_frame.size.height,
+            desired_header_frame.origin.x, desired_header_frame.origin.y,
+            desired_editor_frame.size.width, desired_editor_frame.size.height,
+            desired_editor_frame.origin.x, desired_editor_frame.origin.y);
+    }
     if (!NSEqualRects([g_header frame], desired_header_frame)) {
         [g_header setFrame:desired_header_frame];
     }
@@ -302,7 +261,6 @@ static NSWindow *select_best_parentless_plugin_window(NSSet<NSWindow *> *windows
 static void install_parentless_window_observers(NSWindow *window) {
     clear_parentless_window_observers();
     if (!window) return;
-    if (!parentless_apply_observers()) return;
     NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
     g_parentless_window_will_close_observer =
         [center addObserverForName:NSWindowWillCloseNotification
@@ -318,13 +276,16 @@ static void install_parentless_window_observers(NSWindow *window) {
                             object:window
                              queue:nil
                         usingBlock:^(__unused NSNotification *note) {
-                            parentless_resize_trace(
-                                "bridge/mac: resize-trace window-did-resize window=%p frame=%.0fx%.0f@%.0f,%.0f\n",
-                                window,
-                                [window frame].size.width,
-                                [window frame].size.height,
-                                [window frame].origin.x,
-                                [window frame].origin.y);
+                            if (parentless_resize_trace_enabled() &&
+                                g_parentless_resize_trace_budget-- > 0) {
+                                keepsake_debug_log(
+                                    "bridge/mac: resize-trace window-did-resize window=%p frame=%.0fx%.0f@%.0f,%.0f\n",
+                                    window,
+                                    [window frame].size.width,
+                                    [window frame].size.height,
+                                    [window frame].origin.x,
+                                    [window frame].origin.y);
+                            }
                         }];
     g_parentless_window_did_move_observer =
         [center addObserverForName:NSWindowDidMoveNotification
@@ -337,7 +298,6 @@ static void install_parentless_window_observers(NSWindow *window) {
 
 static void install_window_close_button_handler(NSWindow *window) {
     if (!window) return;
-    if (!parentless_apply_close_handler()) return;
     NSButton *close_button = [window standardWindowButton:NSWindowCloseButton];
     if (!close_button) return;
     [close_button setTarget:window_close_handler()];
@@ -348,53 +308,41 @@ static void style_parentless_plugin_window(NSWindow *window,
                                            const EditorHeaderInfo &header) {
     if (!window) return;
 
-    if (parentless_apply_title()) {
-        NSString *plugin_name = [NSString stringWithUTF8String:header.plugin_name.c_str()];
-        NSString *format = [NSString stringWithUTF8String:header.format.c_str()];
-        NSString *arch = [NSString stringWithUTF8String:header.architecture.c_str()];
-        NSString *presentation = [NSString stringWithUTF8String:
-            (header.presentation.empty() ? "Editor" : header.presentation.c_str())];
-        NSString *title = [NSString stringWithFormat:@"Keepsake %@ — %@ [%@ • %@]",
-                           presentation, plugin_name, format, arch];
-        [window setTitle:title];
-    }
+    NSString *plugin_name = [NSString stringWithUTF8String:header.plugin_name.c_str()];
+    NSString *format = [NSString stringWithUTF8String:header.format.c_str()];
+    NSString *arch = [NSString stringWithUTF8String:header.architecture.c_str()];
+    NSString *presentation = [NSString stringWithUTF8String:
+        (header.presentation.empty() ? "Editor" : header.presentation.c_str())];
+    NSString *title = [NSString stringWithFormat:@"Keepsake %@ — %@ [%@ • %@]",
+                       presentation, plugin_name, format, arch];
+    [window setTitle:title];
 
-    if (parentless_apply_stylemask()) {
-        NSWindowStyleMask mask = [window styleMask];
-        mask |= NSWindowStyleMaskTitled;
-        mask |= NSWindowStyleMaskClosable;
-        mask |= NSWindowStyleMaskMiniaturizable;
-        [window setStyleMask:mask];
-    }
+    NSWindowStyleMask mask = [window styleMask];
+    mask |= NSWindowStyleMaskTitled;
+    mask |= NSWindowStyleMaskClosable;
+    mask |= NSWindowStyleMaskMiniaturizable;
+    [window setStyleMask:mask];
     [window setReleasedWhenClosed:NO];
 
-    if (parentless_apply_frame()) {
-        NSScreen *screen = [window screen] ?: [NSScreen mainScreen];
-        if (screen) {
-            NSRect visible = [screen visibleFrame];
-            NSRect frame = [window frame];
-            if (frame.size.width > visible.size.width) frame.size.width = visible.size.width;
-            if (frame.size.height > visible.size.height) frame.size.height = visible.size.height;
-            frame.origin.x = visible.origin.x + (visible.size.width - frame.size.width) / 2.0;
-            frame.origin.y = visible.origin.y + (visible.size.height - frame.size.height) / 2.0;
-            [window setFrame:frame display:YES];
-        } else {
-            [window center];
-        }
+    NSScreen *screen = [window screen] ?: [NSScreen mainScreen];
+    if (screen) {
+        NSRect visible = [screen visibleFrame];
+        NSRect frame = [window frame];
+        if (frame.size.width > visible.size.width) frame.size.width = visible.size.width;
+        if (frame.size.height > visible.size.height) frame.size.height = visible.size.height;
+        frame.origin.x = visible.origin.x + (visible.size.width - frame.size.width) / 2.0;
+        frame.origin.y = visible.origin.y + (visible.size.height - frame.size.height) / 2.0;
+        [window setFrame:frame display:YES];
+    } else {
+        [window center];
     }
     install_window_close_button_handler(window);
     install_parentless_wrapped_content(window, header);
     clamp_parentless_plugin_window_to_visible_screen(window, "style");
 
-    if (parentless_apply_activate()) {
-        [NSApp activateIgnoringOtherApps:YES];
-    }
-    if (parentless_apply_make_key()) {
-        [window makeKeyAndOrderFront:nil];
-    }
-    if (parentless_apply_order_front()) {
-        [window orderFrontRegardless];
-    }
+    [NSApp activateIgnoringOtherApps:YES];
+    [window makeKeyAndOrderFront:nil];
+    [window orderFrontRegardless];
     keepsake_debug_log("bridge/mac: parentless window shown key=%d main=%d visible=%d\n",
                        [window isKeyWindow] ? 1 : 0,
                        [window isMainWindow] ? 1 : 0,
@@ -489,14 +437,17 @@ static void install_frame_observer() {
 
                 g_current_width = nw;
                 g_current_height = nh;
-                parentless_resize_trace(
-                    "bridge/mac: resize-trace editor-frame-change view=%p size=%dx%d host-window=%p current-layout=%d current-clamp=%d\n",
-                    v,
-                    nw,
-                    nh,
-                    host_window,
-                    g_parentless_layout_in_progress ? 1 : 0,
-                    g_parentless_clamp_in_progress ? 1 : 0);
+                if (parentless_resize_trace_enabled() &&
+                    g_parentless_resize_trace_budget-- > 0) {
+                    keepsake_debug_log(
+                        "bridge/mac: resize-trace editor-frame-change view=%p size=%dx%d host-window=%p current-layout=%d current-clamp=%d\n",
+                        v,
+                        nw,
+                        nh,
+                        host_window,
+                        g_parentless_layout_in_progress ? 1 : 0,
+                        g_parentless_clamp_in_progress ? 1 : 0);
+                }
 
                 NSRect frame = [host_window frame];
                 NSRect cr = [host_window contentRectForFrameRect:frame];
