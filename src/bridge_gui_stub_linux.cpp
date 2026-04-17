@@ -110,6 +110,8 @@ void gui_get_editor_status(bool &open, bool &pending) {
     pending = false;
 }
 void gui_set_status_shm(void *) {}
+void gui_publish_resize_request(int, int) {}
+void gui_request_capture_burst() {}
 
 void gui_set_editor_transient(uint64_t) {}
 
