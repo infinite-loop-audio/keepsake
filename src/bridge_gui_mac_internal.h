@@ -24,15 +24,32 @@ NSView *gui_mac_make_content_view(int w, int h);
 NSView *gui_mac_make_editor_container(int w, int h);
 NSView *gui_mac_make_header_view(int w, const EditorHeaderInfo &header);
 
+static inline void gui_pump_pending_events_for_mode(NSString *mode, NSDate *until_date) {
+    NSEvent *event;
+    while ((event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                                       untilDate:until_date
+                                          inMode:mode
+                                         dequeue:YES])) {
+        [NSApp sendEvent:event];
+    }
+}
+
 static inline void gui_pump_pending_events(NSDate *until_date) {
     @autoreleasepool {
-        NSEvent *event;
-        while ((event = [NSApp nextEventMatchingMask:NSEventMaskAny
-                                           untilDate:until_date
-                                              inMode:NSDefaultRunLoopMode
-                                             dequeue:YES])) {
-            [NSApp sendEvent:event];
-        }
+        NSDate *drain_until = until_date ?: [NSDate distantPast];
+
+        gui_pump_pending_events_for_mode(NSDefaultRunLoopMode, drain_until);
+        gui_pump_pending_events_for_mode(NSEventTrackingRunLoopMode, drain_until);
+        gui_pump_pending_events_for_mode(NSModalPanelRunLoopMode, drain_until);
+
+        // Some JUCE editors rely on timers and sources scheduled in common modes.
+        // Run a non-blocking slice so those callbacks still fire even though the
+        // bridge uses a custom outer poll loop instead of NSApplication::run().
+        CFRunLoopRunInMode((CFStringRef)NSDefaultRunLoopMode, 0.0, true);
+        CFRunLoopRunInMode((CFStringRef)NSEventTrackingRunLoopMode, 0.0, true);
+        CFRunLoopRunInMode((CFStringRef)NSModalPanelRunLoopMode, 0.0, true);
+
+        [NSApp updateWindows];
     }
 }
 

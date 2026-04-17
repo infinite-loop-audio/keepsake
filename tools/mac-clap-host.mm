@@ -81,6 +81,14 @@ struct Options {
     int capture_interval_us = 0;
     int capture_burst_frames = 6;
     int capture_burst_interval_us = 33333;
+    bool parentless_set_title = true;
+    bool parentless_set_stylemask = true;
+    bool parentless_set_frame = true;
+    bool parentless_activate = true;
+    bool parentless_make_key = true;
+    bool parentless_order_front = true;
+    bool parentless_close_handler = true;
+    bool parentless_observers = true;
 };
 
 struct HostState {
@@ -207,6 +215,54 @@ bool parse_args(int argc, char *argv[], Options &opts) {
             opts.capture_burst_frames = std::atoi(argv[++i]);
         } else if (std::strcmp(arg, "--capture-burst-interval-us") == 0 && i + 1 < argc) {
             opts.capture_burst_interval_us = std::atoi(argv[++i]);
+        } else if (std::strcmp(arg, "--parentless-set-title") == 0 && i + 1 < argc) {
+            const char *value = argv[++i];
+            opts.parentless_set_title =
+                std::strcmp(value, "0") != 0 &&
+                std::strcmp(value, "off") != 0 &&
+                std::strcmp(value, "false") != 0;
+        } else if (std::strcmp(arg, "--parentless-set-stylemask") == 0 && i + 1 < argc) {
+            const char *value = argv[++i];
+            opts.parentless_set_stylemask =
+                std::strcmp(value, "0") != 0 &&
+                std::strcmp(value, "off") != 0 &&
+                std::strcmp(value, "false") != 0;
+        } else if (std::strcmp(arg, "--parentless-set-frame") == 0 && i + 1 < argc) {
+            const char *value = argv[++i];
+            opts.parentless_set_frame =
+                std::strcmp(value, "0") != 0 &&
+                std::strcmp(value, "off") != 0 &&
+                std::strcmp(value, "false") != 0;
+        } else if (std::strcmp(arg, "--parentless-activate") == 0 && i + 1 < argc) {
+            const char *value = argv[++i];
+            opts.parentless_activate =
+                std::strcmp(value, "0") != 0 &&
+                std::strcmp(value, "off") != 0 &&
+                std::strcmp(value, "false") != 0;
+        } else if (std::strcmp(arg, "--parentless-make-key") == 0 && i + 1 < argc) {
+            const char *value = argv[++i];
+            opts.parentless_make_key =
+                std::strcmp(value, "0") != 0 &&
+                std::strcmp(value, "off") != 0 &&
+                std::strcmp(value, "false") != 0;
+        } else if (std::strcmp(arg, "--parentless-order-front") == 0 && i + 1 < argc) {
+            const char *value = argv[++i];
+            opts.parentless_order_front =
+                std::strcmp(value, "0") != 0 &&
+                std::strcmp(value, "off") != 0 &&
+                std::strcmp(value, "false") != 0;
+        } else if (std::strcmp(arg, "--parentless-close-handler") == 0 && i + 1 < argc) {
+            const char *value = argv[++i];
+            opts.parentless_close_handler =
+                std::strcmp(value, "0") != 0 &&
+                std::strcmp(value, "off") != 0 &&
+                std::strcmp(value, "false") != 0;
+        } else if (std::strcmp(arg, "--parentless-observers") == 0 && i + 1 < argc) {
+            const char *value = argv[++i];
+            opts.parentless_observers =
+                std::strcmp(value, "0") != 0 &&
+                std::strcmp(value, "off") != 0 &&
+                std::strcmp(value, "false") != 0;
         } else {
             return false;
         }
@@ -795,6 +851,14 @@ int main(int argc, char *argv[]) {
     setenv("KEEPSAKE_MAC_EMBED_ATTACH_TARGET", opts.attach_target.c_str(), 1);
     setenv("KEEPSAKE_MAC_PERIODIC_EDITOR_IDLE", opts.periodic_editor_idle ? "1" : "0", 1);
     setenv("KEEPSAKE_MAC_PERIODIC_CAPTURE", opts.periodic_capture ? "1" : "0", 1);
+    setenv("KEEPSAKE_MAC_PARENTLESS_SET_TITLE", opts.parentless_set_title ? "1" : "0", 1);
+    setenv("KEEPSAKE_MAC_PARENTLESS_SET_STYLEMASK", opts.parentless_set_stylemask ? "1" : "0", 1);
+    setenv("KEEPSAKE_MAC_PARENTLESS_SET_FRAME", opts.parentless_set_frame ? "1" : "0", 1);
+    setenv("KEEPSAKE_MAC_PARENTLESS_ACTIVATE", opts.parentless_activate ? "1" : "0", 1);
+    setenv("KEEPSAKE_MAC_PARENTLESS_MAKE_KEY", opts.parentless_make_key ? "1" : "0", 1);
+    setenv("KEEPSAKE_MAC_PARENTLESS_ORDER_FRONT", opts.parentless_order_front ? "1" : "0", 1);
+    setenv("KEEPSAKE_MAC_PARENTLESS_CLOSE_HANDLER", opts.parentless_close_handler ? "1" : "0", 1);
+    setenv("KEEPSAKE_MAC_PARENTLESS_OBSERVERS", opts.parentless_observers ? "1" : "0", 1);
     {
         const std::string gui_idle_interval = std::to_string(opts.gui_idle_interval_us);
         setenv("KEEPSAKE_MAC_GUI_IDLE_INTERVAL_US", gui_idle_interval.c_str(), 1);
