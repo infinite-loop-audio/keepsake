@@ -1064,6 +1064,8 @@ void gui_idle(BridgeLoader *) {
 
 bool gui_is_open() { return g_editor_open; }
 uint32_t gui_open_editor_iosurface(BridgeLoader *, int, int) { return 0; }
+bool gui_resize_editor_iosurface(int, int, uint32_t &) { return false; }
+bool gui_get_editor_iosurface_size(int &, int &) { return false; }
 void gui_forward_mouse(const IpcMouseEvent &) {}
 void gui_forward_key(const IpcKeyEvent &) {}
 bool gui_is_iosurface_mode() { return false; }
