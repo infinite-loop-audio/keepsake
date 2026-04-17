@@ -75,9 +75,12 @@ should not imply equal confidence without fresh release-window evidence.
 
 ### Packaging and install surface
 
-- No public binary release has shipped yet.
-- Signed/notarized vs unsigned macOS alpha distribution is still a release
-  decision, not a settled user promise.
+- `v0.1-alpha` is now published:
+  - `https://github.com/infinite-loop-audio/keepsake/releases/tag/v0.1-alpha`
+- macOS is the primary supported release artifact.
+- Windows and Linux assets are published as explicitly experimental attachments.
+- Signed/notarized vs unsigned macOS alpha distribution remains an open caveat,
+  not a settled user promise.
 - Build-from-source remains maintainer-oriented, but the release/install
   surface for `v0.1-alpha` is now documented and packaged around the candidate
   artifact flow.

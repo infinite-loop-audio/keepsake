@@ -1,6 +1,6 @@
 # G02.004 — Publish v0.1-alpha
 
-Status: active
+Status: complete
 Owner: Infinite Loop Audio
 Updated: 2026-04-17
 Governing refs:
@@ -31,6 +31,19 @@ Current pre-publish state:
 - `Release Binaries` workflow green at `24551886351`
 - `effigy doctor` still reports the accepted `scan.god-files` debt from
   `g01.015`; that is not a `v0.1-alpha` publication blocker
+
+## Closeout
+
+Closed by:
+
+- release candidate commit `0521d8b`
+- published tag `v0.1-alpha`
+- published GitHub release:
+  - `https://github.com/infinite-loop-audio/keepsake/releases/tag/v0.1-alpha`
+- green release workflow:
+  - `24552158082`
+- post-publication macOS packaged-artifact REAPER smoke:
+  - `docs/logs/2026-04/17-080000-v0.1-alpha-release-checkpoint.md`
 
 ## Steps
 
@@ -94,6 +107,5 @@ Acceptance:
 
 ## Next Task
 
-After publication, open a short post-alpha stabilization lane for incoming bug
-reports and claim corrections, or roll directly into the next generation if the
-alpha proves stable enough to widen support scope.
+Open a short post-alpha stabilization lane for incoming bug reports, claim
+corrections, and installer friction before widening scope.

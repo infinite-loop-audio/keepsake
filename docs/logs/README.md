@@ -14,6 +14,7 @@ Logs capture dated evidence and assessments.
 
 ## Recent Evidence
 
+- [`2026-04/17-080000-v0.1-alpha-release-checkpoint.md`](2026-04/17-080000-v0.1-alpha-release-checkpoint.md) — `v0.1-alpha` is tagged and published; records the real release workflow, public artifact checksums, and post-publication macOS REAPER smoke from the downloaded release zip
 - [`2026-04/17-075000-g02-004-release-artifact-proof.md`](2026-04/17-075000-g02-004-release-artifact-proof.md) — proved the release-binaries workflow on the current candidate commit, recorded the exact artifact set and checksums, and moved g02.004 onto the final tag/publish step
 - [`2026-04/17-074232-g02-003-alpha-evidence-refresh.md`](2026-04/17-074232-g02-003-alpha-evidence-refresh.md) — refreshed the release matrix and known-issues posture from packaged-artifact REAPER smoke on APC, Serum, and Khords plus current green CI
 - [`2026-04/17-073558-g02-002-release-surface-closeout.md`](2026-04/17-073558-g02-002-release-surface-closeout.md) — closed the packaging/versioning/install lane, fixed the local release-candidate script, and moved the alpha stream onto fresh validation work
@@ -41,5 +42,5 @@ Logs capture dated evidence and assessments.
 
 ## Next Task
 
-Add the final g02 release-window evidence as meaningful batch logs:
-publish-checkpoint proof and post-release verification.
+Open the short post-alpha stabilization lane and log the first real
+release-window bugfix or claim-correction batch.

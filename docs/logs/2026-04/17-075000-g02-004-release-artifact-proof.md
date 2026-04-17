@@ -2,7 +2,7 @@
 
 Date: 2026-04-17
 Milestone: `g02.004`
-Status: in_progress
+Status: updated
 
 ## What changed
 
@@ -47,6 +47,7 @@ cut the tag or publish the GitHub release.
 
 ## Next Task
 
-Complete `g02.004` by writing the release checkpoint log, creating tag
-`v0.1-alpha`, publishing the GitHub release, and doing one post-publication
-artifact smoke on the primary macOS lane.
+Treat this as the pre-publication proof note behind the now-published release,
+and use the release checkpoint log as the current authority:
+
+- `docs/logs/2026-04/17-080000-v0.1-alpha-release-checkpoint.md`
