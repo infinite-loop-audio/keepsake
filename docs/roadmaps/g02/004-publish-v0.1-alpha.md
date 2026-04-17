@@ -1,8 +1,8 @@
 # G02.004 — Publish v0.1-alpha
 
-Status: blocked on g02.001-003
+Status: active
 Owner: Infinite Loop Audio
-Updated: 2026-04-12
+Updated: 2026-04-17
 Governing refs:
   - docs/contracts/001-working-rules.md
   - docs/project-brief.md
@@ -21,6 +21,16 @@ This milestone is publication only:
 - final release verification
 
 It must not reopen scope decisions or introduce last-minute feature work.
+
+Current pre-publish state:
+
+- release notes/install surface aligned
+- validation matrix aligned
+- known issues aligned
+- packaged artifact proof exists on the primary macOS lane
+- `Release Binaries` workflow green at `24551886351`
+- `effigy doctor` still reports the accepted `scan.god-files` debt from
+  `g01.015`; that is not a `v0.1-alpha` publication blocker
 
 ## Steps
 
