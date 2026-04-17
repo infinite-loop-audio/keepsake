@@ -56,7 +56,6 @@ fi
 platform=""
 archive_name=""
 clap_path="$build_dir/keepsake.clap"
-stage_dir="$output_dir/stage"
 
 case "$(uname -s)" in
   Darwin)
@@ -77,8 +76,12 @@ case "$(uname -s)" in
     ;;
 esac
 
-mkdir -p "$stage_dir"
-rm -rf "$stage_dir"
+artifact_path="$output_dir/$archive_name"
+checksum_path="$output_dir/SHA256SUMS.txt"
+
+rm -rf "$output_dir"
+mkdir -p "$output_dir"
+stage_dir="$output_dir/stage"
 mkdir -p "$stage_dir"
 
 copy_helper_if_present() {
@@ -94,26 +97,16 @@ else
   cp "$clap_path" "$stage_dir/"
 fi
 
-if [[ "$platform" != "macos-universal" ]]; then
+if [[ "$platform" != macos-* ]]; then
   copy_helper_if_present "keepsake-bridge"
   copy_helper_if_present "keepsake-bridge-x86_64"
 fi
-
-artifact_path="$output_dir/$archive_name"
-checksum_path="$output_dir/SHA256SUMS.txt"
-
-rm -f "$artifact_path" "$checksum_path"
-mkdir -p "$output_dir"
 
 case "$archive_name" in
   *.zip)
     (
       cd "$stage_dir"
       ditto -c -k --sequesterRsrc --keepParent "keepsake.clap" "$artifact_path"
-      if [[ "$platform" != "macos-universal" ]]; then
-        rm -f "$artifact_path"
-        zip -qry "$artifact_path" ./*
-      fi
     )
     ;;
   *.tar.gz)

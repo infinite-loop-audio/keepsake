@@ -7,8 +7,8 @@ Started: 2026-04-12
 
 | Milestone | Title | Status |
 |---|---|---|
-| `001` | [Alpha Scope, Claims, and Docs Reconciliation](001-alpha-scope-claims-and-docs.md) | ready |
-| `002` | [Release Packaging, Versioning, and Install Surface](002-release-packaging-versioning-install-surface.md) | ready |
+| `001` | [Alpha Scope, Claims, and Docs Reconciliation](001-alpha-scope-claims-and-docs.md) | complete |
+| `002` | [Release Packaging, Versioning, and Install Surface](002-release-packaging-versioning-install-surface.md) | complete |
 | `003` | [Alpha Validation Matrix and Evidence Pack](003-alpha-validation-matrix-and-evidence.md) | blocked on 002 |
 | `004` | [Publish v0.1-alpha](004-publish-v0.1-alpha.md) | blocked on 002-003 |
 | `005` | [macOS UI Model and Interactive Fallback Prototype](005-macos-ui-model-and-fallback-prototype.md) | complete |
@@ -40,11 +40,14 @@ needs a viable editor model that does not pretend universal interactive embed.
 
 ## Next Task
 
-Execute `g02.002` — versioning, artifacts, install surface, and release-note
-scaffolding for the now-locked alpha support envelope.
+Execute `g02.003` — refresh the alpha validation matrix and evidence pack
+against the now-locked release surface.
 
 Current release posture outcome:
 - `g02.001` effectively closed in docs posture: the alpha scope/claims baseline
   is now explicit
+- `g02.002` effectively closed in release posture: version, changelog, install
+  surface, release notes, and artifact naming are now aligned to the current
+  support envelope
 - `g02.005` complete — macOS defaults to the bridge-owned live editor path;
   IOSurface preview remains diagnostic-only

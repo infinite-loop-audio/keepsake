@@ -1,8 +1,8 @@
 # G02.002 — Release Packaging, Versioning, and Install Surface
 
-Status: blocked on g02.001
+Status: complete
 Owner: Infinite Loop Audio
-Updated: 2026-04-12
+Updated: 2026-04-17
 Governing refs:
   - docs/contracts/001-working-rules.md
   - docs/project-brief.md
@@ -84,6 +84,16 @@ Acceptance:
 - draft release notes
 - version and changelog diffs
 - one dry run of the packaging flow on at least the primary alpha platform
+
+## Closeout
+
+Closed by:
+
+- `CHANGELOG.md` gaining a real `v0.1-alpha` entry
+- `docs/releases/v0.1-alpha.md` being updated to the actual release/install
+  surface and current support posture
+- local dry-run packaging via `effigy release:candidate:alpha`
+- current push CI green across macOS, Linux, and Windows at `24551205423`
 
 ## Stop Conditions
 

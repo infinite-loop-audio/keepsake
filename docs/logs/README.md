@@ -14,6 +14,7 @@ Logs capture dated evidence and assessments.
 
 ## Recent Evidence
 
+- [`2026-04/17-073558-g02-002-release-surface-closeout.md`](2026-04/17-073558-g02-002-release-surface-closeout.md) — closed the packaging/versioning/install lane, fixed the local release-candidate script, and moved the alpha stream onto fresh validation work
 - [`2026-04/17-073000-g02-001-alpha-scope-closeout.md`](2026-04/17-073000-g02-001-alpha-scope-closeout.md) — closed the remaining posture gap around g02.001 and moved the active release lane cleanly onto packaging/install work
 - [`2026-04/17-071000-macos-preview-lane-audit.md`](2026-04/17-071000-macos-preview-lane-audit.md) — audited the retained macOS preview code, marked it as diagnostic-only, and put the remove-vs-retain decision onto an explicit backlog track
 - [`2026-04/17-064500-macos-live-editor-stabilization-cleanup.md`](2026-04/17-064500-macos-live-editor-stabilization-cleanup.md) — cleaned up the temporary macOS parentless mutation matrix and narrowed the remaining live-editor diagnostics to the hooks that still matter
@@ -38,6 +39,5 @@ Logs capture dated evidence and assessments.
 
 ## Next Task
 
-Add g02 release-window evidence as meaningful batch logs: alpha scope/docs
-closeout, packaging/versioning work, validation matrix runs, and final release
-publication proof.
+Add the next g02 release-window evidence as meaningful batch logs: refreshed
+validation matrix runs, release-candidate proof, and final publication proof.

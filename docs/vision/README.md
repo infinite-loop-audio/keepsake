@@ -35,5 +35,5 @@ can prove in a fresh release window.
 
 ## Next Task
 
-Execute g02.002 — package the `v0.1-alpha` lane around the now-defined support
-envelope: versioning, artifacts, install surface, and release scaffolding.
+Execute g02.003 — validate the now-packaged `v0.1-alpha` support envelope with
+fresh release-window evidence.

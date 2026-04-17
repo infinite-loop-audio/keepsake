@@ -40,5 +40,5 @@ evidence, and publishing from explicit known-issues posture.
 
 ## Next Task
 
-Ship g02.002 — turn the now-defined `v0.1-alpha` scope into versioned
-artifacts, install surface, and release-note scaffolding.
+Execute g02.003 — refresh the `v0.1-alpha` validation matrix and evidence pack
+against the now-locked release surface.

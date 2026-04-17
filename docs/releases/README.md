@@ -37,5 +37,5 @@ Do not publish from chat memory alone. Releases should be backed by:
 
 ## Next Task
 
-Use the publish checklist and release checkpoint template during g02.004 so the
-actual release cut leaves one dated evidence artifact, not just a tag.
+Execute g02.003 first so the publish checklist is fed by fresh release-window
+evidence, not the earlier draft validation posture.
