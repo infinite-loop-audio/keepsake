@@ -8,6 +8,7 @@ alias = "keepsake"
 [manifest]
 include = [
   "tasks/effigy.tasks.toml",
+  "demos/effigy.demos.toml",
   "docs/effigy.docs.toml",
   "release/effigy.release.toml",
 ]

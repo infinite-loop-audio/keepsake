@@ -189,6 +189,15 @@ cmake --build build
 effigy qa
 ```
 
+Demo proof entrypoints:
+
+- `effigy demo list`
+- `effigy demo:supported-proof`
+- individual demos stay available through `effigy demo run <demo-id>`
+
+Demo posture and the supported-vs-diagnostic split live in
+[`docs/demos.md`](docs/demos.md).
+
 Primary local outputs:
 
 - macOS: `build/keepsake.clap`

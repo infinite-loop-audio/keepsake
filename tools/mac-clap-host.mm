@@ -81,6 +81,8 @@ struct Options {
     int capture_interval_us = 0;
     int capture_burst_frames = 6;
     int capture_burst_interval_us = 33333;
+    bool exercise_param_state = false;
+    bool exercise_ui_param_state = false;
 };
 
 struct HostState {
@@ -121,6 +123,25 @@ struct AudioRunState {
     std::atomic<int> blocks{0};
 };
 
+struct ParamEventList {
+    clap_input_events_t iface = {};
+    clap_event_param_value_t event = {};
+    const clap_event_header_t *header = nullptr;
+};
+
+struct MemoryWriteStream {
+    clap_ostream_t iface = {};
+    std::vector<uint8_t> bytes;
+};
+
+struct MemoryReadStream {
+    clap_istream_t iface = {};
+    const std::vector<uint8_t> *bytes = nullptr;
+    size_t offset = 0;
+};
+
+void run_callbacks(const clap_plugin_t *plugin, HostState &host);
+
 double now_ms() {
     return CACurrentMediaTime() * 1000.0;
 }
@@ -135,7 +156,9 @@ void log_line(const char *fmt, ...) {
 
 bool configure_scan_override(const std::string &vst_path) {
     if (vst_path.empty()) return true;
-    const fs::path src(vst_path);
+    std::error_code ec;
+    fs::path src = fs::absolute(fs::path(vst_path), ec);
+    if (ec) return false;
     if (!fs::exists(src)) return false;
 
     char tmpl[] = "/tmp/keepsake-mac-host-XXXXXX";
@@ -143,7 +166,6 @@ bool configure_scan_override(const std::string &vst_path) {
     if (!dir) return false;
 
     const fs::path dst = fs::path(dir) / src.filename();
-    std::error_code ec;
     fs::create_directory_symlink(src, dst, ec);
     if (ec) return false;
     return setenv("KEEPSAKE_VST2_PATH", dir, 1) == 0;
@@ -207,9 +229,211 @@ bool parse_args(int argc, char *argv[], Options &opts) {
             opts.capture_burst_frames = std::atoi(argv[++i]);
         } else if (std::strcmp(arg, "--capture-burst-interval-us") == 0 && i + 1 < argc) {
             opts.capture_burst_interval_us = std::atoi(argv[++i]);
+        } else if (std::strcmp(arg, "--exercise-param-state") == 0) {
+            opts.exercise_param_state = true;
+        } else if (std::strcmp(arg, "--exercise-ui-param-state") == 0) {
+            opts.exercise_ui_param_state = true;
         } else {
             return false;
         }
+    }
+    return true;
+}
+
+uint32_t param_list_size(const clap_input_events_t *list) {
+    auto *events = static_cast<const ParamEventList *>(list->ctx);
+    return events->header ? 1u : 0u;
+}
+
+const clap_event_header_t *param_list_get(const clap_input_events_t *list, uint32_t index) {
+    auto *events = static_cast<const ParamEventList *>(list->ctx);
+    if (index != 0 || !events->header) return nullptr;
+    return events->header;
+}
+
+void init_param_list(ParamEventList &list) {
+    list.iface.ctx = &list;
+    list.iface.size = param_list_size;
+    list.iface.get = param_list_get;
+    list.header = nullptr;
+}
+
+void fill_param_event(ParamEventList &list, clap_id param_id, double value) {
+    std::memset(&list.event, 0, sizeof(list.event));
+    list.event.header.size = sizeof(list.event);
+    list.event.header.time = 0;
+    list.event.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+    list.event.header.type = CLAP_EVENT_PARAM_VALUE;
+    list.event.param_id = param_id;
+    list.event.value = value;
+    list.header = &list.event.header;
+}
+
+int64_t memory_stream_write(const clap_ostream_t *stream, const void *buffer, uint64_t size) {
+    auto *state = static_cast<MemoryWriteStream *>(stream->ctx);
+    const auto *src = static_cast<const uint8_t *>(buffer);
+    state->bytes.insert(state->bytes.end(), src, src + size);
+    return static_cast<int64_t>(size);
+}
+
+int64_t memory_stream_read(const clap_istream_t *stream, void *buffer, uint64_t size) {
+    auto *state = static_cast<MemoryReadStream *>(stream->ctx);
+    if (!state->bytes) return 0;
+    const size_t remaining = state->bytes->size() - std::min(state->offset, state->bytes->size());
+    const size_t to_copy = std::min<size_t>(static_cast<size_t>(size), remaining);
+    if (to_copy == 0) return 0;
+    std::memcpy(buffer, state->bytes->data() + state->offset, to_copy);
+    state->offset += to_copy;
+    return static_cast<int64_t>(to_copy);
+}
+
+void init_memory_stream(MemoryWriteStream &stream) {
+    stream.iface.ctx = &stream;
+    stream.iface.write = memory_stream_write;
+}
+
+void init_memory_stream(MemoryReadStream &stream, const std::vector<uint8_t> &bytes) {
+    stream.bytes = &bytes;
+    stream.offset = 0;
+    stream.iface.ctx = &stream;
+    stream.iface.read = memory_stream_read;
+}
+
+bool save_plugin_state(const clap_plugin_state_t *state_ext,
+                       const clap_plugin_t *plugin,
+                       std::vector<uint8_t> &bytes) {
+    MemoryWriteStream stream;
+    init_memory_stream(stream);
+    if (!state_ext || !state_ext->save || !state_ext->save(plugin, &stream.iface)) return false;
+    bytes = std::move(stream.bytes);
+    return true;
+}
+
+bool save_plugin_state_with_poll(const clap_plugin_state_t *state_ext,
+                                 const clap_plugin_t *plugin,
+                                 HostState &host,
+                                 std::vector<uint8_t> &bytes,
+                                 int timeout_ms) {
+    const double deadline = now_ms() + timeout_ms;
+    do {
+        if (save_plugin_state(state_ext, plugin, bytes)) return true;
+        run_callbacks(plugin, host);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    } while (now_ms() < deadline);
+    return false;
+}
+
+bool load_plugin_state(const clap_plugin_state_t *state_ext,
+                       const clap_plugin_t *plugin,
+                       const std::vector<uint8_t> &bytes) {
+    MemoryReadStream stream;
+    init_memory_stream(stream, bytes);
+    return state_ext && state_ext->load && state_ext->load(plugin, &stream.iface);
+}
+
+bool exercise_param_state_roundtrip(const clap_plugin_t *plugin) {
+    auto *params = static_cast<const clap_plugin_params_t *>(plugin->get_extension(plugin, CLAP_EXT_PARAMS));
+    auto *state = static_cast<const clap_plugin_state_t *>(plugin->get_extension(plugin, CLAP_EXT_STATE));
+    if (!params || !state) {
+        std::fprintf(stderr, "params/state extensions unavailable\n");
+        return false;
+    }
+
+    const uint32_t count = params->count(plugin);
+    log_line("[params.count] %u\n", count);
+    if (count == 0) return false;
+
+    clap_param_info_t info = {};
+    if (!params->get_info(plugin, 0, &info)) {
+        std::fprintf(stderr, "params.get_info failed\n");
+        return false;
+    }
+    log_line("[params.info] id=%u name=%s default=%.3f\n",
+             info.id, info.name, info.default_value);
+
+    auto flush_value = [&](double value) -> bool {
+        ParamEventList list;
+        init_param_list(list);
+        fill_param_event(list, info.id, value);
+        params->flush(plugin, &list.iface, nullptr);
+        double observed = -1.0;
+        if (!params->get_value(plugin, info.id, &observed)) return false;
+        log_line("[params.value] set=%.3f observed=%.3f\n", value, observed);
+        return std::fabs(observed - value) < 0.001;
+    };
+
+    if (!flush_value(0.25)) {
+        std::fprintf(stderr, "param flush to 0.25 not observed\n");
+        return false;
+    }
+
+    std::vector<uint8_t> state_a;
+    if (!save_plugin_state(state, plugin, state_a)) {
+        std::fprintf(stderr, "state save A failed\n");
+        return false;
+    }
+    log_line("[state.save] A bytes=%zu\n", state_a.size());
+
+    if (!flush_value(0.85)) {
+        std::fprintf(stderr, "param flush to 0.85 not observed\n");
+        return false;
+    }
+
+    std::vector<uint8_t> state_b;
+    if (!save_plugin_state(state, plugin, state_b)) {
+        std::fprintf(stderr, "state save B failed\n");
+        return false;
+    }
+    log_line("[state.save] B bytes=%zu\n", state_b.size());
+    if (state_a == state_b) {
+        std::fprintf(stderr, "state chunks did not change after param update\n");
+        return false;
+    }
+
+    if (!load_plugin_state(state, plugin, state_a)) {
+        std::fprintf(stderr, "state load A failed\n");
+        return false;
+    }
+    log_line("[state.load] A bytes=%zu\n", state_a.size());
+
+    std::vector<uint8_t> state_c;
+    if (!save_plugin_state(state, plugin, state_c)) {
+        std::fprintf(stderr, "state save C failed\n");
+        return false;
+    }
+    log_line("[state.save] C bytes=%zu\n", state_c.size());
+    if (state_c != state_a) {
+        std::fprintf(stderr, "state did not round-trip back to A\n");
+        return false;
+    }
+    return true;
+}
+
+bool verify_state_roundtrip(const clap_plugin_state_t *state_ext,
+                            const clap_plugin_t *plugin,
+                            const std::vector<uint8_t> &baseline,
+                            const std::vector<uint8_t> &modified,
+                            const char *label_prefix) {
+    log_line("[%s.state.save] baseline=%zu modified=%zu\n",
+             label_prefix, baseline.size(), modified.size());
+    if (baseline == modified) {
+        std::fprintf(stderr, "%s state chunks did not change\n", label_prefix);
+        return false;
+    }
+    if (!load_plugin_state(state_ext, plugin, baseline)) {
+        std::fprintf(stderr, "%s state load baseline failed\n", label_prefix);
+        return false;
+    }
+    log_line("[%s.state.load] baseline=%zu\n", label_prefix, baseline.size());
+    std::vector<uint8_t> restored;
+    if (!save_plugin_state(state_ext, plugin, restored)) {
+        std::fprintf(stderr, "%s state save restored failed\n", label_prefix);
+        return false;
+    }
+    log_line("[%s.state.save] restored=%zu\n", label_prefix, restored.size());
+    if (restored != baseline) {
+        std::fprintf(stderr, "%s restored chunk mismatch\n", label_prefix);
+        return false;
     }
     return true;
 }
@@ -782,7 +1006,7 @@ int main(int argc, char *argv[]) {
     Options opts;
     if (!parse_args(argc, argv, opts)) {
         std::fprintf(stderr,
-                     "usage: %s <clap-bundle> <plugin-id> [--vst-path PATH] [--ui-mode auto|live|preview|iosurface|floating] [--host-mode stable|delayed-parent|swap-parent] [--attach-target auto|requested-parent|content-view|frame-superview] [--open-ui] [--run-transport] [--script-click-center] [--script-text TEXT] [--script-delay-ms N] [--width N] [--height N] [--ui-seconds N] [--telemetry-seconds N] [--sample-rate N] [--block-size N] [--process-blocks N] [--periodic-editor-idle on|off] [--periodic-capture on|off] [--gui-idle-us N] [--capture-interval-us N] [--capture-burst-frames N] [--capture-burst-interval-us N]\n"
+                     "usage: %s <clap-bundle> <plugin-id> [--vst-path PATH] [--ui-mode auto|live|preview|iosurface|floating] [--host-mode stable|delayed-parent|swap-parent] [--attach-target auto|requested-parent|content-view|frame-superview] [--open-ui] [--run-transport] [--script-click-center] [--script-text TEXT] [--script-delay-ms N] [--width N] [--height N] [--ui-seconds N] [--telemetry-seconds N] [--sample-rate N] [--block-size N] [--process-blocks N] [--periodic-editor-idle on|off] [--periodic-capture on|off] [--gui-idle-us N] [--capture-interval-us N] [--capture-burst-frames N] [--capture-burst-interval-us N] [--exercise-param-state] [--exercise-ui-param-state]\n"
                      "note: preview/iosurface is diagnostic-only on macOS; live is the supported interaction posture.\n",
                      argv[0]);
         return 1;
@@ -839,6 +1063,8 @@ int main(int argc, char *argv[]) {
              opts.capture_interval_us,
              opts.capture_burst_frames,
              opts.capture_burst_interval_us);
+    log_line("exercise_param_state=%d\n", opts.exercise_param_state ? 1 : 0);
+    log_line("exercise_ui_param_state=%d\n", opts.exercise_ui_param_state ? 1 : 0);
 
     if (!entry->init(opts.clap_path.c_str())) {
         std::fprintf(stderr, "entry.init failed\n");
@@ -888,11 +1114,38 @@ int main(int argc, char *argv[]) {
     }
 
     auto *gui = static_cast<const clap_plugin_gui_t *>(plugin->get_extension(plugin, CLAP_EXT_GUI));
+    auto *params = static_cast<const clap_plugin_params_t *>(plugin->get_extension(plugin, CLAP_EXT_PARAMS));
+    auto *state = static_cast<const clap_plugin_state_t *>(plugin->get_extension(plugin, CLAP_EXT_STATE));
+
+    std::vector<uint8_t> ui_state_baseline;
+    if (opts.exercise_ui_param_state && !state) {
+        std::fprintf(stderr, "state extension unavailable\n");
+        plugin->destroy(plugin);
+        return 1;
+    }
+
     if (!plugin->activate(plugin, static_cast<double>(opts.sample_rate), 32,
                           static_cast<uint32_t>(opts.block_size))) {
         std::fprintf(stderr, "activate failed\n");
         plugin->destroy(plugin);
         return 1;
+    }
+    if (opts.exercise_ui_param_state) {
+        if (!params) {
+            std::fprintf(stderr, "params extension unavailable\n");
+            plugin->deactivate(plugin);
+            plugin->destroy(plugin);
+            return 1;
+        }
+        const uint32_t param_count = params->count(plugin);
+        log_line("[ui.params.count] %u\n", param_count);
+        if (!save_plugin_state_with_poll(state, plugin, host, ui_state_baseline, 2000)) {
+            std::fprintf(stderr, "ui baseline state save failed\n");
+            plugin->deactivate(plugin);
+            plugin->destroy(plugin);
+            return 1;
+        }
+        log_line("[ui.state.save] baseline=%zu\n", ui_state_baseline.size());
     }
     if (!plugin->start_processing(plugin)) {
         std::fprintf(stderr, "start_processing failed\n");
@@ -1023,14 +1276,31 @@ int main(int argc, char *argv[]) {
         gui->destroy(plugin);
     }
 
-    plugin->stop_processing(plugin);
+    bool param_state_ok = true;
+    if (opts.exercise_param_state) {
+        plugin->stop_processing(plugin);
+        param_state_ok = exercise_param_state_roundtrip(plugin);
+    } else if (opts.exercise_ui_param_state) {
+        plugin->stop_processing(plugin);
+        std::vector<uint8_t> ui_state_modified;
+        if (!save_plugin_state(state, plugin, ui_state_modified)) {
+            std::fprintf(stderr, "ui modified state save failed\n");
+            param_state_ok = false;
+        } else {
+            log_line("[ui.state.save] modified=%zu\n", ui_state_modified.size());
+            param_state_ok = verify_state_roundtrip(state, plugin, ui_state_baseline,
+                                                    ui_state_modified, "ui");
+        }
+    } else {
+        plugin->stop_processing(plugin);
+    }
     plugin->deactivate(plugin);
     plugin->destroy(plugin);
     entry->deinit();
     [app_delegate release];
 
     log_line("result=%s peak=%.6f\n",
-             (!opts.run_transport || peak > 0.00001f) ? "PASS" : "FAIL",
+             ((!opts.run_transport || peak > 0.00001f) && param_state_ok) ? "PASS" : "FAIL",
              peak);
-    return (!opts.run_transport || peak > 0.00001f) ? 0 : 2;
+    return ((!opts.run_transport || peak > 0.00001f) && param_state_ok) ? 0 : 2;
 }

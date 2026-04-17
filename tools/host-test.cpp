@@ -32,8 +32,10 @@ static bool configure_scan_override(const char *plugin_path) {
     if (!dir) return false;
 
     fs::path src(plugin_path);
-    fs::path dst = fs::path(dir) / src.filename();
     std::error_code ec;
+    src = fs::absolute(src, ec);
+    if (ec) return false;
+    fs::path dst = fs::path(dir) / src.filename();
     fs::create_directory_symlink(src, dst, ec);
     if (ec) return false;
 

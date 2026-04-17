@@ -1,4 +1,21 @@
 [tasks]
+"demo:build:vst2-host-stack" = [
+  { run = "mkdir -p .effigy/demo/artifacts/shared" },
+  { run = "./tools/demo-capture.sh .effigy/demo/artifacts/shared/vst2-host-stack-configure.log cmake --fresh --preset default" },
+  { run = "./tools/demo-capture.sh .effigy/demo/artifacts/shared/vst2-host-stack-build.log cmake --build build --target keepsake keepsake-bridge clap-scan test-plugin host-test host-test-threaded" },
+]
+"demo:build:vst2-gui-stack" = [
+  { run = "mkdir -p .effigy/demo/artifacts/shared" },
+  { run = "./tools/demo-capture.sh .effigy/demo/artifacts/shared/vst2-gui-stack-configure.log cmake --fresh --preset default" },
+  { run = "./tools/demo-capture.sh .effigy/demo/artifacts/shared/vst2-gui-stack-build.log cmake --build build --target keepsake keepsake-bridge keepsake-bridge-x86_64 mac-clap-host demo-vst2-gui-plugin" },
+]
+"demo:supported-proof" = [
+  { run = "effigy demo run vst2-scan-smoke" },
+  { run = "effigy demo run vst2-host-audio-smoke" },
+  { run = "effigy demo run vst2-host-threaded-smoke" },
+  { run = "effigy demo run vst2-gui-smoke" },
+  { run = "effigy demo run vst2-gui-param-state-smoke" },
+]
 "qa:docs:links" = "effigy docs check-links"
 "qa:docs:index:vision" = "effigy docs check-index --policy-index vision"
 "qa:docs:next-action:vision" = "effigy docs check-next-action --policy vision"

@@ -6,6 +6,19 @@ project(keepsake
     DESCRIPTION "CLAP plugin that bridges legacy plugins into modern hosts"
 )
 
+if(APPLE)
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/TestPlugin-Info.plist.in
+        ${CMAKE_CURRENT_BINARY_DIR}/TestPlugin-Info.plist
+        @ONLY
+    )
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/DemoVst2GuiPlugin-Info.plist.in
+        ${CMAKE_CURRENT_BINARY_DIR}/DemoVst2GuiPlugin-Info.plist
+        @ONLY
+    )
+endif()
+
 execute_process(
     COMMAND git rev-parse --short=12 HEAD
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -293,10 +306,48 @@ if(APPLE)
         SUFFIX ".dylib"
         BUNDLE FALSE
     )
+    add_custom_command(TARGET test-plugin POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_CURRENT_BINARY_DIR}/test-plugin.vst/Contents/MacOS"
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "$<TARGET_FILE:test-plugin>"
+            "${CMAKE_CURRENT_BINARY_DIR}/test-plugin.vst/Contents/MacOS/test-plugin"
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "${CMAKE_CURRENT_BINARY_DIR}/TestPlugin-Info.plist"
+            "${CMAKE_CURRENT_BINARY_DIR}/test-plugin.vst/Contents/Info.plist"
+        COMMENT "Packaging test-plugin as a macOS VST bundle"
+    )
 elseif(WIN32)
     set_target_properties(test-plugin PROPERTIES SUFFIX ".dll")
 else()
     set_target_properties(test-plugin PROPERTIES SUFFIX ".so")
+endif()
+
+if(APPLE)
+    add_library(demo-vst2-gui-plugin MODULE tools/demo-vst2-gui-plugin.mm)
+    target_include_directories(demo-vst2-gui-plugin PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor
+    )
+    target_link_libraries(demo-vst2-gui-plugin PRIVATE
+        "-framework Cocoa"
+        "-framework QuartzCore"
+    )
+    set_target_properties(demo-vst2-gui-plugin PROPERTIES
+        PREFIX ""
+        SUFFIX ".dylib"
+        BUNDLE FALSE
+    )
+    add_custom_command(TARGET demo-vst2-gui-plugin POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_CURRENT_BINARY_DIR}/demo-vst2-gui-plugin.vst/Contents/MacOS"
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "$<TARGET_FILE:demo-vst2-gui-plugin>"
+            "${CMAKE_CURRENT_BINARY_DIR}/demo-vst2-gui-plugin.vst/Contents/MacOS/demo-vst2-gui-plugin"
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "${CMAKE_CURRENT_BINARY_DIR}/DemoVst2GuiPlugin-Info.plist"
+            "${CMAKE_CURRENT_BINARY_DIR}/demo-vst2-gui-plugin.vst/Contents/Info.plist"
+        COMMENT "Packaging demo-vst2-gui-plugin as a macOS VST bundle"
+    )
 endif()
 
 if(WIN32)

@@ -9,6 +9,7 @@
 - [`logs/README.md`](logs/README.md)
 - [`releases/README.md`](releases/README.md)
 - [`known-issues-v0.1-alpha.md`](known-issues-v0.1-alpha.md)
+- [`demos.md`](demos.md)
 
 Stricter delivery layer (installed):
 
@@ -18,6 +19,7 @@ Stricter delivery layer (installed):
 Project reference material:
 
 - [`project-brief.md`](project-brief.md)
+- [`demos.md`](demos.md)
 
 ## Working Rule
 

@@ -106,6 +106,9 @@ void keepsake_params_flush(const clap_plugin_t *plugin,
         auto *hdr = in->get(in, i);
         if (hdr->type == CLAP_EVENT_PARAM_VALUE) {
             auto *pv = reinterpret_cast<const clap_event_param_value_t *>(hdr);
+            if (pv->param_id < kp->params.size()) {
+                kp->params[pv->param_id].default_value = static_cast<float>(pv->value);
+            }
             IpcSetParamPayload sp;
             sp.index = static_cast<uint32_t>(pv->param_id);
             sp.value = static_cast<float>(pv->value);

@@ -471,6 +471,49 @@ static void gui_log_mouse_trace(const char *phase,
         s_last_automated_param.load());
 }
 
+static void gui_dispatch_mouse_event_to_target(NSEvent *event,
+                                               NSView *dispatch_target) {
+    if (!event || !dispatch_target) return;
+    gui_prepare_window_for_input(dispatch_target);
+    switch (event.type) {
+    case NSEventTypeMouseMoved:
+        [dispatch_target mouseMoved:event];
+        break;
+    case NSEventTypeLeftMouseDown:
+        [dispatch_target mouseDown:event];
+        break;
+    case NSEventTypeLeftMouseUp:
+        [dispatch_target mouseUp:event];
+        break;
+    case NSEventTypeLeftMouseDragged:
+        [dispatch_target mouseDragged:event];
+        break;
+    case NSEventTypeRightMouseDown:
+        [dispatch_target rightMouseDown:event];
+        break;
+    case NSEventTypeRightMouseUp:
+        [dispatch_target rightMouseUp:event];
+        break;
+    case NSEventTypeRightMouseDragged:
+        [dispatch_target rightMouseDragged:event];
+        break;
+    case NSEventTypeOtherMouseDown:
+        [dispatch_target otherMouseDown:event];
+        break;
+    case NSEventTypeOtherMouseUp:
+        [dispatch_target otherMouseUp:event];
+        break;
+    case NSEventTypeOtherMouseDragged:
+        [dispatch_target otherMouseDragged:event];
+        break;
+    case NSEventTypeScrollWheel:
+        [dispatch_target scrollWheel:event];
+        break;
+    default:
+        break;
+    }
+}
+
 static CGMouseButton gui_cg_mouse_button(int32_t button) {
     switch (button) {
     case 1: return kCGMouseButtonRight;
@@ -552,84 +595,14 @@ static void gui_dispatch_mouse_event(NSView *target_view, NSEvent *event) {
     }
 
     if (g_offscreen_window) {
-        gui_prepare_window_for_input(dispatch_target);
-        [g_offscreen_window sendEvent:event];
+        gui_dispatch_mouse_event_to_target(event, dispatch_target);
         if (trace_mouse) {
             gui_log_mouse_trace("post", event, target_view, dispatch_target,
                                 before_begin, before_automate, before_end);
         }
         return;
     }
-    switch (event.type) {
-    case NSEventTypeMouseMoved:
-        if (dispatch_target) {
-            gui_prepare_window_for_input(dispatch_target);
-            [dispatch_target mouseMoved:event];
-        }
-        break;
-    case NSEventTypeLeftMouseDown:
-        if (dispatch_target) {
-            gui_prepare_window_for_input(dispatch_target);
-            [dispatch_target mouseDown:event];
-        }
-        break;
-    case NSEventTypeLeftMouseUp:
-        if (dispatch_target) {
-            gui_prepare_window_for_input(dispatch_target);
-            [dispatch_target mouseUp:event];
-        }
-        break;
-    case NSEventTypeLeftMouseDragged:
-        if (dispatch_target) {
-            gui_prepare_window_for_input(dispatch_target);
-            [dispatch_target mouseDragged:event];
-        }
-        break;
-    case NSEventTypeRightMouseDown:
-        if (dispatch_target) {
-            gui_prepare_window_for_input(dispatch_target);
-            [dispatch_target rightMouseDown:event];
-        }
-        break;
-    case NSEventTypeRightMouseUp:
-        if (dispatch_target) {
-            gui_prepare_window_for_input(dispatch_target);
-            [dispatch_target rightMouseUp:event];
-        }
-        break;
-    case NSEventTypeRightMouseDragged:
-        if (dispatch_target) {
-            gui_prepare_window_for_input(dispatch_target);
-            [dispatch_target rightMouseDragged:event];
-        }
-        break;
-    case NSEventTypeOtherMouseDown:
-        if (dispatch_target) {
-            gui_prepare_window_for_input(dispatch_target);
-            [dispatch_target otherMouseDown:event];
-        }
-        break;
-    case NSEventTypeOtherMouseUp:
-        if (dispatch_target) {
-            gui_prepare_window_for_input(dispatch_target);
-            [dispatch_target otherMouseUp:event];
-        }
-        break;
-    case NSEventTypeOtherMouseDragged:
-        if (dispatch_target) {
-            gui_prepare_window_for_input(dispatch_target);
-            [dispatch_target otherMouseDragged:event];
-        }
-        break;
-    case NSEventTypeScrollWheel:
-        if (dispatch_target) {
-            gui_prepare_window_for_input(dispatch_target);
-            [dispatch_target scrollWheel:event];
-        }
-        break;
-    default:
-        break;
-    }
+    gui_dispatch_mouse_event_to_target(event, dispatch_target);
     if (trace_mouse) {
         gui_log_mouse_trace("post", event, target_view, dispatch_target,
                             before_begin, before_automate, before_end);

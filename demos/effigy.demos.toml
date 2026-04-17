@@ -1,0 +1,143 @@
+[demos.vst2-scan-smoke]
+title = "VST2 scan smoke"
+summary = "Builds the repo VST2 fixture and proves Keepsake exposes it through the CLAP factory."
+proof = "Headless proof that scan-path override, VST2 metadata extraction, and CLAP descriptor exposure still work together."
+owner = "platform"
+mode = "headless"
+status = "ready"
+covers = ["keepsake.vst2.scan", "keepsake.clap.factory"]
+tags = ["smoke", "vst2", "headless", "macos", "linux"]
+prerequisites = [
+  "Run on macOS or Linux.",
+  "CMake toolchain and network access for first configure must be available.",
+]
+artifacts = [
+  ".effigy/demo/artifacts/shared/vst2-host-stack-configure.log",
+  ".effigy/demo/artifacts/shared/vst2-host-stack-build.log",
+  ".effigy/demo/artifacts/vst2-scan-smoke/clap-scan.txt",
+]
+run = [
+  { task = "demo:build:vst2-host-stack" },
+  { run = "mkdir -p .effigy/demo/artifacts/vst2-scan-smoke" },
+  { run = "env KEEPSAKE_VST2_PATH=\"$(./tools/demo-asset-path.sh vst2-fixture)\" ./tools/demo-capture.sh .effigy/demo/artifacts/vst2-scan-smoke/clap-scan.txt ./build/clap-scan $(./tools/demo-asset-path.sh clap-bundle)" },
+]
+
+[demos.vst2-host-audio-smoke]
+title = "VST2 host audio smoke"
+summary = "Loads the repo VST2 fixture through Keepsake in the host harness and waits for audio."
+proof = "Headless proof that factory lookup, bridge launch, activation, and audio processing still work end to end."
+owner = "platform"
+mode = "headless"
+status = "ready"
+covers = ["keepsake.bridge.audio", "keepsake.vst2.instantiate"]
+tags = ["smoke", "vst2", "audio", "headless", "macos", "linux"]
+prerequisites = [
+  "Run on macOS or Linux.",
+  "CMake toolchain and network access for first configure must be available.",
+]
+artifacts = [
+  ".effigy/demo/artifacts/shared/vst2-host-stack-configure.log",
+  ".effigy/demo/artifacts/shared/vst2-host-stack-build.log",
+  ".effigy/demo/artifacts/vst2-host-audio-smoke/host-test.txt",
+]
+run = [
+  { task = "demo:build:vst2-host-stack" },
+  { run = "mkdir -p .effigy/demo/artifacts/vst2-host-audio-smoke" },
+  { run = "./tools/demo-capture.sh .effigy/demo/artifacts/vst2-host-audio-smoke/host-test.txt ./build/host-test $(./tools/demo-asset-path.sh clap-bundle) $(./tools/demo-asset-path.sh plugin-id) --max-memory-mb 1024 --vst-path $(./tools/demo-asset-path.sh vst2-fixture)" },
+]
+
+[demos.vst2-host-threaded-smoke]
+title = "VST2 host threaded smoke"
+summary = "Runs the threaded host harness against the repo VST2 fixture and fails if main-thread lifecycle calls block."
+proof = "Headless proof that Keepsake still avoids host-visible main-thread stalls while loading and starting the bridged fixture."
+owner = "platform"
+mode = "headless"
+status = "ready"
+covers = ["keepsake.bridge.host-threading", "keepsake.vst2.instantiate"]
+tags = ["smoke", "vst2", "threading", "headless", "macos", "linux"]
+prerequisites = [
+  "Run on macOS or Linux.",
+  "CMake toolchain and network access for first configure must be available.",
+]
+artifacts = [
+  ".effigy/demo/artifacts/shared/vst2-host-stack-configure.log",
+  ".effigy/demo/artifacts/shared/vst2-host-stack-build.log",
+  ".effigy/demo/artifacts/vst2-host-threaded-smoke/host-test-threaded.txt",
+]
+run = [
+  { task = "demo:build:vst2-host-stack" },
+  { run = "mkdir -p .effigy/demo/artifacts/vst2-host-threaded-smoke" },
+  { run = "./tools/demo-capture.sh .effigy/demo/artifacts/vst2-host-threaded-smoke/host-test-threaded.txt ./build/host-test-threaded $(./tools/demo-asset-path.sh clap-bundle) $(./tools/demo-asset-path.sh plugin-id) --timeout-ms 500 --entry-timeout-ms 5000 --max-memory-mb 1024 --vst-path $(./tools/demo-asset-path.sh vst2-fixture)" },
+]
+
+[demos.vst2-gui-smoke]
+title = "VST2 GUI smoke"
+summary = "Builds a tiny VST2 editor fixture and opens it through Keepsake in the mac host harness using the current live-editor posture."
+proof = "Interactive proof that the bridge can load, show, script, and close a minimal VST2 editor on the supported macOS live-window path."
+owner = "platform"
+mode = "interactive"
+status = "ready"
+covers = ["keepsake.bridge.gui", "keepsake.vst2.editor"]
+tags = ["smoke", "vst2", "gui", "interactive", "macos"]
+prerequisites = [
+  "Run on macOS.",
+  "CMake toolchain and network access for first configure must be available.",
+]
+artifacts = [
+  ".effigy/demo/artifacts/shared/vst2-gui-stack-configure.log",
+  ".effigy/demo/artifacts/shared/vst2-gui-stack-build.log",
+  ".effigy/demo/artifacts/vst2-gui-smoke/mac-clap-host.txt",
+]
+run = [
+  { task = "demo:build:vst2-gui-stack" },
+  { run = "mkdir -p .effigy/demo/artifacts/vst2-gui-smoke" },
+  { run = "./tools/demo-capture.sh .effigy/demo/artifacts/vst2-gui-smoke/mac-clap-host.txt ./build/mac-clap-host $(./tools/demo-asset-path.sh clap-bundle) $(./tools/demo-asset-path.sh gui-plugin-id) --vst-path $(./tools/demo-asset-path.sh gui-vst2-fixture) --open-ui --ui-mode live --host-mode stable --script-click-center --ui-seconds 2 --telemetry-seconds 1" },
+]
+
+[demos.vst2-gui-param-state-smoke]
+title = "VST2 GUI param-state smoke"
+summary = "Exercises CLAP params and state round-trip against the tiny GUI VST2 fixture after the editor path has been proven."
+proof = "Headless proof on the same fixture that host-side param flush changes state chunks and state load restores the prior chunk."
+owner = "platform"
+mode = "headless"
+status = "ready"
+covers = ["keepsake.bridge.params", "keepsake.bridge.state", "keepsake.vst2.editor"]
+tags = ["smoke", "vst2", "params", "state", "macos"]
+prerequisites = [
+  "Run on macOS.",
+  "CMake toolchain and network access for first configure must be available.",
+]
+artifacts = [
+  ".effigy/demo/artifacts/shared/vst2-gui-stack-configure.log",
+  ".effigy/demo/artifacts/shared/vst2-gui-stack-build.log",
+  ".effigy/demo/artifacts/vst2-gui-param-state-smoke/mac-clap-host.txt",
+]
+run = [
+  { task = "demo:build:vst2-gui-stack" },
+  { run = "mkdir -p .effigy/demo/artifacts/vst2-gui-param-state-smoke" },
+  { run = "./tools/demo-capture.sh .effigy/demo/artifacts/vst2-gui-param-state-smoke/mac-clap-host.txt ./build/mac-clap-host $(./tools/demo-asset-path.sh clap-bundle) $(./tools/demo-asset-path.sh gui-plugin-id) --vst-path $(./tools/demo-asset-path.sh gui-vst2-fixture) --exercise-param-state" },
+]
+
+[demos.vst2-gui-preview-ui-state-smoke]
+title = "VST2 GUI preview UI-state smoke"
+summary = "Uses the diagnostic preview path to script a UI click, then proves the resulting state chunk changed and restores cleanly."
+proof = "Diagnostic-only proof that editor-originated state changes can be exercised on the tiny fixture without pretending the supported live-window path is host-scriptable."
+owner = "platform"
+mode = "headless"
+status = "ready"
+covers = ["keepsake.bridge.gui-preview", "keepsake.bridge.state", "keepsake.vst2.editor"]
+tags = ["smoke", "vst2", "gui", "state", "diagnostic", "macos"]
+prerequisites = [
+  "Run on macOS.",
+  "CMake toolchain and network access for first configure must be available.",
+]
+artifacts = [
+  ".effigy/demo/artifacts/shared/vst2-gui-stack-configure.log",
+  ".effigy/demo/artifacts/shared/vst2-gui-stack-build.log",
+  ".effigy/demo/artifacts/vst2-gui-preview-ui-state-smoke/mac-clap-host.txt",
+]
+run = [
+  { task = "demo:build:vst2-gui-stack" },
+  { run = "mkdir -p .effigy/demo/artifacts/vst2-gui-preview-ui-state-smoke" },
+  { run = "env KEEPSAKE_MAC_ENABLE_PREVIEW=1 ./tools/demo-capture.sh .effigy/demo/artifacts/vst2-gui-preview-ui-state-smoke/mac-clap-host.txt ./build/mac-clap-host $(./tools/demo-asset-path.sh clap-bundle) $(./tools/demo-asset-path.sh gui-plugin-id) --vst-path $(./tools/demo-asset-path.sh gui-vst2-fixture) --open-ui --ui-mode preview --host-mode stable --attach-target requested-parent --script-click-center --script-delay-ms 250 --ui-seconds 1 --exercise-ui-param-state" },
+]
