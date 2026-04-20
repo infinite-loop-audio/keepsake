@@ -2,17 +2,20 @@
 
 Status: active
 Owner: Infinite Loop Audio
-Updated: 2026-04-17
+Updated: 2026-04-20
 
 This is the release-baseline caveat list for the first public alpha. It should
-shrink or sharpen as g02 validation runs. Do not broaden support claims around
-it; either validate the lane or keep the caveat.
+shrink or sharpen as post-alpha validation and claim-correction work continues.
+Do not broaden support claims around it; either validate the lane or keep the
+caveat.
 
 ## Support Posture
 
 - Primary validated lane today: macOS + REAPER + VST2
-- Experimental with current CI and exploratory host evidence: Windows, Linux
-- Experimental / lightly proven: VST3, AU v2, 32-bit
+- Experimental with current CI and real-host VM evidence: Windows
+- Experimental with current CI and exploratory host evidence: Linux
+- Experimental / lightly proven: VST3, AU v2
+- Experimental public claim despite stronger Windows proof: 32-bit
 
 Experimental here means implementation exists and may work, but the alpha
 should not imply equal confidence without fresh release-window evidence.
@@ -34,8 +37,9 @@ should not imply equal confidence without fresh release-window evidence.
 - VST2 is the strongest proven format lane right now.
 - VST3 and AU v2 loaders exist in tree, but broad alpha claims for them still
   need explicit release-window validation.
-- 32-bit support is an architectural goal and code path, but it should remain
-  experimental until release-window proof exists on supported platforms.
+- 32-bit support should still remain experimental in public claims for
+  `v0.1-alpha`, but Windows now has real-host REAPER VM proof for APC/Serum
+  `x86` rather than only architecture-level implementation.
 
 ### Platform coverage
 
@@ -43,19 +47,29 @@ should not imply equal confidence without fresh release-window evidence.
 - The packaged macOS candidate artifact now has a fresh REAPER smoke pass for
   APC, Serum, and Khords, which is the current release-window baseline for the
   supported lane.
-- Windows and Linux now both have exploratory real-host VM evidence in REAPER,
-  but neither has enough release-window proof yet to stand beside the primary
-  macOS lane.
+- Windows and Linux do not have equal proof quality:
+  - Windows now has materially stronger REAPER VM evidence than the original
+    release freeze captured
+  - Linux remains exploratory host evidence
 - Linux now has exploratory Ubuntu ARM64 VM host evidence with native ARM64
   REAPER and the repo `test-plugin.so`, including scan/add/UI/transport
   success. The remaining caveat is that this is still ARM64 VM evidence, not a
   direct `linux-x64` host-validation pass against the current public artifact
   target.
-- Windows now has exploratory Windows 11 ARM64 VM host evidence with x64
-  REAPER and the repo `test-plugin.dll`, including scan/add/UI success. The
-  remaining caveats are that this is still ARM64 VM evidence, transport was not
-  exercised yet, and the lane has not been proven with a non-repo legacy
-  plugin.
+- Windows now has REAPER evidence on the Windows 11 ARM64 VM with real legacy
+  plugins:
+  - APC `x64`
+  - APC `x86`
+  - Serum `x64`
+  - Serum `x86`
+- The Windows lane now includes:
+  - discovery / instantiate
+  - embedded UI open / close
+  - short transport / audio proof
+  - four-plugin coexistence in one REAPER session
+- Remaining Windows caveat:
+  - this is still a secondary Windows 11 ARM64 VM + REAPER x64 lane, not the
+    primary supported release claim for `v0.1-alpha`
 
 ### GUI/editor behavior
 
@@ -72,6 +86,9 @@ should not imply equal confidence without fresh release-window evidence.
   not imply that interactive embedded editing is a settled or generally
   supported macOS mode.
 - AU GUI handling is not yet part of the strongest proven alpha lane.
+- On Windows VST2, plugin-handle resizing is the supported posture for
+  resizable editors. Host-edge resize for embedded bridged editors should still
+  be treated as unsupported / experimental.
 
 ### Packaging and install surface
 
@@ -96,6 +113,6 @@ Do not publish around unresolved ambiguity.
 
 ## Next Task
 
-Use this file as a hard gate during g02.004 publication prep: publish only if
-the release body, validation matrix, and artifact scope still match these
-caveats.
+Use this file as the post-release claim boundary for `v0.1-alpha`: correct the
+docs when evidence improves, but do not silently widen support claims without
+updating the release surface.
