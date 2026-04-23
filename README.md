@@ -60,30 +60,27 @@ Each plugin runs in an isolated subprocess, so a crash in a legacy plugin produc
 
 ## Installation
 
-No public binary release is published yet. The `v0.1-alpha` release stream is
-tracked in [`docs/roadmaps/g02/README.md`](docs/roadmaps/g02/README.md).
+Download `v0.1-alpha` from the [releases page](https://github.com/infinite-loop-audio/keepsake/releases/tag/v0.1-alpha) and follow the setup guide for your platform:
 
-Until the first alpha artifacts are cut, use local builds or maintainers'
-dev bundles. The draft release/install surface lives in
-[`docs/releases/v0.1-alpha.md`](docs/releases/v0.1-alpha.md).
+- **[macOS setup guide](docs/setup/macos.md)** — primary validated lane
+- **[Windows setup guide](docs/setup/windows.md)** — experimental
+- **[Linux setup guide](docs/setup/linux.md)** — experimental
 
-Once built or downloaded, place `keepsake.clap` in your system CLAP plugin folder:
+The short version: unpack the archive, place `keepsake.clap` (plus the adjacent bridge binary on Windows/Linux) into your CLAP plugin folder, and rescan in your host.
 
-| Platform | Path |
+| Platform | CLAP folder |
 |---|---|
-| macOS | `~/Library/Audio/Plug-Ins/CLAP/` or `/Library/Audio/Plug-Ins/CLAP/` |
+| macOS | `~/Library/Audio/Plug-Ins/CLAP/` |
 | Windows | `%COMMONPROGRAMFILES%\CLAP\` or `%LOCALAPPDATA%\Programs\Common\CLAP\` |
 | Linux | `~/.clap/` or `/usr/lib/clap/` |
 
-Rescan plugins in your host. On the strongest current evidence lane
-(macOS + REAPER + VST2), bridged plugins appear as CLAP entries with their own
-names and vendors.
-
 ---
 
-## Configuring scan paths
+## Configuration
 
-On first load, Keepsake scans the standard plugin locations for each format on your platform. You can configure additional scan paths — and trigger a manual rescan — via Keepsake's settings panel or a configuration file at:
+On first load, Keepsake scans the standard VST2 plugin locations for your platform. No config file is required to get started.
+
+To add custom scan paths, change what gets exposed, or adjust isolation settings, create a `config.toml` at:
 
 | Platform | Path |
 |---|---|
@@ -91,74 +88,33 @@ On first load, Keepsake scans the standard plugin locations for each format on y
 | Windows | `%APPDATA%\Keepsake\config.toml` |
 | Linux | `~/.config/keepsake/config.toml` |
 
-The alpha known limitations and support caveats live in
-[`docs/known-issues-v0.1-alpha.md`](docs/known-issues-v0.1-alpha.md).
-
-Current practical `config.toml` keys:
+Quick example:
 
 ```toml
 [scan]
-rescan = false
-replace_default_vst2_paths = false
 vst2_paths = ["/extra/vst/folder"]
 
-[gui]
-mac_mode = "live" # live | auto (preview is diagnostic-only; see note below)
-mac_attach_target = "auto" # auto | requested-parent | content-view | frame-superview
-
 [expose]
-mode = "auto"          # auto | whitelist | all
-vst2_bridged = true    # x86_64-on-arm64, 32-bit, or other bridge-required VST2
-vst2_native = false    # native-loadable VST2 such as arm64 VST2 on Apple Silicon
-vst3 = false
-au = false
-
-[[expose.plugin]]
-path = "/Library/Audio/Plug-Ins/VST/My Plugin.vst"
+vst2_bridged = true    # bridge-required VST2 — on by default
+vst2_native = false    # native VST2 — off by default
 
 [isolation]
 default = "per-instance"
 ```
 
-The intended default posture is conservative: expose bridge-required VST2 by
-default, keep native VST2 opt-in, and leave VST3/AU off until their release
-lane is stronger.
+Full documentation of every config key: **[config reference](docs/setup/config-reference.md)**
 
-On macOS, GUI mode now has an explicit split, but the supported posture is now
-clear:
-
-- `mac_mode = "live"`: use the bridge-owned live editor window for real interaction
-- `mac_mode = "auto"`: compatibility alias that still resolves to the live editor posture
-
-`live` is now the intended and validated macOS interaction posture for bridged
-VST2 editors in the strongest lane (`macOS + REAPER + VST2`, including Serum,
-APC, and Khords).
-
-The old IOSurface preview path is still available for diagnostics, but it is no
-longer part of the normal alpha config surface. To force it intentionally for
-operator/debug work:
-
-```sh
-KEEPSAKE_MAC_ENABLE_PREVIEW=1 KEEPSAKE_MAC_UI_MODE=preview open -a REAPER
-```
-
-Do not treat preview as a broadly supported interactive mode.
-
-The macOS live-editor path still retains a narrow diagnostic surface for hard
-host/plugin issues:
-
-- `KEEPSAKE_MAC_FLOATING_STATE_POLL=1`: re-enable floating/live close-state polling
-  if you need to compare host-callback behavior against the current default
-- `KEEPSAKE_MAC_PARENTLESS_RESIZE_TRACE=1`: emit bounded resize trace logs for
-  bridged parentless `x64` windows during resize/debug investigation
-
-Those are diagnostic hooks, not normal runtime knobs.
+Known limitations and support caveats: **[`docs/known-issues-v0.1-alpha.md`](docs/known-issues-v0.1-alpha.md)**
 
 ---
 
 ## Docs
 
-Project docs, planning, and architecture decisions live in [`docs/README.md`](docs/README.md).
+- **[Setup guides](docs/setup/README.md)** — installation for macOS, Windows, Linux
+- **[Config reference](docs/setup/config-reference.md)** — all config.toml options
+- **[Troubleshooting](docs/setup/troubleshooting.md)** — common problems and fixes
+- **[Known issues — v0.1-alpha](docs/known-issues-v0.1-alpha.md)** — current alpha caveats
+- **[Architecture and planning](docs/README.md)** — project docs, decisions, roadmaps
 
 ---
 
@@ -174,14 +130,7 @@ If you are a developer of another CLAP host and want to offer tighter Keepsake i
 
 ## Building from source
 
-Build-from-source docs still need a proper maintainer-quality pass before the
-first alpha release. Today, the practical entry points are:
-
-- `cmake --preset default`
-- `cmake --build build`
-- `effigy qa`
-
-Typical local flow:
+**Requirements:** CMake 3.24+, a C++20 compiler (clang or gcc), and git. External dependencies (CLAP SDK, VST3 pluginterfaces) are fetched automatically by CMake. On macOS, Xcode command line tools are required.
 
 ```sh
 cmake --preset default
@@ -189,39 +138,26 @@ cmake --build build
 effigy qa
 ```
 
-Demo proof entrypoints:
+Primary outputs:
+- macOS: `build/keepsake.clap` (bundle with helper binaries under `Contents/Helpers/`)
+- Windows/Linux: `build/keepsake.clap` + adjacent `keepsake-bridge` binary
 
-- `effigy demo list`
-- `effigy demo:supported-proof`
-- individual demos stay available through `effigy demo run <demo-id>`
+Other useful commands:
 
-Demo posture and the supported-vs-diagnostic split live in
-[`docs/demos.md`](docs/demos.md).
+```sh
+effigy doctor          # health check — verify build environment
+effigy demo list       # list available demo proofs
+effigy demo:supported-proof  # run the primary validation suite
+effigy demo run <id>   # run a specific demo
+```
 
-Primary local outputs:
-
-- macOS: `build/keepsake.clap`
-- helper binaries inside the bundle under `Contents/Helpers/`
-
-The project is C/C++, depends on
-[VeSTige](https://github.com/LMMS/lmms/blob/master/plugins/vst_base/vestige/aeffect.h),
-the [CLAP SDK](https://github.com/free-audio/clap), and the VST3 pluginterface
-headers for VST3 hosting. macOS, Windows, and Linux all have build paths in
-tree, but the current alpha support posture is narrower than the full code
-surface.
+The project uses [VeSTige](https://github.com/LMMS/lmms/blob/master/plugins/vst_base/vestige/aeffect.h) (bundled in `vendor/`) for VST2 — not the Steinberg SDK. The [CLAP SDK](https://github.com/free-audio/clap) and VST3 pluginterfaces are fetched via CMake FetchContent. Full build instructions for all three platforms, including 32-bit bridge builds and troubleshooting: **[docs/setup/building.md](docs/setup/building.md)**
 
 ---
 
 ## Contributing
 
-Contributions are welcome. The most useful contributions right now are:
-
-- Platform testing and bug reports
-- VST2 edge case coverage (parameter handling, MIDI, GUI lifecycle)
-- Build system improvements
-- Documentation
-
-Please open an issue before starting significant work so effort isn't duplicated.
+Contributions are welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the development workflow, legal constraints (VeSTige-only for VST2 — this matters), and what makes a useful PR. Open an issue before starting significant work so effort isn't duplicated.
 
 ---
 
