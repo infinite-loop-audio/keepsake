@@ -12,7 +12,7 @@ into architecture and contracts.
 
 ## Rule
 
-Before roadmap generation rollover, purge stale generation-specific specs and batch cards from the active tree so the next generation does not inherit dead planning debris.
+Before roadmap generation rollover, purge stale generation-specific specs from the active tree so the next generation does not inherit dead planning debris.
 
 
 Specs are a stepping stone, not the final authority.

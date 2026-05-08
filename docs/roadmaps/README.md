@@ -14,6 +14,7 @@ contracts.
 
 ## Layout
 
+- `gNN/batch-cards/` optional per-generation execution cards
 - `g01/` — first generation milestones
 - `g02/` — alpha release generation
 - `g03/` — post-alpha stabilization generation

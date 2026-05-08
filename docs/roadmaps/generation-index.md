@@ -25,7 +25,7 @@ Rollover is a closeout event, not a convenience move. Before opening the next ge
 
 - close, pause, supersede, or rehome every roadmap in the current generation
 - refresh the roadmap front doors so the old generation is visibly closed
-- purge stale generation-specific specs and batch cards from `docs/specs/` so the active planning tree no longer carries dead lane debris
+- purge stale generation-specific specs from `docs/specs/` so the active planning tree no longer carries dead lane debris
 
 If that cleanup has not happened, stay in the current generation and finish the closeout there first.
 

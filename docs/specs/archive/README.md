@@ -20,7 +20,6 @@ before the first archived artifact exists.
 Keep the archive lean:
 
 - `archive/NNN-<slug>.md`
-- `archive/batch-cards/NNN-<slug>.md`
 
 Do not build a second complex planning tree under `archive/`.
 
