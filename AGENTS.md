@@ -59,3 +59,34 @@ depend on Keepsake.
 Use the repo-local style reference for internal work and normal replies:
 
 - `docs/policy/internal-writing-style.md`
+
+<!-- BEGIN EFFIGY AGENT CONTRACT -->
+## Effigy Agent Contract
+
+Use Effigy as the default command surface for supported project work.
+
+Default entry sequence:
+1. Run `effigy doctor`.
+2. Run `effigy tasks`.
+3. Run `effigy test --plan`.
+
+Use `effigy graph` when the job is code understanding: ownership, flow,
+implementation, or changed-file impact. Do not insert graph into unrelated
+deployment, state, docs, release, or direct task-execution work.
+
+Prefer `effigy <task>`, `effigy test`, and the matching built-in surface over
+raw package-manager or shell commands when Effigy covers the path. Use
+`effigy --json <command>` whenever another agent or tool will consume output.
+
+This repo's local `.agents/skills/effigy` copy is authoritative for this
+project. When an agent supports both project-local and global skills, prefer
+the project-local copy over any globally installed Effigy skill.
+
+Do not add `--repo .` while already inside the target repo. Do not edit
+`.github/workflows/` or run release mutations unless the user explicitly asks.
+
+Reference docs:
+- Effigy agent adoption: `docs/guides/047-agent-and-cross-repo-adoption.md`
+- Graph workflows: `docs/guides/076-code-graph-and-agent-workflows.md`
+- JSON contracts: `docs/guides/017-json-output-contracts.md`
+<!-- END EFFIGY AGENT CONTRACT -->

@@ -44,7 +44,6 @@
 build/
 build-*/
 dist/
-.effigy/
 
 # CMake
 CMakeFiles/
@@ -63,3 +62,7 @@ compile_commands.json
 Thumbs.db
 .dsp_cache
 .claude/settings.local.json
+
+# BEGIN EFFIGY LOCAL STATE
+.effigy/
+# END EFFIGY LOCAL STATE
