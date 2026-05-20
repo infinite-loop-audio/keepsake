@@ -6,6 +6,8 @@ description: >
   effigy selectors, parse --json envelopes, and avoid release/CI footguns.
   Use when the user mentions effigy, effigy.toml, or needs tests, dev, QA,
   repo navigation, deployment, or validation in an Effigy-adopting repo.
+metadata:
+  internal: true
 ---
 
 # Effigy Skill
