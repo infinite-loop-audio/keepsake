@@ -1,41 +1,44 @@
 # Agent Operating Loop
 
-Canonical sequence for agents in any repo with `effigy.toml`. Run phases in
-order; skip a phase only when the user's request already satisfied it. This is
-the default operating loop, not a claim that `graph` supersedes every other
-Effigy surface.
+Effigy is not a fixed entry ritual. Pick the first command that matches the
+job. The common mistake is front-loading `doctor`, `tasks`, and `test --plan`
+even when the work is clearly code understanding or direct execution.
 
-## Phase 1 — Discover the surface (always)
+## Route by job
 
-```bash
-effigy doctor
-effigy tasks
-effigy test --plan
-```
+| Job | First command |
+|-----|---------------|
+| Code understanding | `effigy graph explore "<question>" --json` |
+| Selector inventory | `effigy tasks` |
+| Test-routing inspection | `effigy test --plan` |
+| Routing ambiguity or repo health | `effigy doctor` |
+| Direct execution | `effigy <selector>` |
 
-Machine-readable inventory:
+Use machine-readable output only when another tool or agent step needs it:
 
 ```bash
 effigy --json tasks
 effigy --json doctor
+effigy --json test --plan
 ```
 
-If routing is unclear:
+If routing is unclear, narrow the question instead of running broad health
+checks by reflex:
 
 ```bash
 effigy doctor <selector> <args...>
 ```
 
-Details: `first-five-commands.md` (same commands, more expected-output notes).
+Details: `first-five-commands.md` and `selector-routing.md`.
 
-## Phase 2 — Map codebase context (before broad scanning)
+## Code-understanding lane (before broad scanning)
 
 Do this when you need to find owners, trace behavior, or orient in an
 unfamiliar tree — **before** spraying `rg` or opening many files.
 
 ```bash
 effigy graph status --json
-effigy graph index --json          # only when stale_paths is non-empty
+effigy graph index --json          # when freshness.state is not ready or usable is false
 effigy graph explore "<question>" --max-files 6 --max-bytes 12288 --json
 ```
 
@@ -45,7 +48,7 @@ Do not force this phase onto unrelated tasks. If the job is clearly execution,
 deployment, state orchestration, docs validation, or release inspection, use
 the matching built-in instead of inserting `graph` ritualistically.
 
-## Phase 3 — Do the work
+## Execution lane
 
 ```bash
 effigy <selector>                  # manifest task or built-in
@@ -55,7 +58,7 @@ effigy test                        # or effigy test --plan first
 Prefer Effigy over raw `cargo` / `npm` / `docker compose` when a task or
 built-in covers the path.
 
-## Phase 4 — Narrow validation after edits
+## Validation lane
 
 ```bash
 git diff --name-only | effigy graph affected --stdin --json
@@ -64,14 +67,14 @@ effigy test                        # or a repo-specific qa:* task
 
 Use `graph affected` to pick a smaller target; it is not exhaustive proof.
 
-## Phase 5 — Repo health (when drift matters)
+## Health lane (when drift matters)
 
 ```bash
 effigy doctor --verbose            # includes enabled scan checks
 effigy scan god-files --json       # individual scanners also available
 ```
 
-## Phase not in the default loop
+## Not part of the default route
 
 Use only when the repo or user needs them:
 

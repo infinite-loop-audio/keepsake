@@ -25,30 +25,30 @@ Tasks can be shell strings, refs to other tasks, or Rhai scripts. Examples:
 
 # Aggregator: chain of task refs
 "qa:ci:fast" = [
-  { task = "qa:ci:test" },
-  { task = "qa:ci:doc" },
+  "cargo test",
+  "cargo test --doc",
   { task = "qa:released-surface" },
   { task = "qa:ci:json" },
 ]
 
 # Rhai script
-"link:local" = [{ rhai = "scripts/install-local-bin-links.rhai" }]
+"db:seed" = { rhai = "scripts/seed-db.rhai" }
 
 # Rhai deploy plan wrapper
-"deploy:uat:plan" = [{ rhai = "scripts/deploy-uat-plan.rhai" }]
+"deploy:uat:plan" = { rhai = "scripts/deploy-uat-plan.rhai" }
 
 # Rhai distribution validation wrapper
-"release:artifacts:check" = [{ rhai = "scripts/check-release-artifacts.rhai" }]
+"release:artifacts:check" = { rhai = "scripts/check-release-artifacts.rhai" }
 
 # Mixed chain
 "bootstrap:local" = [
-  { task = "install:local" },
-  { task = "link:local" },
+  { rhai = "scripts/build-local-bin.rhai" },
+  { rhai = "scripts/install-local-bin-links.rhai" },
 ]
 
 # Task with explicit run block (for richer config)
 [tasks."smoke:release"]
-run = [{ rhai = "scripts/check-release-smoke.rhai" }]
+run = { rhai = "scripts/check-release-smoke.rhai" }
 ```
 
 Typical Rhai wrappers for typed deploy / distribution helpers:

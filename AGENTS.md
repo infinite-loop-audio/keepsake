@@ -65,10 +65,11 @@ Use the repo-local style reference for internal work and normal replies:
 
 Use Effigy as the default command surface for supported project work.
 
-Default entry sequence:
-1. Run `effigy doctor`.
-2. Run `effigy tasks`.
-3. Run `effigy test --plan`.
+Route by job, not by startup ritual:
+- use `effigy graph` for code understanding
+- use `effigy tasks` for selector inventory
+- use `effigy doctor` for routing ambiguity or repo health
+- use `effigy test --plan` when test execution shape matters
 
 Use `effigy graph` when the job is code understanding: ownership, flow,
 implementation, or changed-file impact. Do not insert graph into unrelated
