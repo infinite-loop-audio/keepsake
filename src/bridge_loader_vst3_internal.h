@@ -15,6 +15,7 @@
 #include "pluginterfaces/vst/ivstcomponent.h"
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivsteditcontroller.h"
+#include "pluginterfaces/gui/iplugview.h"
 
 #ifndef _WIN32
 #include <dlfcn.h>
@@ -64,6 +65,7 @@ class Vst3Loader : public BridgeLoader {
     IComponent *component = nullptr;
     IAudioProcessor *processor = nullptr;
     IEditController *controller = nullptr;
+    IPlugView *editor_view = nullptr;
     ExitModuleFunc exitModule = nullptr;
 
     int32_t n_inputs = 0;
@@ -72,6 +74,7 @@ class Vst3Loader : public BridgeLoader {
     int32_t n_input_channels = 0;
     int32_t n_output_channels = 0;
     bool is_active = false;
+    bool editor_attached = false;
     uint32_t max_block = 512;
 
     TUID classID = {};

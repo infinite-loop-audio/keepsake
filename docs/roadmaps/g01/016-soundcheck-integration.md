@@ -1,19 +1,29 @@
 # G01.016 — Soundcheck Integration
 
-Status: deferred
+Status: superseded
 Owner: Infinite Loop Audio
-Updated: 2026-04-11
+Updated: 2026-07-16
 Governing refs:
   - docs/contracts/006-process-isolation-policy.md
 
-## Scope
+## Disposition
+
+Keepsake will not query Soundcheck, launch Soundcheck, or depend on a
+Soundcheck-owned API. Soundcheck should load Keepsake through CLAP and observe
+the same behavior as every other host.
+
+Plugin IDs and public host-neutral metadata remain available to any CLAP host.
+Any richer catalog or screenshot behavior belongs to the host and must not
+change Keepsake's runtime topology.
+
+## Superseded Scope
 
 Replace Keepsake's built-in config.toml isolation settings with queries
 to Soundcheck's local HTTP API. When Soundcheck is running, Keepsake reads
 plugin metadata and isolation config from it. When Soundcheck is not
 available, Keepsake falls back to its own config.toml.
 
-Deferred until Soundcheck has a working HTTP API (Soundcheck Layer 5).
+This plan is retained only as historical context. Do not execute it.
 
 ## Steps
 

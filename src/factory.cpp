@@ -233,7 +233,7 @@ bool keepsake_factory_init(const char *plugin_path) {
     keepsake_debug_log("keepsake: scanning %zu VST2 path(s)\n", vst2_paths.size());
     for (const auto &path : vst2_paths) {
         keepsake_debug_log("keepsake: scan_vst2_entry begin path=%s\n", path.c_str());
-        scan_vst2_entry(path, all_plugins, allow_cross_arch_vst2_scan);
+        scan_vst2_entry(path, all_plugins, allow_cross_arch_vst2_scan, cfg);
         keepsake_debug_log("keepsake: scan_vst2_entry end path=%s total=%u\n",
                            path.c_str(),
                            static_cast<unsigned>(all_plugins.size()));
@@ -272,7 +272,12 @@ bool keepsake_factory_init(const char *plugin_path) {
 #endif
             size_t before = all_plugins.size();
             for (const auto &dir : vst3_paths) {
-                scan_vst3_directory(dir, all_plugins);
+                scan_vst3_directory(
+                    dir,
+                    all_plugins,
+                    cfg.expose_vst3_native,
+                    cfg.expose_vst3_bridged,
+                    cfg);
             }
             dedupe_plugins_by_file_path(all_plugins);
             fprintf(stderr, "keepsake: found %zu VST3 plugin(s)\n",
@@ -281,7 +286,7 @@ bool keepsake_factory_init(const char *plugin_path) {
 
         // Full scan — AU v2 (macOS only)
 #ifdef __APPLE__
-        {
+        if (cfg.expose_au) {
             size_t before = all_plugins.size();
             scan_au_plugins(all_plugins);
             dedupe_plugins_by_file_path(all_plugins);

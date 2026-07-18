@@ -1,6 +1,6 @@
 # Backlog 001 — macOS Preview Lane Disposition
 
-Status: backlog
+Status: partially resolved
 Owner: Infinite Loop Audio
 Created: 2026-04-17
 Depends on:
@@ -27,6 +27,11 @@ The remaining open question is not product behavior. It is maintenance posture:
 ## Why this is backlog, not active
 
 This is not blocking the current alpha support claim set.
+
+The 2026-07 companion presentation/input experiment was removed after it failed
+the interaction and complexity bars. The older operator-only IOSurface preview
+remains in tree, so the final retain-or-remove decision for that diagnostic code
+stays deferred.
 
 The code is already demoted behind diagnostic posture. Removing it now would be
 cleanup work, not release-critical work, and should not interrupt the active

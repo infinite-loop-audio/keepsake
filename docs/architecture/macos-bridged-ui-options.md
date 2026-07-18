@@ -2,13 +2,15 @@
 
 Status: draft
 Owner: Infinite Loop Audio
-Updated: 2026-04-16
+Updated: 2026-07-16
 Vision refs: docs/vision/001-keepsake-vision.md
 Related roadmap refs:
   - docs/roadmaps/g01/013-embedded-editors.md
   - docs/roadmaps/g01/017-iosurface-embedded-editors.md
 Related evidence:
   - docs/logs/2026-04/16-221500-mac-iosurface-embedded-ui-architecture-decision.md
+  - docs/logs/2026-07/15-123000-macos-x64-editor-hosting-research.md
+  - docs/logs/2026-07/15-132500-screencapturekit-iosurface-metal-proof.md
 
 ## Problem
 
@@ -144,12 +146,24 @@ mode, while others are explicitly fallback-only or unsupported.
 #### Best fit
 
 - Release messaging and alpha support envelope
-- Companion policy, not a full architecture by itself
+- Support policy, not a full architecture by itself
+
+## 2026-07 abandoned companion experiment
+
+CARemoteLayer transport could be established but rendered black. A later
+ScreenCaptureKit experiment rendered the Intel editor into Soundcheck's host
+view, but needed a dedicated helper, receiver dylib, frame accumulator, input
+protocol, focus emulation, and Soundcheck-specific lifecycle handling. JUCE
+input remained unreliable and other editors still shimmered.
+
+That experiment is closed. Its dated logs remain evidence, but its executable,
+library, protocol, and product integration surfaces are removed. ScreenCaptureKit
+remains useful only for a host's generic screenshot of the real native window.
 
 ## Recommendation
 
-Adopt **Option B as the primary macOS direction**, and keep only a narrow slice
-of **Option A** as diagnostic support.
+Adopt **Option B as the product direction**. Pair it with a passive host-owned
+placeholder so hosts still receive a normal Cocoa CLAP child view.
 
 Reasoning:
 
@@ -162,38 +176,40 @@ Reasoning:
 - Option B is now the default macOS UI stance, not just a fallback candidate.
 - Option D should be used regardless, so public claims stay aligned to actual
   behavior.
+- The CARemote form of Option C reached its stop condition: transport worked,
+  presentation stayed black.
+- The ScreenCaptureKit companion path exceeded its complexity budget without
+  delivering universal interaction or stable rendering.
+- A host can screenshot the real native window without changing Keepsake's
+  CLAP behavior or streaming that window back into the host parent.
 
 ## Proposed Prototype Sequence
 
-1. Formalize the bridge-owned live editor as the primary macOS model.
-2. Keep the current IOSurface lane available only as render-only /
-   best-effort experimental presentation behind an explicit diagnostic/operator
-   switch.
-3. Validate the live path with the current comparison set:
+1. Advertise a non-floating Cocoa CLAP GUI and attach a non-rendering placeholder to
+   the host-provided parent.
+2. Open the real editor in the existing bridge-owned native window.
+3. Validate that path with the current comparison set:
    - Serum
    - APC
    - Khords
-4. Only after the live path is stable, decide whether Option C deserves a
-   separate research milestone.
+4. Remove the companion receiver/helper/proof build surfaces.
+5. Implement screenshots as general native-window capture in inspection hosts,
+   outside Keepsake's ABI.
 
 ## Open Questions
 
-- Should macOS embedded mode be user-selectable, plugin-selectable, or
-  entirely hidden behind automatic fallback?
-- Is "render-only embed + live remote editor" acceptable for the `v0.1-alpha`
-  support envelope, or should alpha avoid embedded claims entirely?
 - Does the bridge-owned editor need additional transport/focus coordination to
   feel first-class in hosts like REAPER?
+- Should the diagnostic IOSurface preview be removed completely in a later
+  cleanup, or retained behind its existing explicit operator gate?
 
 ## Decision Gate
 
-Do not resume incremental embedded-input tweaking unless there is a fresh
-architecture decision that reopens that lane. The current macOS release posture
-should assume bridge-owned live editor first, diagnostic preview only second.
+Do not resume remote presentation or synthetic input without a new architecture
+decision and a substantially different mechanism. The product path is native
+editor plus a non-rendering host placeholder with one native-editor reopen action.
 
 ## Next Task
 
-Keep the preview lane on an explicit later-disposition track rather than
-treating it as an implied cleanup:
-
-- backlog: [docs/roadmaps/backlog/001-macos-preview-lane-disposition.md](../roadmaps/backlog/001-macos-preview-lane-disposition.md)
+Validate contract 007 in ordinary Soundcheck and REAPER hosting, then move
+screenshot work to Soundcheck's general floating-window capture path.

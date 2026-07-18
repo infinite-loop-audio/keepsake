@@ -200,9 +200,21 @@ void *vst2_open_library(const std::string &path, std::string &load_path) {
     load_path = resolve_vst_bundle(path);
 #endif
 #ifndef _WIN32
-    return dlopen(load_path.c_str(), RTLD_LAZY | RTLD_LOCAL);
+    dlerror();
+    void *lib = dlopen(load_path.c_str(), RTLD_LAZY | RTLD_LOCAL);
+    if (!lib) {
+        const char *error = dlerror();
+        fprintf(stderr, "bridge/vst2: dlopen failed path='%s': %s\n",
+                load_path.c_str(), error ? error : "unknown error");
+    }
+    return lib;
 #else
-    return (void *)LoadLibraryA(load_path.c_str());
+    void *lib = (void *)LoadLibraryA(load_path.c_str());
+    if (!lib) {
+        fprintf(stderr, "bridge/vst2: LoadLibrary failed path='%s' error=%lu\n",
+                load_path.c_str(), static_cast<unsigned long>(GetLastError()));
+    }
+    return lib;
 #endif
 }
 
@@ -221,6 +233,6 @@ void vst2_close_library(void *lib) {
 #ifndef _WIN32
     if (lib) dlclose(lib);
 #else
-    (void)lib;
+    if (lib) FreeLibrary(static_cast<HMODULE>(lib));
 #endif
 }

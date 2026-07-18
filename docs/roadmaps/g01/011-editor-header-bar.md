@@ -23,8 +23,7 @@ Add a native toolbar to the floating NSWindow in `bridge_gui_mac.mm`:
 - Architecture indicator (native / Rosetta / 32-bit)
 - Isolation mode indicator + toggle (shared → per-binary → per-instance)
 - Bridge process status (connected / crashed)
-- "Open Soundcheck" button (launches companion app, deferred until
-  Soundcheck exists — placeholder for now)
+- no host- or companion-specific launch action
 
 The toolbar sits above the VST2/VST3 editor content view. The editor
 window height increases by the toolbar height.
@@ -32,8 +31,8 @@ window height increases by the toolbar height.
 ### 2. Isolation toggle
 
 Clicking the isolation indicator cycles through modes for this plugin.
-The change is written back to config.toml (or Soundcheck API when
-available). Takes effect on next instantiation, not mid-session.
+The change is written back to config.toml. It takes effect on next
+instantiation, not mid-session.
 
 ### 3. Platform stubs
 

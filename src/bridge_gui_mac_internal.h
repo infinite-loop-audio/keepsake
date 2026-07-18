@@ -55,5 +55,6 @@ static inline void gui_pump_pending_events(NSDate *until_date) {
 
 bool gui_open_windowed_editor(BridgeLoader *loader, const EditorHeaderInfo &header);
 void gui_close_window_state();
+void gui_keep_editor_window_above_host();
 void gui_capture_iosurface_if_needed();
 void gui_close_iosurface_state();

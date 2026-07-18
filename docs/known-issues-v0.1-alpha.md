@@ -31,6 +31,8 @@ should not imply equal confidence without fresh release-window evidence.
   set.
 - Cold host discovery time can vary because descriptor discovery still includes
   bounded plugin scan work on first use.
+- Explicit full rescans may take over a minute on a large VST2 library. Normal
+  host initialization remains cache-backed.
 
 ### Format and validation coverage
 

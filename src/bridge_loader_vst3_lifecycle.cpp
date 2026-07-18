@@ -165,6 +165,11 @@ void Vst3Loader::set_chunk(const uint8_t *data, size_t size) {
 
 void Vst3Loader::close() {
     if (is_active) deactivate();
+    close_editor();
+    if (editor_view) {
+        editor_view->release();
+        editor_view = nullptr;
+    }
     if (controller) {
         controller->terminate();
         controller->release();

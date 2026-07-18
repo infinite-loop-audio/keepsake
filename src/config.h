@@ -33,7 +33,8 @@ struct KeepsakeConfig {
     std::string expose_mode = "auto"; // "auto", "whitelist", "all"
     bool expose_vst2_bridged = true;
     bool expose_vst2_native = false;
-    bool expose_vst3 = false;
+    bool expose_vst3_bridged = true;
+    bool expose_vst3_native = false;
     bool expose_au = false;
     std::vector<WhitelistEntry> whitelist;
 };

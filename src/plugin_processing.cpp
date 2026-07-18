@@ -5,14 +5,12 @@
 #include "plugin_internal.h"
 #ifdef __APPLE__
 #include "plugin_gui_mac_embed.h"
+#include "plugin_gui_mac_placeholder.h"
 #endif
 #include "bridge_gui.h"
 #include "debug_log.h"
 
 #include <clap/events.h>
-#ifndef _WIN32
-#include <ctime>
-#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -22,34 +20,6 @@ static const uint64_t GUI_DIRECT_RESIZE_FALLBACK_SUPPRESS_MS = 500;
 #endif
 
 static void maybe_request_gui_main_thread(KeepsakePlugin *kp);
-
-#ifndef _WIN32
-#ifdef __APPLE__
-static const uint64_t GUI_FLOATING_STATE_POLL_INTERVAL_MS = 100;
-
-static bool mac_floating_state_poll_enabled() {
-    const char *value = std::getenv("KEEPSAKE_MAC_FLOATING_STATE_POLL");
-    if (!value || !value[0]) return false;
-    if (std::strcmp(value, "0") == 0 ||
-        std::strcmp(value, "false") == 0 ||
-        std::strcmp(value, "off") == 0) {
-        return false;
-    }
-    if (std::strcmp(value, "1") == 0 ||
-        std::strcmp(value, "true") == 0 ||
-        std::strcmp(value, "on") == 0) {
-        return true;
-    }
-    return false;
-}
-#endif
-static uint64_t monotonic_now_ms() {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return static_cast<uint64_t>(ts.tv_sec) * 1000u +
-           static_cast<uint64_t>(ts.tv_nsec) / 1000000u;
-}
-#endif
 
 #ifdef _WIN32
 static bool maybe_apply_editor_resize_request(KeepsakePlugin *kp, ShmProcessControl *ctrl) {
@@ -455,22 +425,6 @@ void plugin_on_main_thread(const clap_plugin_t *plugin) {
     }
 #endif
 
-#ifdef __APPLE__
-    if (mac_floating_state_poll_enabled() &&
-        kp->editor_open && kp->gui_is_floating && !kp->gui_iosurface_embed) {
-        const uint32_t editor_state = shm_load_acquire(&ctrl->editor_state);
-        if (editor_state == SHM_EDITOR_CLOSED || editor_state == SHM_EDITOR_FAILED) {
-            keepsake_debug_log("keepsake: floating editor externally closed state=%u instance=%u\n",
-                               editor_state, kp->instance_id);
-            if (kp->host_gui && kp->host_gui->closed) {
-                kp->host_gui->closed(kp->host, false);
-            }
-            keepsake_gui_session_mark_closed(kp);
-            return;
-        }
-    }
-#endif
-
     if (!kp->editor_open_pending) return;
 
     const KeepsakeGuiPendingState pending_state =
@@ -504,14 +458,6 @@ static void maybe_request_gui_main_thread(KeepsakePlugin *kp) {
 #ifdef __APPLE__
     if (kp->editor_open && kp->gui_iosurface_embed) {
         if (kp->gui_embed_refresh_burst_remaining > 0) {
-            keepsake_gui_session_request_callback_once(kp);
-        }
-    }
-    if (mac_floating_state_poll_enabled() &&
-        kp->editor_open && kp->gui_is_floating && !kp->gui_iosurface_embed) {
-        const uint64_t now_ms = monotonic_now_ms();
-        if (now_ms - kp->last_gui_poll_ms >= GUI_FLOATING_STATE_POLL_INTERVAL_MS) {
-            kp->last_gui_poll_ms = now_ms;
             keepsake_gui_session_request_callback_once(kp);
         }
     }

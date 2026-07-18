@@ -17,6 +17,8 @@ static const char *DEMO_PRODUCT = "KeepsakeDemoGui";
 static const int32_t DEMO_VERSION = 0x010000;
 static const int DEMO_EDITOR_WIDTH = 320;
 static const int DEMO_EDITOR_HEIGHT = 160;
+static const int DEMO_EDITOR_EXPANDED_WIDTH = 480;
+static const int DEMO_EDITOR_EXPANDED_HEIGHT = 240;
 
 struct ERect {
     int16_t top;
@@ -35,9 +37,14 @@ static float g_chunk_gain = 0.6f;
 static void __cdecl plugin_set_parameter(AEffect *, int index, float value);
 
 @interface KeepsakeDemoEditorView : NSView
+- (void)updateGainFromEditor:(float)value;
 @end
 
 @implementation KeepsakeDemoEditorView
+
+- (BOOL)acceptsFirstResponder {
+    return YES;
+}
 
 - (BOOL)isFlipped {
     return YES;
@@ -63,7 +70,8 @@ static void __cdecl plugin_set_parameter(AEffect *, int index, float value);
         NSFontAttributeName: [NSFont systemFontOfSize:13.0],
         NSForegroundColorAttributeName: [NSColor colorWithCalibratedWhite:0.2 alpha:1.0],
     };
-    NSString *body = [NSString stringWithFormat:@"Gain %.0f%%  Click or drag the bar.", g_gain * 100.0f];
+    NSString *body = [NSString stringWithFormat:@"Gain %.0f%%  Click or drag. R resizes.",
+                                               g_gain * 100.0f];
     [body drawAtPoint:NSMakePoint(24.0, 54.0) withAttributes:body_attrs];
 
     NSRect slider = [self sliderRect];
@@ -86,7 +94,11 @@ static void __cdecl plugin_set_parameter(AEffect *, int index, float value);
     CGFloat value = (point.x - slider.origin.x) / slider.size.width;
     if (value < 0.0) value = 0.0;
     if (value > 1.0) value = 1.0;
-    g_gain = static_cast<float>(value);
+    [self updateGainFromEditor:static_cast<float>(value)];
+}
+
+- (void)updateGainFromEditor:(float)value {
+    g_gain = std::clamp(value, 0.0f, 1.0f);
     [self setNeedsDisplay:YES];
 
     if (g_host_callback) {
@@ -103,6 +115,26 @@ static void __cdecl plugin_set_parameter(AEffect *, int index, float value);
 
 - (void)mouseDragged:(NSEvent *)event {
     [self updateGainForPoint:[self convertPoint:event.locationInWindow fromView:nil]];
+}
+
+- (void)keyDown:(NSEvent *)event {
+    if ([event.charactersIgnoringModifiers.lowercaseString isEqualToString:@"a"]) {
+        [self updateGainFromEditor:0.75f];
+        return;
+    }
+    if ([event.charactersIgnoringModifiers.lowercaseString isEqualToString:@"r"]) {
+        const bool expanded = g_editor_rect.right == DEMO_EDITOR_EXPANDED_WIDTH;
+        const int width = expanded ? DEMO_EDITOR_WIDTH : DEMO_EDITOR_EXPANDED_WIDTH;
+        const int height = expanded ? DEMO_EDITOR_HEIGHT : DEMO_EDITOR_EXPANDED_HEIGHT;
+        g_editor_rect.right = width;
+        g_editor_rect.bottom = height;
+        if (g_host_callback) {
+            g_host_callback(nullptr, audioMasterSizeWindow, width, height, nullptr, 0.0f);
+        }
+        [self setNeedsDisplay:YES];
+        return;
+    }
+    [super keyDown:event];
 }
 
 @end
@@ -171,7 +203,9 @@ static intptr_t __cdecl plugin_dispatcher(
             [parent addSubview:view];
             g_editor_view = view;
         }
-        return 1;
+        // Deliberately return zero: many commercial VST2 editors successfully
+        // attach their view but do not use effEditOpen's return as a Boolean.
+        return 0;
     case effEditClose:
         @autoreleasepool {
             [g_editor_view removeFromSuperview];

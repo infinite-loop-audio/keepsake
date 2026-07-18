@@ -158,13 +158,13 @@ After saving the config, rescan in your host. See the [full config reference](co
 
 ---
 
-## Exposing VST3 and AU plugins (experimental)
+## Exposing native VST3 and AU plugins (experimental)
 
-VST3 and AU support exists but is not yet validated for this alpha. If you want to try it:
+Bridge-required VST3 is exposed by default. Native VST3 duplicates and AU remain off. If you want to try them:
 
 ```toml
 [expose]
-vst3 = true   # experimental — VST3 bridging
+vst3_native = true  # also bridge native VST3 plugins
 au = true     # experimental — Audio Unit v2 bridging (macOS only)
 ```
 

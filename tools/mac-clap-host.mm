@@ -1118,6 +1118,8 @@ int main(int argc, char *argv[]) {
     auto *state = static_cast<const clap_plugin_state_t *>(plugin->get_extension(plugin, CLAP_EXT_STATE));
 
     std::vector<uint8_t> ui_state_baseline;
+    std::vector<uint8_t> ui_state_modified_live;
+    bool ui_state_live_save_ok = true;
     if (opts.exercise_ui_param_state && !state) {
         std::fprintf(stderr, "state extension unavailable\n");
         plugin->destroy(plugin);
@@ -1166,10 +1168,19 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        const bool request_floating =
-            opts.ui_mode == "live" ||
-            opts.ui_mode == "floating" ||
-            opts.ui_mode == "auto";
+        const char *preferred_api = nullptr;
+        bool preferred_floating = false;
+        const bool has_preference = gui->get_preferred_api(
+            plugin, &preferred_api, &preferred_floating);
+        const bool request_floating = opts.ui_mode == "floating"
+            ? true
+            : (has_preference && preferred_api &&
+               std::strcmp(preferred_api, CLAP_WINDOW_API_COCOA) == 0
+                   ? preferred_floating
+                   : false);
+        log_line("[gui.preferred_api] api=%s floating=%d\n",
+                 preferred_api ? preferred_api : "none",
+                 request_floating ? 1 : 0);
 
         if (!gui->create(plugin, CLAP_WINDOW_API_COCOA, request_floating)) {
             std::fprintf(stderr, "gui.create failed\n");
@@ -1271,25 +1282,29 @@ int main(int argc, char *argv[]) {
         monitor_embed_metrics(plugin, host, opts.telemetry_seconds * 1000);
     }
 
+    if (opts.exercise_ui_param_state) {
+        ui_state_live_save_ok = save_plugin_state(state, plugin, ui_state_modified_live);
+        if (!ui_state_live_save_ok) {
+            std::fprintf(stderr, "live UI state save failed\n");
+        } else {
+            log_line("[ui.state.save] modified-live=%zu\n", ui_state_modified_live.size());
+        }
+    }
+
     if (gui && opts.open_ui) {
         gui->hide(plugin);
         gui->destroy(plugin);
     }
 
-    bool param_state_ok = true;
+    bool param_state_ok = ui_state_live_save_ok;
     if (opts.exercise_param_state) {
         plugin->stop_processing(plugin);
         param_state_ok = exercise_param_state_roundtrip(plugin);
     } else if (opts.exercise_ui_param_state) {
         plugin->stop_processing(plugin);
-        std::vector<uint8_t> ui_state_modified;
-        if (!save_plugin_state(state, plugin, ui_state_modified)) {
-            std::fprintf(stderr, "ui modified state save failed\n");
-            param_state_ok = false;
-        } else {
-            log_line("[ui.state.save] modified=%zu\n", ui_state_modified.size());
+        if (ui_state_live_save_ok) {
             param_state_ok = verify_state_roundtrip(state, plugin, ui_state_baseline,
-                                                    ui_state_modified, "ui");
+                                                    ui_state_modified_live, "ui");
         }
     } else {
         plugin->stop_processing(plugin);

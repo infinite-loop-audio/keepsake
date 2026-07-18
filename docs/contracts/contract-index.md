@@ -2,7 +2,7 @@
 
 Status: active
 Owner: Infinite Loop Audio
-Updated: 2026-04-17
+Updated: 2026-07-15
 
 ## Coverage Rules
 
@@ -20,6 +20,7 @@ Updated: 2026-04-17
 | `002-clap-factory-interface.md` | Descriptor shape, plugin ID namespace (multi-format), factory lifecycle | keepsake repo | g01.001+ | active |
 | `004-ipc-bridge-protocol.md` | Subprocess lifecycle, pipe protocol, shared memory layout, crash handling | keepsake repo | g01.002+ | active |
 | `006-process-isolation-policy.md` | Shared/per-binary/per-instance isolation, multi-instance bridge, config overrides | keepsake repo | g01.010+ | active |
+| `007-macos-native-editor-and-host-placeholder.md` | Passive host-owned Cocoa view plus bridge-owned native legacy editor | keepsake repo | g03.001 | active |
 
 ## Missing or Pending Contracts
 

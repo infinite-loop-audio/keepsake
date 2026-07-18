@@ -6,9 +6,7 @@
 
 #include "debug_log.h"
 
-#include <atomic>
 #include <cstdlib>
-#include <thread>
 #include <unistd.h>
 
 static bool parentless_env_flag_enabled(const char *name, bool default_value) {
@@ -33,6 +31,23 @@ static bool parentless_resize_trace_enabled() {
 
 static void install_frame_observer();
 static void update_window_size_after_open(BridgeLoader *loader, int &w, int &h);
+static bool g_editor_frame_change_in_progress = false;
+
+static void normalize_hosted_editor_view_origins() {
+    if (!g_window || !g_editor_container || g_editor_frame_change_in_progress) return;
+    for (NSView *child in [g_editor_container subviews]) {
+        const NSPoint origin = [child frame].origin;
+        if (std::fabs(origin.x) <= 0.5 && std::fabs(origin.y) <= 0.5) continue;
+        keepsake_debug_log(
+            "bridge/mac: normalizing hosted editor view class=%s origin=%.1f,%.1f -> 0,0\n",
+            NSStringFromClass([child class]).UTF8String,
+            origin.x,
+            origin.y);
+        g_editor_frame_change_in_progress = true;
+        [child setFrameOrigin:NSZeroPoint];
+        g_editor_frame_change_in_progress = false;
+    }
+}
 
 @interface KeepsakeMacWindowCloseHandler : NSObject
 - (void)handleWindowClose:(id)sender;
@@ -44,7 +59,6 @@ static id g_parentless_window_did_move_observer = nil;
 static KeepsakeMacWindowCloseHandler *g_window_close_handler = nil;
 static bool g_parentless_layout_in_progress = false;
 static bool g_parentless_clamp_in_progress = false;
-static bool g_editor_frame_change_in_progress = false;
 static int g_parentless_resize_trace_budget = 120;
 
 @implementation KeepsakeMacWindowCloseHandler
@@ -159,6 +173,24 @@ static NSWindow *active_editor_window() {
     if (g_window) return g_window;
     if (g_parentless_plugin_window) return g_parentless_plugin_window;
     return nil;
+}
+
+void gui_keep_editor_window_above_host() {
+    NSWindow *window = active_editor_window();
+    // Hosts commonly keep plugin panels at NSFloatingWindowLevel. Using the
+    // same level leaves cross-process ordering to whichever app orders its
+    // window most recently. Keep the real editor one semantic tier higher,
+    // while remaining below the menu bar and system UI.
+    constexpr NSWindowLevel editor_window_level = NSModalPanelWindowLevel;
+    if (!window || [window level] == editor_window_level) return;
+    const NSInteger old_level = [window level];
+    [window setLevel:editor_window_level];
+    [window setHidesOnDeactivate:NO];
+    keepsake_debug_log(
+        "bridge/mac: editor window level promoted old=%ld new=%ld parentless=%d\n",
+        static_cast<long>(old_level),
+        static_cast<long>([window level]),
+        window == g_parentless_plugin_window ? 1 : 0);
 }
 
 static void install_parentless_wrapped_content(NSWindow *window,
@@ -338,6 +370,7 @@ static void style_parentless_plugin_window(NSWindow *window,
     }
     install_window_close_button_handler(window);
     install_parentless_wrapped_content(window, header);
+    gui_keep_editor_window_above_host();
     clamp_parentless_plugin_window_to_visible_screen(window, "style");
 
     [NSApp activateIgnoringOtherApps:YES];
@@ -400,6 +433,11 @@ static bool open_parentless_editor(BridgeLoader *loader,
         }
     } else {
         keepsake_debug_log("bridge/mac: no parentless plugin window discovered after open\n");
+        loader->close_editor();
+        g_parentless_plugin_window = nil;
+        g_active_loader = nil;
+        g_editor_open = false;
+        return false;
     }
 
     g_active_loader = loader;
@@ -423,6 +461,8 @@ static void install_frame_observer() {
                 if (!g_editor_open || !g_editor_container) return;
                 if ([v superview] != g_editor_container && v != g_editor_container) return;
                 if (g_editor_frame_change_in_progress) return;
+
+                normalize_hosted_editor_view_origins();
 
                 NSSize sz = [v frame].size;
                 int nw = static_cast<int>(sz.width);
@@ -520,11 +560,11 @@ static bool open_floating_editor(BridgeLoader *loader,
                        header.plugin_name.c_str()];
     [g_window setTitle:title];
     [g_window setReleasedWhenClosed:NO];
-    [g_window setLevel:NSNormalWindowLevel];
     [g_window setHidesOnDeactivate:NO];
     [g_window setStyleMask:([g_window styleMask] & ~NSWindowStyleMaskResizable)];
     [g_window center];
     install_window_close_button_handler(g_window);
+    gui_keep_editor_window_above_host();
 
     NSView *content = gui_mac_make_content_view(w, h);
     [g_window setContentView:content];
@@ -545,32 +585,20 @@ static bool open_floating_editor(BridgeLoader *loader,
                        [g_window isVisible] ? 1 : 0);
     gui_pump_pending_events([NSDate dateWithTimeIntervalSinceNow:0.0]);
 
+    // AppKit and plugin editor construction belong on the bridge main thread.
+    // The host-side IPC timeout remains the watchdog for a wedged plugin.
     void *editor_parent = (__bridge void *)g_editor_container;
-    std::atomic<bool> open_done{false};
-    std::atomic<bool> open_ok{false};
-    std::thread open_thread([&]() {
-        bool ok = loader->open_editor(editor_parent);
-        open_ok.store(ok);
-        open_done.store(true);
-    });
-
-    const int open_timeout_iters = EDITOR_OPEN_TIMEOUT_MS / 16;
-    for (int i = 0; i < open_timeout_iters && !open_done.load(); i++) {
+    const bool open_ok = loader->open_editor(editor_parent);
+    for (int i = 0; i < 8; i++) {
         gui_pump_pending_events([NSDate dateWithTimeIntervalSinceNow:0.0]);
         [g_window displayIfNeeded];
-        usleep(16000);
+        if ([g_editor_container.subviews count] > 0) break;
+        if (i + 1 < 8) usleep(16000);
     }
 
-    if (!open_done.load()) {
-        fprintf(stderr, "bridge: loader->open_editor() timed out after %dms\n",
-                EDITOR_OPEN_TIMEOUT_MS);
-        open_thread.detach();
-        return false;
-    }
-
-    open_thread.join();
-    if (!open_ok.load()) {
-        fprintf(stderr, "bridge: loader->open_editor() failed\n");
+    if (!open_ok || [g_editor_container.subviews count] == 0) {
+        fprintf(stderr, "bridge: loader->open_editor() produced no hosted editor view\n");
+        if (open_ok) loader->close_editor();
         [g_window orderOut:nil];
         g_window = nil;
         g_header = nil;
@@ -579,6 +607,7 @@ static bool open_floating_editor(BridgeLoader *loader,
     }
 
     g_active_loader = loader;
+    normalize_hosted_editor_view_origins();
     install_frame_observer();
     update_window_size_after_open(loader, w, h);
     [NSApp activateIgnoringOtherApps:YES];
@@ -589,6 +618,7 @@ static bool open_floating_editor(BridgeLoader *loader,
     for (int i = 0; i < 8; i++) {
         loader->editor_idle();
         gui_pump_pending_events([NSDate dateWithTimeIntervalSinceNow:0.0]);
+        normalize_hosted_editor_view_origins();
         [g_window displayIfNeeded];
         usleep(16000);
     }
@@ -621,7 +651,11 @@ static bool gui_mac_should_force_parentless_open(const EditorHeaderInfo &header)
 
 bool gui_open_windowed_editor(BridgeLoader *loader, const EditorHeaderInfo &header) {
     const bool use_parentless_open = gui_mac_should_force_parentless_open(header);
-    if (use_parentless_open) return open_parentless_editor(loader, header);
+    if (use_parentless_open) {
+        if (open_parentless_editor(loader, header)) return true;
+        keepsake_debug_log(
+            "bridge/mac: parentless editor produced no window; retrying with a hosted parent\n");
+    }
     return open_floating_editor(loader, header);
 }
 

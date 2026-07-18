@@ -14,6 +14,10 @@ Logs capture dated evidence and assessments.
 
 ## Recent Evidence
 
+- [`2026-07/16-114200-macos-native-editor-placeholder-refocus.md`](2026-07/16-114200-macos-native-editor-placeholder-refocus.md) — removed the brittle Soundcheck companion UI stack and restored a host-independent native editor plus non-rendering placeholder/reopen contract
+- [`2026-07/15-162700-soundcheck-companion-inspection-integration.md`](2026-07/15-162700-soundcheck-companion-inspection-integration.md) — wired installed Soundcheck to the signed ScreenCaptureKit inspection host, resolved APC by Keepsake descriptor ID, and captured a clean 1920×1160 PNG
+- [`2026-07/15-123000-macos-x64-editor-hosting-research.md`](2026-07/15-123000-macos-x64-editor-hosting-research.md) — CARemote transport succeeded but rendered black; an x86_64 disposable local VST2 host rendered the editor correctly and established the Soundcheck integration direction
+- [`2026-07/15-132500-screencapturekit-iosurface-metal-proof.md`](2026-07/15-132500-screencapturekit-iosurface-metal-proof.md) — ScreenCaptureKit delivered an Intel VST2 window as IOSurface-backed frames into a native Metal view at about 58 fps, including a clean APC run
 - [`2026-04/17-113000-demo-proof-stack-and-operator-shortcut.md`](2026-04/17-113000-demo-proof-stack-and-operator-shortcut.md) — added the Effigy demo proof stack, the supported-stack shortcut, and the explicit supported-vs-diagnostic split for repo proof
 - [`2026-04/17-081500-g03-post-alpha-rollover.md`](2026-04/17-081500-g03-post-alpha-rollover.md) — opened `g03` after `v0.1-alpha` publication and moved the active lane onto post-alpha stabilization
 - [`2026-04/17-080000-v0.1-alpha-release-checkpoint.md`](2026-04/17-080000-v0.1-alpha-release-checkpoint.md) — `v0.1-alpha` is tagged and published; records the real release workflow, public artifact checksums, and post-publication macOS REAPER smoke from the downloaded release zip

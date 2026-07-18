@@ -71,8 +71,17 @@ std::string keepsake_format_label(uint32_t format) {
 
 std::string keepsake_display_arch_suffix(const std::string &arch) {
     if (arch == "x86") return "x86";
-    if (arch == "x86_64" || arch == "native") return "x64";
+    if (arch == "x86_64") return "x64";
     if (arch == "arm64") return "arm64";
+    if (arch == "native") {
+#if defined(__aarch64__) || defined(_M_ARM64)
+        return "arm64";
+#elif defined(__x86_64__) || defined(_M_X64)
+        return "x64";
+#elif defined(__i386__) || defined(_M_IX86)
+        return "x86";
+#endif
+    }
     return {};
 }
 

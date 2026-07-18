@@ -61,11 +61,22 @@ public:
         }
 
         auto entry = reinterpret_cast<VstEntry>(vst2_lookup_entry(lib));
-        if (!entry) return false;
+        if (!entry) {
+            fprintf(stderr, "bridge/vst2: no VST2 entry point in '%s'\n",
+                    load_path.c_str());
+            vst2_close_library(lib);
+            lib = nullptr;
+            return false;
+        }
 
         effect = entry(vst2_host_callback);
         if (!effect || effect->magic != kEffectMagic) {
+            fprintf(stderr, "bridge/vst2: invalid AEffect from '%s' effect=%p magic=0x%08X\n",
+                    load_path.c_str(), static_cast<void *>(effect),
+                    effect ? static_cast<unsigned>(effect->magic) : 0u);
             effect = nullptr;
+            vst2_close_library(lib);
+            lib = nullptr;
             return false;
         }
 
@@ -260,8 +271,11 @@ public:
                            s_last_automated_param.load(),
                            s_last_automated_value.load());
         s_editor_open_in_progress.store(false);
-        editor_open = (result != 0);
-        return result != 0;
+        // VST2 does not define effEditOpen's return value as a reliable
+        // success flag. Several real plugins create a valid editor and return
+        // zero, so platform GUI code must validate the resulting view/window.
+        editor_open = true;
+        return true;
     }
 
     void close_editor() override {

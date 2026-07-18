@@ -3,6 +3,11 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
+#include <atomic>
+#include <mutex>
+#include <optional>
+#include <thread>
 
 namespace {
 
@@ -49,48 +54,95 @@ void walk_vst2_plugins(const fs::path &root, Fn &&fn) {
 
 } // namespace
 
-void scan_vst2_entry(const std::string &entry_path,
-                     std::vector<Vst2PluginInfo> &results,
-                     bool targeted_vst2_override) {
-    fs::path entry(entry_path);
+static void emit_scan_progress(const char *state,
+                               const char *format,
+                               bool bridged,
+                               const fs::path &path) {
+    fprintf(stderr, "keepsake: scan-progress state=%s format=%s bridged=%d path=%s\n",
+            state, format, bridged ? 1 : 0, path.string().c_str());
+}
 
-    auto try_scan_plugin = [&](const fs::path &plugin_path) {
-        Vst2PluginInfo info;
-        info.format = FORMAT_VST2;
-        if (vst2_load_metadata(plugin_path.string(), info)) {
-            results.push_back(std::move(info));
-            return;
+static std::optional<Vst2PluginInfo> scan_vst2_plugin(
+    const fs::path &plugin_path,
+    bool targeted_vst2_override,
+    const KeepsakeConfig &cfg) {
+    std::string binary_arch = vst2_detect_binary_arch(plugin_path.string());
+    bool needs_cross_arch = !binary_arch.empty() && binary_arch != "native";
+    emit_scan_progress("started", "vst2", needs_cross_arch, plugin_path);
+    Vst2PluginInfo info;
+    info.format = FORMAT_VST2;
+    if (vst2_load_metadata(plugin_path.string(), info)) {
+        if (targeted_vst2_override || plugin_is_exposed(info, cfg)) {
+            emit_scan_progress("discovered", "vst2", info.needs_cross_arch, plugin_path);
         }
-        std::string binary_arch = vst2_detect_binary_arch(plugin_path.string());
-        std::string bridge_binary;
+        return info;
+    }
+    std::string bridge_binary;
 #ifdef _WIN32
-        if (binary_arch == "x86" && !s_bridge_32_path.empty()) {
-            bridge_binary = s_bridge_32_path;
-        }
+    if (binary_arch == "x86" && !s_bridge_32_path.empty()) {
+        bridge_binary = s_bridge_32_path;
+    }
 #endif
 #ifdef __APPLE__
-        if (bridge_binary.empty() &&
-            binary_arch == "x86_64" && !s_bridge_x86_64_path.empty()) {
-            bridge_binary = s_bridge_x86_64_path;
-        }
+    if (bridge_binary.empty() &&
+        binary_arch == "x86_64" && !s_bridge_x86_64_path.empty()) {
+        bridge_binary = s_bridge_x86_64_path;
+    }
 #endif
-        if (bridge_binary.empty() &&
-            targeted_vst2_override && !s_bridge_x86_64_path.empty()) {
-            bridge_binary = s_bridge_x86_64_path;
-        }
-        if (!bridge_binary.empty()) {
-            Vst2PluginInfo cross_info;
-            cross_info.format = FORMAT_VST2;
-            if (vst2_load_metadata_via_bridge(plugin_path.string(),
-                                              bridge_binary,
-                                              cross_info)) {
-                if (cross_info.binary_arch.empty()) cross_info.binary_arch = binary_arch;
-                results.push_back(std::move(cross_info));
+    if (bridge_binary.empty() &&
+        targeted_vst2_override && !s_bridge_x86_64_path.empty()) {
+        bridge_binary = s_bridge_x86_64_path;
+    }
+    if (!bridge_binary.empty()) {
+        Vst2PluginInfo cross_info;
+        cross_info.format = FORMAT_VST2;
+        if (vst2_load_metadata_via_bridge(plugin_path.string(),
+                                          bridge_binary,
+                                          cross_info)) {
+            if (cross_info.binary_arch.empty()) cross_info.binary_arch = binary_arch;
+            if (targeted_vst2_override || plugin_is_exposed(cross_info, cfg)) {
+                emit_scan_progress("discovered", "vst2", true, plugin_path);
             }
+            return cross_info;
         }
-    };
+    }
+    emit_scan_progress("failed", "vst2", needs_cross_arch, plugin_path);
+    return std::nullopt;
+}
 
-    walk_vst2_plugins(entry, try_scan_plugin);
+void scan_vst2_entry(const std::string &entry_path,
+                     std::vector<Vst2PluginInfo> &results,
+                     bool targeted_vst2_override,
+                     const KeepsakeConfig &cfg) {
+    fs::path entry(entry_path);
+
+    std::vector<fs::path> paths;
+    walk_vst2_plugins(entry, [&](const fs::path &path) { paths.push_back(path); });
+    std::atomic<size_t> next{0};
+    std::mutex result_mutex;
+    std::vector<Vst2PluginInfo> scanned;
+    const size_t worker_count = std::min<size_t>(4, paths.size());
+    std::vector<std::thread> workers;
+    workers.reserve(worker_count);
+    for (size_t worker = 0; worker < worker_count; ++worker) {
+        workers.emplace_back([&] {
+            while (true) {
+                const size_t index = next.fetch_add(1);
+                if (index >= paths.size()) break;
+                auto plugin = scan_vst2_plugin(paths[index], targeted_vst2_override, cfg);
+                if (!plugin) continue;
+                std::lock_guard<std::mutex> lock(result_mutex);
+                scanned.push_back(std::move(*plugin));
+            }
+        });
+    }
+    for (auto &worker : workers) worker.join();
+    std::sort(scanned.begin(), scanned.end(), [](const auto &left, const auto &right) {
+        return left.file_path < right.file_path;
+    });
+    results.insert(results.end(),
+                   std::make_move_iterator(scanned.begin()),
+                   std::make_move_iterator(scanned.end()));
 }
 
 #ifdef __APPLE__
@@ -166,18 +218,57 @@ void scan_au_plugins(std::vector<Vst2PluginInfo> &) {}
 #endif
 
 void scan_vst3_directory(const std::string &dir_path,
-                         std::vector<Vst2PluginInfo> &results) {
+                         std::vector<Vst2PluginInfo> &results,
+                         bool scan_native,
+                         bool scan_bridged,
+                         const KeepsakeConfig &cfg) {
     std::error_code ec;
     if (!fs::is_directory(dir_path, ec)) return;
 
-    for (const auto &dir_entry : fs::directory_iterator(dir_path, ec)) {
-        if (ec) break;
-        if (!is_vst3_file(dir_entry.path())) continue;
+    fs::recursive_directory_iterator it(
+        dir_path,
+        fs::directory_options::follow_directory_symlink |
+            fs::directory_options::skip_permission_denied,
+        ec);
+    fs::recursive_directory_iterator end;
+    for (; it != end; it.increment(ec)) {
+        if (ec) {
+            ec.clear();
+            continue;
+        }
+        const fs::path &path = it->path();
+        if (!is_vst3_file(path)) continue;
+        it.disable_recursion_pending();
+
+        std::string binary_arch = vst2_detect_binary_arch(path.string());
+        bool needs_cross_arch = !binary_arch.empty() && binary_arch != "native";
+        if ((needs_cross_arch && !scan_bridged) ||
+            (!needs_cross_arch && !scan_native)) {
+            continue;
+        }
+
+        emit_scan_progress("started", "vst3", needs_cross_arch, path);
+
+        std::string bridge_binary = s_bridge_path;
+#ifdef __APPLE__
+        if (needs_cross_arch && binary_arch == "x86_64" &&
+            !s_bridge_x86_64_path.empty()) {
+            bridge_binary = s_bridge_x86_64_path;
+        }
+#endif
+        if (bridge_binary.empty()) continue;
 
         Vst2PluginInfo info;
-        if (scan_plugin_via_bridge(dir_entry.path().string(),
-                                   s_bridge_path, FORMAT_VST3, info)) {
+        if (scan_plugin_via_bridge(path.string(),
+                                   bridge_binary, FORMAT_VST3, info)) {
+            info.binary_arch = binary_arch;
+            info.needs_cross_arch = needs_cross_arch;
+            if (plugin_is_exposed(info, cfg)) {
+                emit_scan_progress("discovered", "vst3", needs_cross_arch, path);
+            }
             results.push_back(std::move(info));
+        } else {
+            emit_scan_progress("failed", "vst3", needs_cross_arch, path);
         }
     }
 }

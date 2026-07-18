@@ -2,7 +2,7 @@
 
 Status: active
 Owner: Infinite Loop Audio
-Updated: 2026-04-17
+Updated: 2026-07-16
 Vision refs: docs/vision/001-keepsake-vision.md
 
 ## Execution-Relevant Surfaces
@@ -17,7 +17,7 @@ Vision refs: docs/vision/001-keepsake-vision.md
 | Scanner + cache | Code surface | Implemented | Per-format scan with cached metadata and rescan logic |
 | Out-of-process host | Code surface | Implemented | Shared/per-binary/per-instance isolation |
 | IPC bridge | Code surface | Implemented | Pipe + shared-memory protocol |
-| macOS live editor path | Code surface | Implemented, validated in primary lane | Bridge-owned live editor is the current supported macOS UI posture |
+| macOS host placeholder + native editor | Code surface | Implemented; validation active | Passive Cocoa child view in the host plus bridge-owned real editor window; governed by contract 007 |
 | macOS IOSurface preview path | Code surface | Implemented, diagnostic-only | Retained for operator/debug use; not part of the supported interactive alpha lane |
 | Platform config + cache files | Config surface | Implemented, docs incomplete | Runtime exists; release-grade schema docs still pending |
 | Build system | Tooling | Implemented | CMake + CI across macOS, Windows, Linux |

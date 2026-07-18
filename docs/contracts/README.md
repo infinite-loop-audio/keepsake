@@ -6,6 +6,7 @@ Use this folder for explicit non-code contracts that constrain behavior.
 
 - [`contract-index.md`](contract-index.md) — register of all active contracts
 - [`001-working-rules.md`](001-working-rules.md) — execution grammar, done-ness, and autonomy rules
+- [`007-macos-native-editor-and-host-placeholder.md`](007-macos-native-editor-and-host-placeholder.md) — non-rendering host view with native-editor reopen control plus bridge-owned editor on macOS
 
 ## Rule
 

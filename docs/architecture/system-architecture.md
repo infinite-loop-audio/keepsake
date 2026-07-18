@@ -2,7 +2,7 @@
 
 Status: active
 Owner: Infinite Loop Audio
-Updated: 2026-04-17
+Updated: 2026-07-16
 Vision refs: docs/vision/001-keepsake-vision.md
 
 ## Overview
@@ -65,7 +65,7 @@ keepsake-bridge-32 (helper binary, 32-bit — where platform supports it)
 | IPC / subprocess model | Pipe protocol + shared memory | Governed by `docs/contracts/004-ipc-bridge-protocol.md`; current implementation also multiplexes instances inside shared bridges |
 | Bridge helper binaries | `keepsake-bridge`, `keepsake-bridge-x86_64`, future `keepsake-bridge-32` | Native helper plus cross-arch helper where needed; 32-bit still needs release-grade proof before claiming support |
 | Scan path config | config + cache files per platform | Runtime exists; user-facing schema/docs still need alpha release hardening |
-| macOS editor posture | Bridge-owned live editor window | Primary validated interaction path for the current alpha lane; IOSurface preview remains diagnostic-only |
+| macOS editor posture | Passive host placeholder plus bridge-owned native editor window | Every normal CLAP host gets the same Cocoa parent view. Real plugin rendering and input remain in the native bridge window. Keepsake has no companion or screenshot API. |
 
 ## Platform Notes
 

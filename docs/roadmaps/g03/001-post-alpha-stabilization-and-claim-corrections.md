@@ -2,9 +2,10 @@
 
 Status: active
 Owner: Infinite Loop Audio
-Updated: 2026-04-17
+Updated: 2026-07-16
 Governing refs:
   - docs/contracts/001-working-rules.md
+  - docs/contracts/007-macos-native-editor-and-host-placeholder.md
   - docs/releases/v0.1-alpha.md
   - docs/releases/v0.1-alpha-validation-matrix.md
   - docs/known-issues-v0.1-alpha.md
@@ -58,6 +59,15 @@ Bias:
 
 Acceptance:
 - at least one meaningful post-release stabilization batch lands with evidence
+
+Opening batch:
+
+- remove the failed Soundcheck companion receiver/helper experiment
+- restore one host-independent macOS UI model
+- attach a non-rendering Cocoa placeholder with a native-editor reopen action
+  to the host parent
+- keep all real interaction in the bridge-owned native plugin window
+- leave screenshots to the inspection host's generic native-window capture path
 
 ### 4. Refresh evidence where the release surface moved
 

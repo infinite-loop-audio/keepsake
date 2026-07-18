@@ -696,7 +696,18 @@ uint32_t gui_open_editor_iosurface(BridgeLoader *loader, int width, int height) 
         [g_offscreen_window orderBack:nil];
     }
 
-    loader->open_editor((__bridge void *)g_offscreen_view);
+    const bool open_ok = loader->open_editor((__bridge void *)g_offscreen_view);
+    for (int i = 0; i < 8 && [g_offscreen_view.subviews count] == 0; ++i) {
+        gui_pump_pending_events([NSDate dateWithTimeIntervalSinceNow:0.0]);
+        if (i + 1 < 8) usleep(16000);
+    }
+    if (!open_ok || [g_offscreen_view.subviews count] == 0) {
+        fprintf(stderr, "bridge: IOSurface editor produced no hosted editor view\n");
+        if (open_ok) loader->close_editor();
+        gui_close_iosurface_state();
+        g_capture_loader = nullptr;
+        return 0;
+    }
     gui_refresh_capture_layout(true, true);
     const uint32_t surface_id = g_surface ? IOSurfaceGetID(g_surface) : 0;
     g_active_loader = loader;

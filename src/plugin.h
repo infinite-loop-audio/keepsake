@@ -80,6 +80,7 @@ struct KeepsakePlugin {
     std::atomic<bool> gui_callback_requested{false};
     void *iosurface_layer = nullptr; // CALayer* for IOSurface refresh
     void *iosurface_view = nullptr;  // NSView* host-side input/attachment view
+    void *host_placeholder_view = nullptr; // NSView* for native-window mode
     uint32_t iosurface_id = 0;
     bool gui_iosurface_embed = false;
     uint32_t gui_embed_refresh_burst_remaining = 0;

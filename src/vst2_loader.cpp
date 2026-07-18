@@ -120,6 +120,12 @@ bool vst2_load_metadata(const std::string &path, Vst2PluginInfo &info) {
         return false;
     }
 
+    // Complete the VST2 lifecycle before querying metadata. Some plugins only
+    // initialise dispatcher-backed names, categories, and flags in effOpen.
+    if (effect->dispatcher) {
+        effect->dispatcher(effect, effOpen, 0, 0, nullptr, 0.0f);
+    }
+
     // Read AEffect fields
     info.unique_id = effect->uniqueID;
     info.flags = effect->flags;

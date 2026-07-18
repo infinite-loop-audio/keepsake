@@ -218,8 +218,16 @@ KeepsakeConfig config_load() {
             if (t.find("vst2_native") == 0) {
                 cfg.expose_vst2_native = parse_toml_bool(t, cfg.expose_vst2_native);
             }
-            if (t.find("vst3") == 0) {
-                cfg.expose_vst3 = parse_toml_bool(t, cfg.expose_vst3);
+            if (t.find("vst3_bridged") == 0) {
+                cfg.expose_vst3_bridged = parse_toml_bool(t, cfg.expose_vst3_bridged);
+            } else if (t.find("vst3_native") == 0) {
+                cfg.expose_vst3_native = parse_toml_bool(t, cfg.expose_vst3_native);
+            } else if (t.find("vst3") == 0) {
+                // Legacy `vst3 = true` exposed every VST3. `false` now leaves
+                // bridge-required VST3 enabled while native duplicates stay hidden.
+                bool expose_all_vst3 = parse_toml_bool(t, false);
+                cfg.expose_vst3_native = expose_all_vst3;
+                if (expose_all_vst3) cfg.expose_vst3_bridged = true;
             }
             if (t.find("au") == 0) {
                 cfg.expose_au = parse_toml_bool(t, cfg.expose_au);
@@ -246,15 +254,17 @@ KeepsakeConfig config_load() {
     if (cfg.expose_mode == "all") {
         cfg.expose_vst2_bridged = true;
         cfg.expose_vst2_native = true;
-        cfg.expose_vst3 = true;
+        cfg.expose_vst3_bridged = true;
+        cfg.expose_vst3_native = true;
         cfg.expose_au = true;
     }
 
-    fprintf(stderr, "keepsake: loaded config (expose=%s bridged-vst2=%s native-vst2=%s vst3=%s au=%s, %zu whitelist, %zu extra paths, replace-default-vst2-paths=%s, mac-ui=%s, mac-attach=%s, isolation=%s)\n",
+    fprintf(stderr, "keepsake: loaded config (expose=%s bridged-vst2=%s native-vst2=%s bridged-vst3=%s native-vst3=%s au=%s, %zu whitelist, %zu extra paths, replace-default-vst2-paths=%s, mac-ui=%s, mac-attach=%s, isolation=%s)\n",
             cfg.expose_mode.c_str(),
             cfg.expose_vst2_bridged ? "true" : "false",
             cfg.expose_vst2_native ? "true" : "false",
-            cfg.expose_vst3 ? "true" : "false",
+            cfg.expose_vst3_bridged ? "true" : "false",
+            cfg.expose_vst3_native ? "true" : "false",
             cfg.expose_au ? "true" : "false",
             cfg.whitelist.size(),
             cfg.extra_vst2_paths.size(),

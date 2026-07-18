@@ -933,7 +933,7 @@ void gui_get_editor_status(bool &open, bool &pending) {
     pending = g_pending_open.load() || g_editor_open_inflight.load();
 }
 
-void gui_set_status_shm(void *shm_ptr) {
+void gui_set_status_shm(void *shm_ptr, const char *) {
     g_gui_status_ctrl = shm_ptr ? shm_control(shm_ptr) : nullptr;
 }
 

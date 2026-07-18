@@ -4,13 +4,21 @@
 
 #include "plugin_internal.h"
 
+static bool state_operation_allowed(const KeepsakePlugin *kp) {
+    // VST2 chunk access is serialized with processing by the loader's
+    // effect mutex. Hosts also need to save presets while an editor is open
+    // and restore them after activation. Other formats retain the existing
+    // conservative lifecycle restriction until they provide equivalent
+    // serialization.
+    return kp->format == FORMAT_VST2 ||
+           (!kp->processing && !keepsake_gui_session_is_open_or_pending(kp));
+}
+
 bool keepsake_state_save(const clap_plugin_t *plugin,
                           const clap_ostream_t *stream) {
     auto *kp = get(plugin);
     if (kp->crashed || !kp->bridge_ok) return false;
-    if (kp->processing || keepsake_gui_session_is_open_or_pending(kp)) {
-        return false;
-    }
+    if (!state_operation_allowed(kp)) return false;
 
     std::vector<uint8_t> chunk_data;
     if (!send_and_wait(kp, IPC_OP_GET_CHUNK, nullptr, 0, &chunk_data))
@@ -32,9 +40,7 @@ bool keepsake_state_load(const clap_plugin_t *plugin,
                           const clap_istream_t *stream) {
     auto *kp = get(plugin);
     if (kp->crashed || !kp->bridge_ok) return false;
-    if (kp->processing || keepsake_gui_session_is_open_or_pending(kp)) {
-        return false;
-    }
+    if (!state_operation_allowed(kp)) return false;
 
     uint32_t size = 0;
     if (stream->read(stream, &size, sizeof(size)) != sizeof(size))

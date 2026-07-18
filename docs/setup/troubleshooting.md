@@ -203,7 +203,7 @@ VST3 and AU support are **experimental in v0.1-alpha**. They are disabled by def
 
 ```toml
 [expose]
-vst3 = true   # experimental
+vst3_native = true  # also expose native VST3 plugins; bridged VST3 is on by default
 au = true     # experimental, macOS only
 ```
 

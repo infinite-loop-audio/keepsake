@@ -26,7 +26,9 @@ static LibHandle lib_open(const char *path) { return dlopen(path, RTLD_LAZY | RT
 
 #ifdef __APPLE__
 static std::string resolve_macos_bundle(const std::string &path) {
-    if (path.size() < 4 || path.substr(path.size() - 4) != ".vst") return path;
+    bool is_vst2 = path.size() >= 4 && path.substr(path.size() - 4) == ".vst";
+    bool is_vst3 = path.size() >= 5 && path.substr(path.size() - 5) == ".vst3";
+    if (!is_vst2 && !is_vst3) return path;
 
     CFURLRef bundle_url = CFURLCreateFromFileSystemRepresentation(
         kCFAllocatorDefault,

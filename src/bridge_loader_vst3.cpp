@@ -21,6 +21,7 @@ void Vst3Loader::get_info(IpcPluginInfo &info, std::vector<uint8_t> &extra) {
     } else if (is_fx) {
         info.category = 1;
     }
+    if (has_editor()) info.flags |= 1; // VST2-compatible effFlagsHasEditor cache bit.
 
     auto append = [&](const char *s) {
         size_t len = strlen(s);
@@ -109,14 +110,59 @@ void Vst3Loader::send_midi(int32_t delta, const uint8_t data[4]) {
     midi_queue.push_back({delta, {data[0], data[1], data[2], data[3]}});
 }
 
-bool Vst3Loader::has_editor() { return false; }
+bool Vst3Loader::has_editor() {
+    if (!controller) return false;
+    if (editor_view) return true;
 
-bool Vst3Loader::open_editor(void *) { return false; }
+    editor_view = controller->createView(ViewType::kEditor);
+    if (!editor_view) return false;
 
-void Vst3Loader::close_editor() {}
+#ifdef __APPLE__
+    FIDString platform_type = kPlatformTypeNSView;
+#elif defined(_WIN32)
+    FIDString platform_type = kPlatformTypeHWND;
+#else
+    FIDString platform_type = kPlatformTypeX11EmbedWindowID;
+#endif
+    if (editor_view->isPlatformTypeSupported(platform_type) != kResultTrue) {
+        editor_view->release();
+        editor_view = nullptr;
+        return false;
+    }
+    return true;
+}
+
+bool Vst3Loader::open_editor(void *parent_view) {
+    if (!parent_view || !has_editor()) return false;
+    if (editor_attached) return true;
+
+#ifdef __APPLE__
+    FIDString platform_type = kPlatformTypeNSView;
+#elif defined(_WIN32)
+    FIDString platform_type = kPlatformTypeHWND;
+#else
+    FIDString platform_type = kPlatformTypeX11EmbedWindowID;
+#endif
+    if (editor_view->attached(parent_view, platform_type) != kResultOk) return false;
+    editor_attached = true;
+    return true;
+}
+
+void Vst3Loader::close_editor() {
+    if (!editor_view) return;
+    if (editor_attached) editor_view->removed();
+    editor_attached = false;
+}
 
 void Vst3Loader::editor_idle() {}
 
-bool Vst3Loader::get_editor_rect(int &, int &) { return false; }
+bool Vst3Loader::get_editor_rect(int &width, int &height) {
+    if (!has_editor()) return false;
+    ViewRect rect{};
+    if (editor_view->getSize(&rect) != kResultOk) return false;
+    width = rect.getWidth();
+    height = rect.getHeight();
+    return width > 0 && height > 0;
+}
 
 BridgeLoader *create_vst3_loader() { return new Vst3Loader(); }

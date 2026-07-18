@@ -97,7 +97,7 @@ When this env var is set, `vst2_paths` and `replace_default_vst2_paths` are igno
 
 ## `[expose]` — What gets exposed to the host
 
-Controls which discovered plugins Keepsake presents to your host. The default posture is conservative: bridge-required VST2 on, everything else off.
+Controls which discovered plugins Keepsake presents to your host. The default posture is conservative: bridge-required VST2 and VST3 on, native duplicates and AU off.
 
 ### `mode`
 
@@ -107,7 +107,7 @@ mode = "auto"  # default
 
 | Value | Behaviour |
 |---|---|
-| `"auto"` | Use the `vst2_bridged`, `vst2_native`, `vst3`, `au` flags below |
+| `"auto"` | Use the format and architecture flags below |
 | `"whitelist"` | Only expose plugins explicitly listed in `[[expose.plugin]]` entries |
 | `"all"` | Expose everything found — useful for development and testing |
 
@@ -129,13 +129,21 @@ Expose VST2 plugins that can be loaded natively (same architecture as the host).
 
 Set to `true` if you want all VST2 plugins going through Keepsake's bridge, including native ones.
 
-### `vst3`
+### `vst3_bridged`
 
 ```toml
-vst3 = false  # default
+vst3_bridged = true  # default
 ```
 
-Expose VST3 plugins. **Experimental in v0.1-alpha.** The loader exists and may work, but this lane has not been fully validated.
+Expose VST3 plugins that cannot load in the host architecture, such as Intel-only VST3s on Apple silicon. Experimental, but this is the useful bridge case.
+
+### `vst3_native`
+
+```toml
+vst3_native = false  # default
+```
+
+Expose native-architecture VST3 plugins through Keepsake as well. Off by default to avoid duplicating plugins the host can load directly. The legacy `vst3 = true` setting enables both VST3 groups; `vst3 = false` keeps bridge-required VST3 enabled and native duplicates hidden.
 
 ### `au`
 
@@ -253,7 +261,8 @@ replace_default_vst2_paths = false
 mode = "auto"
 vst2_bridged = true
 vst2_native = false
-vst3 = false
+vst3_bridged = true
+vst3_native = false
 au = false
 
 # Optionally whitelist specific plugins:

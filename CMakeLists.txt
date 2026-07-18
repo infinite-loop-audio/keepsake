@@ -76,6 +76,7 @@ add_library(keepsake MODULE
     src/main.cpp
     src/factory.cpp
     src/factory_helpers.cpp
+    src/plugin_identity.cpp
     src/plugin_labels.cpp
     src/factory_scan.cpp
     src/vst2_loader.cpp
@@ -116,7 +117,8 @@ set_target_properties(keepsake PROPERTIES
 if(APPLE)
     target_sources(keepsake PRIVATE
         src/plugin_gui.cpp
-        src/plugin_gui_mac_embed.mm)
+        src/plugin_gui_mac_embed.mm
+        src/plugin_gui_mac_placeholder.mm)
     set_target_properties(keepsake PROPERTIES
         BUNDLE TRUE
         BUNDLE_EXTENSION clap
@@ -348,6 +350,7 @@ if(APPLE)
             "${CMAKE_CURRENT_BINARY_DIR}/demo-vst2-gui-plugin.vst/Contents/Info.plist"
         COMMENT "Packaging demo-vst2-gui-plugin as a macOS VST bundle"
     )
+
 endif()
 
 if(WIN32)
@@ -411,5 +414,6 @@ if(APPLE OR UNIX)
             "-framework Cocoa"
             "-framework QuartzCore"
         )
+
     endif()
 endif()

@@ -2,7 +2,7 @@
 
 Status: active
 Owner: Infinite Loop Audio
-Updated: 2026-04-10
+Updated: 2026-07-12
 Depends on: docs/architecture/system-architecture.md, docs/contracts/001-working-rules.md
 Authority owners: Infinite Loop Audio
 Affects: g01.001 and all subsequent milestones that touch the factory or descriptor shape
@@ -54,12 +54,11 @@ added when a collision is detected; non-colliding plugins use the clean form.
 keepsake.vst3.<uid>
 ```
 
-`<uid>` is derived from the VST3 plugin's FUID (a 128-bit identifier). Encoded
-as a 32-character uppercase hexadecimal string (no dashes):
-`keepsake.vst3.AABBCCDD11223344EEFF5566778899AA`.
-
-VST3 FUIDs are globally unique by design; collision resolution is not expected
-to be needed.
+The current alpha bridge receipt carries an 8-character uppercase hexadecimal
+class key, for example `keepsake.vst3.0DE7AEF2`. A future full-FUID receipt may
+use the documented 32-character form. Consumers must accept both shapes during
+the alpha line. Collision-safe full-FUID promotion remains required before the
+VST3 ID shape is declared stable.
 
 #### AU v2 IDs
 
@@ -181,11 +180,20 @@ do this).
 
 ### Scan and cache interaction
 
-The factory exposes whatever the most recent completed scan produced, across
-all supported formats. Scan details (paths per format, caching strategy, rescan
-triggers) are outside this contract's scope — they will be governed by the
-platform config contract (005) once authored. For g01.001, a hardcoded scan
-path or a single configured path is sufficient.
+The factory exposes whatever the most recent completed scan produced. Normal
+host initialization reads the cache; an explicit rescan trigger performs the
+slow source-plugin probes before atomically replacing that cache. VST3 scanning
+is recursive, selects the architecture-matching helper, and may expose only
+bridge-required VST3s without duplicating native plugins.
+During an explicit rescan, Keepsake writes
+`keepsake: scan-progress state=<started|discovered|failed> format=<vst2|vst3> bridged=<0|1> path=<source-path>`
+to stderr as each source-plugin probe changes state. `discovered` is emitted
+only when the result is exposed under the active configuration. Supervising
+hosts may consume this bounded machine-readable line for progress UI and
+provisional counts; other diagnostic output remains non-contractual.
+VST2 source probes use a bounded four-worker pool. Result aggregation, sorting,
+cache replacement, and descriptor construction remain single-threaded so scan
+completion order cannot change stable IDs or cache contents.
 
 ### Stability guarantees
 

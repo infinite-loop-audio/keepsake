@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <string>
 
 #ifndef _WIN32
@@ -98,7 +99,17 @@ void handle_init(uint32_t /*caller_id*/, const std::vector<uint8_t> &payload) {
 
     if (load_on_main_thread) {
         keepsake_debug_log("bridge: INIT load on main thread path=%s\n", path.c_str());
-        if (!loader->load(path)) {
+        bool loaded = false;
+        try {
+            loaded = loader->load(path);
+        } catch (const std::exception &error) {
+            fprintf(stderr, "bridge: plugin threw while loading '%s': %s\n",
+                    path.c_str(), error.what());
+        } catch (...) {
+            fprintf(stderr, "bridge: plugin threw an unknown exception while loading '%s'\n",
+                    path.c_str());
+        }
+        if (!loaded) {
             keepsake_debug_log("bridge: INIT load FAILED path=%s\n", path.c_str());
             ipc_write_error(g_pipe_out, "failed to load plugin");
             delete loader;
@@ -120,7 +131,15 @@ void handle_init(uint32_t /*caller_id*/, const std::vector<uint8_t> &payload) {
 
         pthread_create(&lt, nullptr, [](void *arg) -> void * {
             auto *c = static_cast<LoadCtx *>(arg);
-            *c->ok = c->loader->load(c->path);
+            try {
+                *c->ok = c->loader->load(c->path);
+            } catch (const std::exception &error) {
+                fprintf(stderr, "bridge: plugin threw while loading '%s': %s\n",
+                        c->path.c_str(), error.what());
+            } catch (...) {
+                fprintf(stderr, "bridge: plugin threw an unknown exception while loading '%s'\n",
+                        c->path.c_str());
+            }
             *c->done = true;
             delete c;
             return nullptr;

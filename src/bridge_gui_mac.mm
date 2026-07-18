@@ -2,6 +2,9 @@
 
 #include "debug_log.h"
 #include "ipc.h"
+#include "mac_editor_notification.h"
+
+#include <notify.h>
 
 #include <cstdlib>
 #include <cstring>
@@ -18,6 +21,7 @@ bool g_iosurface_mode = false;
 int g_current_width = 0;
 int g_current_height = 0;
 static ShmProcessControl *g_gui_status_ctrl = nullptr;
+static std::string g_gui_status_notification_name;
 static bool g_logged_focus_state = false;
 static bool g_last_app_active = false;
 static bool g_last_window_key = false;
@@ -111,7 +115,11 @@ static void gui_log_focus_state(const char *phase) {
 
 static void gui_store_editor_state(uint32_t state) {
     if (!g_gui_status_ctrl) return;
+    const uint32_t previous = shm_load_acquire(&g_gui_status_ctrl->editor_state);
     shm_store_release(&g_gui_status_ctrl->editor_state, state);
+    if (previous != state && !g_gui_status_notification_name.empty()) {
+        notify_post(g_gui_status_notification_name.c_str());
+    }
 }
 
 void gui_init() {
@@ -126,6 +134,7 @@ void gui_init() {
                 queue:nil
                 usingBlock:^(__unused NSNotification *note) {
                     keepsake_debug_log("bridge/mac: NSApp did become active\n");
+                    gui_keep_editor_window_above_host();
                     gui_log_focus_state("nsapp-become-active");
                 }];
     }
@@ -137,6 +146,7 @@ void gui_init() {
                 queue:nil
                 usingBlock:^(__unused NSNotification *note) {
                     keepsake_debug_log("bridge/mac: NSApp did resign active\n");
+                    gui_keep_editor_window_above_host();
                     gui_log_focus_state("nsapp-resign-active");
                 }];
     }
@@ -172,8 +182,11 @@ void gui_get_editor_status(bool &open, bool &pending) {
     pending = false;
 }
 
-void gui_set_status_shm(void *shm_ptr) {
+void gui_set_status_shm(void *shm_ptr, const char *shm_name) {
     g_gui_status_ctrl = shm_ptr ? shm_control(shm_ptr) : nullptr;
+    g_gui_status_notification_name = shm_name
+        ? mac_editor_state_notification_name(shm_name)
+        : std::string();
 }
 
 void gui_publish_resize_request(int width, int height) {
@@ -219,6 +232,7 @@ void gui_idle(BridgeLoader *loader) {
     if (!g_editor_open) return;
 
     gui_pump_pending_events(nil);
+    gui_keep_editor_window_above_host();
     gui_log_focus_state("idle");
 
     BridgeLoader *active = loader ? loader : g_active_loader;

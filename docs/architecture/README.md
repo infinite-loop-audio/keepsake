@@ -11,6 +11,8 @@ They set the realized constraints roadmap batches must honor.
 - [`system-architecture.md`](system-architecture.md) — component layout and
   CLAP/VeSTige seams
 - [`system-inventory.md`](system-inventory.md) — execution-relevant surfaces
+- [`repo-authority-map.md`](repo-authority-map.md) — Keepsake versus host
+  ownership, including generic screenshot capture
 - [`product-guardrails.md`](product-guardrails.md) — delivery guardrails and
   anti-fake-work rules
 
@@ -28,5 +30,4 @@ They set the realized constraints roadmap batches must honor.
 
 ## Next Task
 
-Keep architecture aligned with the alpha support envelope so implemented system
-shape and publicly claimed release support do not drift apart during g02.
+Validate contract 007 without adding a host-specific runtime seam.

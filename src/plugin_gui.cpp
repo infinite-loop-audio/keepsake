@@ -7,6 +7,7 @@
 #include "debug_log.h"
 #ifdef __APPLE__
 #include "plugin_gui_mac_embed.h"
+#include "plugin_gui_mac_placeholder.h"
 #endif
 
 #include <atomic>
@@ -134,7 +135,10 @@ static bool gui_get_preferred_api(const clap_plugin_t *, const char **api,
                                   bool *is_floating) {
 #ifdef __APPLE__
     *api = CLAP_WINDOW_API_COCOA;
-    *is_floating = gui_mac_mode_prefers_live_editor();
+    // A normal host-owned editor window carries Keepsake's non-rendering
+    // status/reopen view. The legacy editor itself remains in the bridge-owned
+    // native window, where AppKit and plugin frameworks receive real input.
+    *is_floating = false;
 #elif defined(_WIN32)
     *api = CLAP_WINDOW_API_WIN32;
     *is_floating = false;
@@ -215,6 +219,7 @@ static void gui_destroy(const clap_plugin_t *plugin) {
     keepsake_gui_session_mark_closed(kp);
 #ifdef __APPLE__
     gui_mac_detach_iosurface(kp);
+    gui_mac_detach_placeholder(kp);
 #endif
 #ifdef _WIN32
     keepsake_gui_session_clear_callback_request(kp);
@@ -311,6 +316,7 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
 
 #ifdef __APPLE__
     if (!kp->gui_is_floating && gui_mac_mode_uses_iosurface_preview()) {
+        gui_mac_detach_placeholder(kp);
         int32_t width = kp->editor_width > 0 ? kp->editor_width : 960;
         int32_t height = kp->editor_height > 0 ? kp->editor_height : 640;
         IpcEditorOpenRequest open_req = {};
@@ -362,8 +368,13 @@ static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *win
     }
 
     gui_mac_detach_iosurface(kp);
+    if (!gui_mac_attach_placeholder(kp, window)) {
+        keepsake_debug_log("keepsake: gui_set_parent mac placeholder attach failed parent=%p\n",
+                           window->cocoa);
+        return false;
+    }
     kp->gui_is_floating = true;
-    keepsake_debug_log("keepsake: gui_set_parent mac live-editor mode=%s parent=%p\n",
+    keepsake_debug_log("keepsake: gui_set_parent mac native-editor mode=%s placeholder-parent=%p\n",
                        gui_mac_ui_mode().c_str(),
                        window->cocoa);
     return true;
@@ -496,12 +507,24 @@ static bool gui_show(const clap_plugin_t *plugin) {
                        kp->gui_is_floating ? 1 : 0,
                        kp->editor_open ? 1 : 0,
                        kp->editor_open_pending ? 1 : 0);
+#ifdef __APPLE__
+    gui_mac_update_placeholder(kp);
+#endif
     return true;
 }
+
+#ifdef __APPLE__
+bool gui_mac_open_native_editor(KeepsakePlugin *kp) {
+    return kp && gui_show(&kp->clap);
+}
+#endif
 
 void gui_complete_pending_open(KeepsakePlugin *kp) {
     if (!kp) return;
     keepsake_gui_session_mark_open(kp);
+#ifdef __APPLE__
+    gui_mac_update_placeholder(kp);
+#endif
 #ifdef _WIN32
     gui_resume_processing_after_editor(kp);
 #endif
@@ -525,6 +548,7 @@ static bool gui_hide(const clap_plugin_t *plugin) {
 #ifdef __APPLE__
     gui_mac_detach_iosurface(kp);
     kp->gui_embed_refresh_burst_remaining = 0;
+    gui_mac_update_placeholder(kp);
 #endif
 #ifdef _WIN32
     keepsake_gui_session_clear_callback_request(kp);

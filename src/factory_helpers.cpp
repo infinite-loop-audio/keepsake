@@ -1,5 +1,6 @@
 #include "factory_internal.h"
 #include "plugin_labels.h"
+#include "plugin_identity.h"
 
 #include <algorithm>
 #include <unordered_map>
@@ -35,55 +36,11 @@ std::string format_version(int32_t v) {
 
 namespace {
 
-const char *format_prefix(uint32_t format) {
-    switch (format) {
-    case FORMAT_VST2: return "vst2";
-    case FORMAT_VST3: return "vst3";
-    case FORMAT_AU:   return "au";
-    default:          return "unknown";
-    }
-}
-
-std::string make_plugin_id(uint32_t format, int32_t unique_id) {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "keepsake.%s.%08X",
-             format_prefix(format), static_cast<uint32_t>(unique_id));
-    return buf;
-}
-
 std::string display_arch_suffix(const std::string &arch) {
     if (arch == "x86") return "x86";
     if (arch == "x86_64" || arch == "native") return "x64";
     if (arch == "arm64") return "arm64";
     return {};
-}
-
-std::string id_arch_suffix(const std::string &arch) {
-    if (arch == "x86") return "x86";
-    if (arch == "arm64") return "arm64";
-    return {};
-}
-
-std::string make_plugin_id_disambiguated(uint32_t format,
-                                         int32_t unique_id,
-                                         const std::string &arch,
-                                         const std::string &path,
-                                         bool needs_suffix) {
-    std::string base = make_plugin_id(format, unique_id);
-    std::string arch_suffix = id_arch_suffix(arch);
-    if (format == FORMAT_VST2 && !arch_suffix.empty()) {
-        base += "." + arch_suffix;
-        if (!needs_suffix) return base;
-    } else if (!needs_suffix) {
-        return base;
-    }
-
-    uint32_t hash = 0;
-    for (char c : path) hash = hash * 31 + static_cast<uint32_t>(c);
-
-    char suffix[8];
-    snprintf(suffix, sizeof(suffix), ".%04x", hash & 0xFFFF);
-    return base + suffix;
 }
 
 void map_features(const Vst2PluginInfo &info, PluginEntry &entry) {
@@ -157,40 +114,38 @@ bool glob_match_simple(const std::string &pattern, const std::string &text) {
 
 } // namespace
 
+bool plugin_is_exposed(const Vst2PluginInfo &plugin,
+                       const KeepsakeConfig &cfg) {
+    if (cfg.expose_mode == "all") return true;
+    if (cfg.expose_mode == "whitelist") {
+        for (const auto &wl : cfg.whitelist) {
+            if (glob_match_simple(wl.path, plugin.file_path)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    switch (plugin.format) {
+    case FORMAT_VST2:
+        return plugin.needs_cross_arch ? cfg.expose_vst2_bridged
+                                       : cfg.expose_vst2_native;
+    case FORMAT_VST3:
+        return plugin.needs_cross_arch ? cfg.expose_vst3_bridged
+                                       : cfg.expose_vst3_native;
+    case FORMAT_AU:
+        return cfg.expose_au;
+    default:
+        return false;
+    }
+}
+
 void filter_plugins(std::vector<Vst2PluginInfo> &plugins,
                     const KeepsakeConfig &cfg) {
     if (cfg.expose_mode == "all") return;
 
     std::vector<Vst2PluginInfo> filtered;
-    for (auto &p : plugins) {
-        bool include = false;
-
-        if (cfg.expose_mode == "whitelist") {
-            for (const auto &wl : cfg.whitelist) {
-                if (glob_match_simple(wl.path, p.file_path)) {
-                    include = true;
-                    break;
-                }
-            }
-        } else {
-            switch (p.format) {
-            case FORMAT_VST2:
-                include = p.needs_cross_arch ? cfg.expose_vst2_bridged
-                                             : cfg.expose_vst2_native;
-                break;
-            case FORMAT_VST3:
-                include = cfg.expose_vst3;
-                break;
-            case FORMAT_AU:
-                include = cfg.expose_au;
-                break;
-            default:
-                include = false;
-                break;
-            }
-        }
-
-        if (include) filtered.push_back(std::move(p));
+    for (auto &plugin : plugins) {
+        if (plugin_is_exposed(plugin, cfg)) filtered.push_back(std::move(plugin));
     }
 
     size_t removed = plugins.size() - filtered.size();
@@ -205,8 +160,8 @@ void build_descriptors(std::vector<Vst2PluginInfo> &plugins) {
     std::unordered_map<std::string, size_t> id_counts;
     std::unordered_set<std::string> assigned_ids;
     for (const auto &p : plugins) {
-        std::string id_suffix = id_arch_suffix(p.binary_arch);
-        std::string key = make_plugin_id(p.format, p.unique_id);
+        std::string id_suffix = keepsake_plugin_id_arch_suffix(p.binary_arch);
+        std::string key = keepsake_make_plugin_id(p.format, p.unique_id);
         if (p.format == FORMAT_VST2 && !id_suffix.empty()) {
             key += "." + id_suffix;
         }
@@ -218,13 +173,13 @@ void build_descriptors(std::vector<Vst2PluginInfo> &plugins) {
 
     for (auto &p : plugins) {
         PluginEntry entry;
-        std::string id_suffix = id_arch_suffix(p.binary_arch);
-        std::string base_id = make_plugin_id(p.format, p.unique_id);
+        std::string id_suffix = keepsake_plugin_id_arch_suffix(p.binary_arch);
+        std::string base_id = keepsake_make_plugin_id(p.format, p.unique_id);
         if (p.format == FORMAT_VST2 && !id_suffix.empty()) {
             base_id += "." + id_suffix;
         }
         bool needs_suffix = id_counts[base_id] > 1;
-        entry.id = make_plugin_id_disambiguated(
+        entry.id = keepsake_make_plugin_id_disambiguated(
             p.format, p.unique_id, p.binary_arch, p.file_path, needs_suffix);
         if (!assigned_ids.insert(entry.id).second) {
             uint32_t hash = 0;

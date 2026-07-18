@@ -22,7 +22,7 @@ Started: 2026-04-10
 | `013` | [Embedded Editors](013-embedded-editors.md) | complete |
 | `014` | [Scan Robustness](014-scan-robustness.md) | complete |
 | `015` | [Codebase Health](015-codebase-health.md) | complete |
-| `016` | [Soundcheck Integration](016-soundcheck-integration.md) | deferred |
+| `016` | [Soundcheck Integration](016-soundcheck-integration.md) | superseded |
 
 Note:
 - `017` remains parked as an evidence/research card for macOS IOSurface
@@ -44,4 +44,5 @@ VST2, VST3, and AU v2 formats including 32-bit plugins.
 
 Ship the next ready milestone. Suggested order: 014 (scan robustness) → 011
 (header bar) → 015 (codebase health) → 007 (CI) → 012 (Windows/Linux GUI)
-→ 013 (embedded editors) → 016 (Soundcheck integration, when ready).
+→ 013 (embedded editors). The former Soundcheck-specific integration lane is
+superseded; host integration stays CLAP-only.
