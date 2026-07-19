@@ -80,13 +80,15 @@ void cache_save(const std::vector<Vst2PluginInfo> &plugins) {
             plugins.size(), config_cache_path().c_str());
 }
 
-std::vector<Vst2PluginInfo> cache_load() {
+std::vector<Vst2PluginInfo> cache_load(bool *invalidated) {
+    if (invalidated) *invalidated = false;
     std::vector<Vst2PluginInfo> result;
     std::ifstream f(config_cache_path());
     if (!f.is_open()) return result;
 
     std::string line;
     bool found_invalid = false;
+    bool found_stale = false;
     while (std::getline(f, line)) {
         if (line.empty()) continue;
 
@@ -130,8 +132,14 @@ std::vector<Vst2PluginInfo> cache_load() {
         p.needs_cross_arch = (fields[needs_cross_arch_idx] == "1");
         int64_t cached_mtime = std::stoll(fields[mtime_idx]);
 
-        if (!fs::exists(p.file_path)) continue;
-        if (file_mtime(p.file_path) != cached_mtime) continue;
+        if (!fs::exists(p.file_path)) {
+            found_stale = true;
+            continue;
+        }
+        if (file_mtime(p.file_path) != cached_mtime) {
+            found_stale = true;
+            continue;
+        }
         if (!cache_entry_is_sane(p)) {
             fprintf(stderr,
                     "keepsake: ignoring corrupted cache entry '%s' (category=%d in=%d out=%d params=%d)\n",
@@ -144,8 +152,11 @@ std::vector<Vst2PluginInfo> cache_load() {
         result.push_back(std::move(p));
     }
 
-    if (found_invalid) {
-        fprintf(stderr, "keepsake: cache contained invalid metadata, forcing rescan\n");
+    if (found_invalid || found_stale) {
+        if (invalidated) *invalidated = true;
+        fprintf(stderr,
+                "keepsake: cache contained %s entries, forcing rescan\n",
+                found_invalid ? "invalid" : "stale");
         result.clear();
         return result;
     }

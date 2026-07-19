@@ -55,6 +55,28 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(vst3_pluginterfaces)
 
+include(CTest)
+
+if(BUILD_TESTING)
+    add_executable(config-cache-test
+        tools/config-cache-test.cpp
+        src/config.cpp
+        src/config_cache.cpp
+    )
+    target_include_directories(config-cache-test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME config-cache-stale-entry COMMAND config-cache-test)
+
+    add_executable(vst2-string-buffer-test
+        tools/vst2-string-buffer-test.cpp
+    )
+    target_include_directories(vst2-string-buffer-test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME vst2-string-buffer-overflow COMMAND vst2-string-buffer-test)
+endif()
+
 # Create a symlink so #include "pluginterfaces/..." works
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/_deps/vst3-include")
 if(WIN32)

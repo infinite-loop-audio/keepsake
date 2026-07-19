@@ -4,6 +4,7 @@
 
 #include "bridge_loader.h"
 #include "debug_log.h"
+#include "vst2_string_buffer.h"
 #include <vestige/vestige.h>
 #include <atomic>
 #include <cstdio>
@@ -109,9 +110,15 @@ public:
         char namebuf[256] = {}, vendorbuf[256] = {}, productbuf[256] = {};
         if (effect->dispatcher) {
             std::lock_guard<std::recursive_mutex> lock(effect_mutex);
-            effect->dispatcher(effect, effGetEffectName, 0, 0, namebuf, 0);
-            effect->dispatcher(effect, effGetVendorString, 0, 0, vendorbuf, 0);
-            effect->dispatcher(effect, effGetProductString, 0, 0, productbuf, 0);
+            query_vst2_string(namebuf, [&](char *buffer) {
+                effect->dispatcher(effect, effGetEffectName, 0, 0, buffer, 0);
+            });
+            query_vst2_string(vendorbuf, [&](char *buffer) {
+                effect->dispatcher(effect, effGetVendorString, 0, 0, buffer, 0);
+            });
+            query_vst2_string(productbuf, [&](char *buffer) {
+                effect->dispatcher(effect, effGetProductString, 0, 0, buffer, 0);
+            });
             info.vendor_version = static_cast<int32_t>(
                 effect->dispatcher(effect, effGetVendorVersion, 0, 0, nullptr, 0));
             info.category = static_cast<int32_t>(
@@ -193,10 +200,14 @@ public:
         }
         if (effect->dispatcher) {
             std::lock_guard<std::recursive_mutex> lock(effect_mutex);
-            effect->dispatcher(effect, effGetParamName, static_cast<int>(index),
-                                0, resp.name, 0);
-            effect->dispatcher(effect, effGetParamLabel, static_cast<int>(index),
-                                0, resp.label, 0);
+            query_vst2_string(resp.name, [&](char *buffer) {
+                effect->dispatcher(effect, effGetParamName,
+                                   static_cast<int>(index), 0, buffer, 0);
+            });
+            query_vst2_string(resp.label, [&](char *buffer) {
+                effect->dispatcher(effect, effGetParamLabel,
+                                   static_cast<int>(index), 0, buffer, 0);
+            });
         }
         if (resp.name[0] == '\0') {
             snprintf(resp.name, sizeof(resp.name), "Param %u", index + 1);

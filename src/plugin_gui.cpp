@@ -274,8 +274,20 @@ static bool gui_get_size(const clap_plugin_t *plugin, uint32_t *w, uint32_t *h) 
                            scale);
         return true;
     }
+#ifdef __APPLE__
+    // Some legacy editors (including Native Instruments Raum) do not expose
+    // effEditGetRect until effEditOpen. The CLAP host must receive an initial
+    // size before set_parent/show can open the bridge-owned live editor, so
+    // use the same provisional canvas as the IOSurface path. The real editor
+    // remains independently sized and may update the host after opening.
+    *w = 960;
+    *h = 640;
+    keepsake_debug_log("keepsake: gui_get_size default-mac-live %ux%u\n", *w, *h);
+    return true;
+#else
     keepsake_debug_log("keepsake: gui_get_size unavailable\n");
     return false;
+#endif
 }
 
 static bool gui_can_resize(const clap_plugin_t *) {

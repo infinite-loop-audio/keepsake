@@ -48,11 +48,13 @@ std::string config_dir();
 
 // --- Scan cache ---
 
-// Load cached plugin info from cache.json.
-// Returns empty vector if cache doesn't exist or is corrupt.
-std::vector<Vst2PluginInfo> cache_load();
+// Load cached plugin info from cache.dat.
+// Returns an empty vector if the cache does not exist or cannot be reused.
+// When provided, invalidated is set when an existing stale or corrupt cache
+// requires a complete scan rather than the normal fast startup scan.
+std::vector<Vst2PluginInfo> cache_load(bool *invalidated = nullptr);
 
-// Save plugin info to cache.json.
+// Save plugin info to cache.dat.
 void cache_save(const std::vector<Vst2PluginInfo> &plugins);
 
 // Check if a rescan sentinel file exists and remove it.

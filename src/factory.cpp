@@ -201,13 +201,19 @@ bool keepsake_factory_init(const char *plugin_path) {
     // Try loading from cache
     std::vector<Vst2PluginInfo> all_plugins;
     if (use_cache && !force_rescan) {
-        all_plugins = cache_load();
+        bool cache_invalidated = false;
+        all_plugins = cache_load(&cache_invalidated);
         if (!all_plugins.empty()) {
             fprintf(stderr, "keepsake: using cached scan (%zu plugins)\n",
                     all_plugins.size());
             filter_plugins(all_plugins, cfg);
             build_descriptors(all_plugins);
             return true;
+        }
+        if (cache_invalidated) {
+            // A fast VST2-only rebuild would silently discard cached VST3/AU
+            // descriptors. Rebuild every enabled format before replacing it.
+            force_rescan = true;
         }
     }
 

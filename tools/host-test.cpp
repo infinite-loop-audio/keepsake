@@ -149,6 +149,25 @@ static int run_worker(int argc, char *argv[]) {
         return 1;
     }
 
+    // Hosts commonly enumerate parameters before activation. Exercise that
+    // ordering because legacy plugins may write strings larger than the VST2
+    // specification's nominal buffers.
+    auto *params = static_cast<const clap_plugin_params_t *>(
+        plugin->get_extension(plugin, CLAP_EXT_PARAMS));
+    if (params) {
+        const uint32_t count = params->count(plugin);
+        for (uint32_t i = 0; i < count; ++i) {
+            clap_param_info_t info = {};
+            if (!params->get_info(plugin, i, &info)) {
+                fprintf(stderr, "failed to read parameter %u of %u\n", i, count);
+                plugin->destroy(plugin);
+                entry->deinit();
+                return 1;
+            }
+        }
+        printf("[params]           %u — OK\n", count);
+    }
+
     // Activate
     t = now_ms();
     ok = plugin->activate(plugin, 44100.0, 32, 512);
