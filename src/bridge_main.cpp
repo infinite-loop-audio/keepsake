@@ -118,6 +118,14 @@ int main(int argc, char *argv[]) {
         struct pollfd pfd = { g_pipe_in, POLLIN, 0 };
         int pr = poll(&pfd, 1, pipe_timeout);
         if (pr <= 0) continue;
+        if (pfd.revents & (POLLHUP | POLLERR | POLLNVAL)) {
+            // The host disappeared without a lifecycle handshake. Do not run
+            // plugin cleanup here: legacy editors may block indefinitely in
+            // effEditClose/effClose. This bridge is disposable, so let the OS
+            // reclaim every instance and loaded library instead.
+            fprintf(stderr, "bridge: command pipe disconnected, exiting immediately\n");
+            std::_Exit(0);
+        }
         if (!(pfd.revents & POLLIN)) continue;
 #else
         if (!platform_read_ready(g_pipe_in, pipe_timeout)) continue;
@@ -127,8 +135,10 @@ int main(int argc, char *argv[]) {
         uint32_t opcode;
         std::vector<uint8_t> payload;
         if (!ipc_read_msg(g_pipe_in, opcode, payload)) {
-            fprintf(stderr, "bridge: command pipe closed, exiting\n");
-            break;
+            // A broken IPC stream is equivalent to host death. Avoid vendor
+            // teardown for the same reason as the POLLHUP path above.
+            fprintf(stderr, "bridge: command pipe closed, exiting immediately\n");
+            std::_Exit(0);
         }
 
         keepsake_debug_log("bridge: dispatch opcode=0x%02X payload=%zu gui_open=%d\n",

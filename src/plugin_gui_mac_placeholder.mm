@@ -112,6 +112,9 @@
                 state,
                 _plugin->instance_id);
             keepsake_gui_session_mark_closed(_plugin);
+            if (_plugin->host_gui && _plugin->host_gui->closed) {
+                _plugin->host_gui->closed(_plugin->host, false);
+            }
         }
     }
     const bool available = _plugin && !_plugin->crashed && _plugin->bridge_ok;

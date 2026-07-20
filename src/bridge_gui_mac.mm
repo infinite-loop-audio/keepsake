@@ -223,6 +223,25 @@ void gui_close_editor(BridgeLoader *loader) {
     gui_log_focus_state("close");
 }
 
+void gui_abandon_editor_for_host_close() {
+    if (!g_editor_open) return;
+
+    // Disposable inspection hosts own the whole bridge process. Do not call
+    // legacy editor teardown here: some plugins block indefinitely in
+    // effEditClose. Publish the logical close first; host shutdown will close
+    // the command pipe and the bridge will exit without plugin destructors.
+    gui_close_window_state();
+    gui_close_iosurface_state();
+    g_active_loader = nil;
+    g_editor_open = false;
+    g_last_editor_idle_us = 0;
+    g_last_periodic_capture_us = 0;
+    g_last_burst_capture_us = 0;
+    g_capture_burst_remaining = 0;
+    gui_store_editor_state(SHM_EDITOR_CLOSED);
+    gui_log_focus_state("abandon-for-host-close");
+}
+
 bool gui_get_editor_rect(BridgeLoader *loader, int &width, int &height) {
     if (!loader) return false;
     return loader->get_editor_rect(width, height);

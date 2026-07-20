@@ -218,6 +218,19 @@ add_executable(keepsake-bridge
     ${BRIDGE_GUI_SRC}
 )
 
+if(BUILD_TESTING AND UNIX)
+    add_executable(bridge-pipe-close-test
+        tools/bridge-pipe-close-test.cpp
+    )
+    target_include_directories(bridge-pipe-close-test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(
+        NAME bridge-pipe-close-exits
+        COMMAND bridge-pipe-close-test $<TARGET_FILE:keepsake-bridge>
+    )
+endif()
+
 target_include_directories(keepsake-bridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor
     ${CMAKE_CURRENT_SOURCE_DIR}/src

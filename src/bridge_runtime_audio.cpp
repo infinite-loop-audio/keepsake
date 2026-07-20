@@ -60,10 +60,6 @@ static void bridge_process_shm_request(PluginInstance *inst) {
         s_vst_time_info.flags |= kVstTransportCycleActive | kVstCyclePosValid;
     }
 
-    keepsake_debug_log("bridge: process request instance=%u frames=%u midi=%u params=%u state=%u\n",
-                       inst->id, nframes, ctrl->midi_count, ctrl->param_count,
-                       shm_load_acquire(&ctrl->state));
-
     for (uint32_t p = 0; p < ctrl->param_count && p < 64; p++) {
         inst->loader->set_param(ctrl->params[p].index, ctrl->params[p].value);
     }
@@ -94,8 +90,6 @@ static void bridge_process_shm_request(PluginInstance *inst) {
         SetEvent(inst->shm_done_event);
     }
 #endif
-    keepsake_debug_log("bridge: process done instance=%u state=%u\n",
-                       inst->id, shm_load_acquire(&ctrl->state));
 }
 
 #ifndef _WIN32

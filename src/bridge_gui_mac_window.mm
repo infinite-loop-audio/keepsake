@@ -66,6 +66,10 @@ static int g_parentless_resize_trace_budget = 120;
     keepsake_debug_log("bridge/mac: titlebar close requested parentless=%d floating=%d\n",
                        g_parentless_plugin_window ? 1 : 0,
                        g_window ? 1 : 0);
+    if (parentless_env_flag_enabled("KEEPSAKE_MAC_DISPOSABLE_EDITOR", false)) {
+        gui_abandon_editor_for_host_close();
+        return;
+    }
     gui_close_editor(g_active_loader);
 }
 @end
