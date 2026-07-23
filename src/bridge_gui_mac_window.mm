@@ -29,6 +29,12 @@ static bool parentless_resize_trace_enabled() {
     return parentless_env_flag_enabled("KEEPSAKE_MAC_PARENTLESS_RESIZE_TRACE", false);
 }
 
+static bool parentless_window_requires_native_content_root(NSWindow *window) {
+    if (!window) return false;
+    const char *class_name = object_getClassName(window);
+    return class_name && std::strstr(class_name, "QNSWindow") != nullptr;
+}
+
 static void install_frame_observer();
 static void update_window_size_after_open(BridgeLoader *loader, int &w, int &h);
 static bool g_editor_frame_change_in_progress = false;
@@ -404,6 +410,20 @@ static bool open_parentless_editor(BridgeLoader *loader,
         NSWindow *best = select_best_parentless_plugin_window(windows_before,
                                                               "open-scan");
         if (best) {
+            if (parentless_window_requires_native_content_root(best)) {
+                // Qt may create a QNSWindow for a null-parent effEditOpen but
+                // leave it as a non-rendering shell. Reopen against Keepsake's
+                // concrete editor parent instead; Qt then installs the actual
+                // editor view in the host-owned window.
+                keepsake_debug_log(
+                    "bridge/mac: Qt parentless shell detected window=%p class=%s; retrying with hosted parent\n",
+                    best,
+                    object_getClassName(best));
+                [best orderOut:nil];
+                loader->close_editor();
+                gui_pump_pending_events([NSDate dateWithTimeIntervalSinceNow:0.0]);
+                return false;
+            }
             g_parentless_plugin_window = best;
             install_parentless_window_observers(g_parentless_plugin_window);
             style_parentless_plugin_window(g_parentless_plugin_window, header);
